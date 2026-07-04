@@ -1,0 +1,58 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+
+      - name: Build Debug APK
+        run: gradle assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: moto-voice-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: "Moto Voice Build ${{ github.run_number }}"
+          body: |
+            Auto-release from `main`.
+
+            **Commit:** ${{ github.sha }}
+            **Built:** ${{ github.run_number }}
+
+            Flash `app-debug.apk` to your device, grant permissions in the app, then set Moto Voice as Default Assistant.
+          files: app/build/outputs/apk/debug/app-debug.apk
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

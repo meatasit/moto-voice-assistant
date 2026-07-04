@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/black">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Moto Voice"
+            android:textColor="@color/white"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/onboarding_subtitle"
+            android:textColor="#CCFFFFFF"
+            android:textSize="14sp"
+            android:layout_marginBottom="24dp" />
+
+        <!-- Status banner -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="24dp"
+            app:cardBackgroundColor="#1F1F1F"
+            app:cardCornerRadius="12dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:padding="16dp"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/tvStatusIcon"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="⚙️"
+                    android:textSize="24sp"
+                    android:layout_marginEnd="12dp" />
+
+                <TextView
+                    android:id="@+id/tvStatus"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="กำลังตรวจสอบ..."
+                    android:textColor="@color/white"
+                    android:textSize="15sp" />
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="สิทธิ์ที่จำเป็น"
+            android:textColor="@color/purple_200"
+            android:textSize="13sp"
+            android:textAllCaps="true"
+            android:letterSpacing="0.1"
+            android:layout_marginBottom="12dp" />
+
+        <!-- Permissions card -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="24dp"
+            app:cardBackgroundColor="#1F1F1F"
+            app:cardCornerRadius="12dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="8dp">
+
+                <!-- Microphone row -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="56dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingHorizontal="8dp">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="🎤  ไมโครโฟน (บันทึกเสียง)"
+                        android:textColor="@color/white"
+                        android:textSize="15sp" />
+                    <Button
+                        android:id="@+id/btnMic"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:text="@string/perm_grant"
+                        android:textColor="@color/white" />
+                </LinearLayout>
+
+                <View android:layout_width="match_parent" android:layout_height="1dp"
+                    android:background="#33FFFFFF" />
+
+                <!-- Contacts row -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="56dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingHorizontal="8dp">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="📋  รายชื่อ (ค้นหาผู้ติดต่อ)"
+                        android:textColor="@color/white"
+                        android:textSize="15sp" />
+                    <Button
+                        android:id="@+id/btnContacts"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:text="@string/perm_grant"
+                        android:textColor="@color/white" />
+                </LinearLayout>
+
+                <View android:layout_width="match_parent" android:layout_height="1dp"
+                    android:background="#33FFFFFF" />
+
+                <!-- Call row -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="56dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingHorizontal="8dp">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="📞  โทรออก"
+                        android:textColor="@color/white"
+                        android:textSize="15sp" />
+                    <Button
+                        android:id="@+id/btnCall"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:text="@string/perm_grant"
+                        android:textColor="@color/white" />
+                </LinearLayout>
+
+                <View android:layout_width="match_parent" android:layout_height="1dp"
+                    android:background="#33FFFFFF" />
+
+                <!-- Bluetooth row -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="56dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingHorizontal="8dp">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="🔵  บลูทูธ (หมวกกันน็อค)"
+                        android:textColor="@color/white"
+                        android:textSize="15sp" />
+                    <Button
+                        android:id="@+id/btnBluetooth"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:text="@string/perm_grant"
+                        android:textColor="@color/white" />
+                </LinearLayout>
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Set Default Assistant button -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnSetDefault"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="@string/btn_set_default"
+            android:textSize="16sp"
+            android:layout_marginBottom="24dp"
+            app:cornerRadius="12dp" />
+
+        <!-- How to use -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardBackgroundColor="#1F1F1F"
+            app:cardCornerRadius="12dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/how_to_use_title"
+                    android:textColor="@color/purple_200"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/how_to_use_body"
+                    android:textColor="#CCFFFFFF"
+                    android:textSize="14sp"
+                    android:lineSpacingMultiplier="1.5" />
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+    </LinearLayout>
+</ScrollView>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Moto Voice</string>
+
+    <string name="onboarding_subtitle">ขอสิทธิ์ต่อไปนี้เพื่อให้แอปทำงานได้ขณะขี่มอเตอร์ไซค์</string>
+
+    <string name="perm_grant">ขอสิทธิ์</string>
+    <string name="perm_granted">ได้รับแล้ว ✓</string>
+    <string name="btn_set_default">ตั้งเป็น Default Assistant</string>
+
+    <string name="status_ready">พร้อมใช้งาน</string>
+    <string name="status_not_default">ยังไม่ได้ตั้งเป็น Default Assistant</string>
+    <string name="status_missing_perms">ยังขาดสิทธิ์บางอย่าง</string>
+
+    <string name="how_to_use_title">วิธีใช้</string>
+    <string name="how_to_use_body">กด Bluetooth BVRA หรือปุ่ม Home ค้าง แล้วพูดว่า\n\"โทรหา [ชื่อ]\"</string>
+</resources>
