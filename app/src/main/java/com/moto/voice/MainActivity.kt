@@ -11,7 +11,6 @@ import android.provider.Settings
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import com.google.android.material.button.MaterialButton
 import com.moto.voice.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity() {
@@ -83,7 +82,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun updatePermButton(btn: MaterialButton, permission: String) {
+    private fun updatePermButton(btn: android.widget.Button, permission: String) {
         val granted = hasPermission(permission)
         btn.text = if (granted) getString(R.string.perm_granted) else getString(R.string.perm_grant)
         btn.isEnabled = !granted

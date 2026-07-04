@@ -186,7 +186,6 @@ class VoiceCommandPipeline(
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, "th-TH")
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "th-TH")
-                putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_MATCH_RESULTS, false)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
                 putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
