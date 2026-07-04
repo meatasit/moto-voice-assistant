@@ -28,9 +28,33 @@
         </activity>
 
         <!--
-            VoiceInteractionService — registers this app as a Default Digital Assistant.
-            Users select it via Settings > Default apps > Digital assistant app.
-            Triggered by BVRA Bluetooth button or long-pressing Home.
+            ACTION_ASSIST activity — this is what makes the app appear in
+            Settings > Default apps > Digital assistant app on all Android devices.
+            Triggered by long-pressing Home, BVRA Bluetooth button, or RoleManager.ROLE_ASSISTANT.
+            It immediately starts VoiceCommandService and finishes with no visible UI.
+        -->
+        <activity
+            android:name=".VoiceAssistActivity"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <action android:name="android.intent.action.VOICE_COMMAND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- Foreground service that runs the actual voice pipeline -->
+        <service
+            android:name=".service.VoiceCommandService"
+            android:foregroundServiceType="microphone"
+            android:exported="false" />
+
+        <!--
+            VoiceInteractionService — additional registration for devices that support
+            full VIS (e.g. stock Android). Not required for the assistant list.
         -->
         <service
             android:name=".service.MotoVoiceInteractionService"
