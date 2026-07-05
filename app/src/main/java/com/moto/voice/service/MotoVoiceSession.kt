@@ -5,25 +5,22 @@ import android.os.Bundle
 import android.service.voice.VoiceInteractionSession
 import android.view.View
 import android.widget.FrameLayout
+import com.moto.voice.data.AppSettings
 import com.moto.voice.pipeline.VoiceCommandPipeline
 
 class MotoVoiceSession(context: Context) : VoiceInteractionSession(context) {
 
     private var pipeline: VoiceCommandPipeline? = null
 
-    override fun onCreateContentView(): View {
-        // Headless session — invisible placeholder; all interaction is audio-only.
-        return FrameLayout(context).apply {
-            visibility = View.INVISIBLE
-            layoutParams = FrameLayout.LayoutParams(1, 1)
-        }
+    override fun onCreateContentView(): View = FrameLayout(context).apply {
+        visibility = View.INVISIBLE
+        layoutParams = FrameLayout.LayoutParams(1, 1)
     }
 
     override fun onShow(args: Bundle?, showFlags: Int) {
         super.onShow(args, showFlags)
-        hide()  // Dismiss the window overlay; the session itself keeps running.
-
-        pipeline = VoiceCommandPipeline(context, onFinished = { finish() })
+        hide()
+        pipeline = VoiceCommandPipeline(context, AppSettings(context), onFinished = { finish() })
         pipeline?.start()
     }
 

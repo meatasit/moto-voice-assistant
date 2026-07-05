@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/black">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- Webhook section -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="WEBHOOK" android:textColor="@color/purple_200"
+            android:textSize="12sp" android:textAllCaps="true" android:letterSpacing="0.1"
+            android:layout_marginBottom="8dp" android:layout_marginTop="8dp" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            app:cardBackgroundColor="#1F1F1F"
+            app:cardCornerRadius="12dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:padding="16dp">
+
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="Webhook URL" android:textColor="#AAFFFFFF" android:textSize="12sp"
+                    android:layout_marginBottom="4dp" />
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense"
+                    app:boxStrokeColor="@color/purple_200"
+                    android:layout_marginBottom="16dp">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etWebhookUrl"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:textColor="@color/white" android:textSize="14sp"
+                        android:inputType="textUri"
+                        android:hint="https://n8n.example.com/webhook/..." />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="Auth Token" android:textColor="#AAFFFFFF" android:textSize="12sp"
+                    android:layout_marginBottom="4dp" />
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="horizontal" android:gravity="center_vertical"
+                    android:layout_marginBottom="16dp">
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense"
+                        app:boxStrokeColor="@color/purple_200">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etToken"
+                            android:layout_width="match_parent" android:layout_height="wrap_content"
+                            android:textColor="@color/white" android:textSize="14sp"
+                            android:inputType="textPassword"
+                            android:hint="Bearer token หรือ API key" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <Button android:id="@+id/btnShowToken"
+                        style="@style/Widget.MaterialComponents.Button.TextButton"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="แสดง" android:textColor="@color/purple_200"
+                        android:layout_marginStart="8dp" />
+                </LinearLayout>
+
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="Timeout (วินาที)" android:textColor="#AAFFFFFF" android:textSize="12sp"
+                    android:layout_marginBottom="4dp" />
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="120dp" android:layout_height="wrap_content"
+                    style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense"
+                    app:boxStrokeColor="@color/purple_200"
+                    android:layout_marginBottom="16dp">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etTimeout"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:textColor="@color/white" android:textSize="14sp"
+                        android:inputType="number"
+                        android:hint="4" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnTestConnection"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="ทดสอบการเชื่อมต่อ"
+                    app:cornerRadius="8dp" />
+
+                <TextView
+                    android:id="@+id/tvTestResult"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:textColor="#CCFFFFFF" android:textSize="12sp"
+                    android:fontFamily="monospace"
+                    android:layout_marginTop="12dp"
+                    android:text="" />
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Behavior section -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="พฤติกรรม" android:textColor="@color/purple_200"
+            android:textSize="12sp" android:textAllCaps="true" android:letterSpacing="0.1"
+            android:layout_marginBottom="8dp" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            app:cardBackgroundColor="#1F1F1F"
+            app:cardCornerRadius="12dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:padding="8dp">
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="64dp"
+                    android:orientation="horizontal" android:gravity="center_vertical"
+                    android:paddingHorizontal="8dp">
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:orientation="vertical">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="โหมด LLM" android:textColor="@color/white" android:textSize="15sp" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="เปิด = ใช้ webhook / ปิด = rule-based เท่านั้น"
+                            android:textColor="#88FFFFFF" android:textSize="12sp" />
+                    </LinearLayout>
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switchLlm"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                </LinearLayout>
+
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="64dp"
+                    android:orientation="horizontal" android:gravity="center_vertical"
+                    android:paddingHorizontal="8dp">
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:orientation="vertical">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="ยืนยันก่อนโทรเสมอ" android:textColor="@color/white" android:textSize="15sp" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="TTS ถามยืนยัน ก่อน ACTION_CALL"
+                            android:textColor="#88FFFFFF" android:textSize="12sp" />
+                    </LinearLayout>
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switchConfirmCall"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                </LinearLayout>
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Quick links section -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="ลิงก์ลัด" android:textColor="@color/purple_200"
+            android:textSize="12sp" android:textAllCaps="true" android:letterSpacing="0.1"
+            android:layout_marginBottom="8dp" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            app:cardBackgroundColor="#1F1F1F"
+            app:cardCornerRadius="12dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:padding="8dp">
+
+                <Button android:id="@+id/btnDefaultAssistant"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="match_parent" android:layout_height="48dp"
+                    android:text="⚙️  ตั้งค่า Default Digital Assistant"
+                    android:textColor="@color/white" android:gravity="start|center_vertical"
+                    android:paddingStart="8dp" />
+
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
+
+                <Button android:id="@+id/btnBatteryOpt"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="match_parent" android:layout_height="48dp"
+                    android:text="🔋  ยกเว้น Battery Optimization"
+                    android:textColor="@color/white" android:gravity="start|center_vertical"
+                    android:paddingStart="8dp" />
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+    </LinearLayout>
+</ScrollView>

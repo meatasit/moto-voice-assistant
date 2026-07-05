@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.moto.voice.MainActivity
+import com.moto.voice.data.AppSettings
 import com.moto.voice.pipeline.VoiceCommandPipeline
 
 class VoiceCommandService : Service() {
@@ -23,13 +24,13 @@ class VoiceCommandService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        createChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIF_ID, buildNotification())
         pipeline?.stop()
-        pipeline = VoiceCommandPipeline(this) { stopSelf(startId) }
+        pipeline = VoiceCommandPipeline(this, AppSettings(this)) { stopSelf(startId) }
         pipeline?.start()
         return START_NOT_STICKY
     }
@@ -41,34 +42,22 @@ class VoiceCommandService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun createNotificationChannel() {
+    private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Moto Voice — กำลังฟัง",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "แสดงขณะผู้ช่วยเสียงกำลังทำงาน"
-                setSound(null, null)
-                enableLights(false)
-                enableVibration(false)
-            }
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+            val ch = NotificationChannel(CHANNEL_ID, "Moto Voice — กำลังฟัง", NotificationManager.IMPORTANCE_LOW)
+            ch.setSound(null, null); ch.enableLights(false); ch.enableVibration(false)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
         }
     }
 
     private fun buildNotification(): Notification {
-        val tapIntent = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE
-        )
+        val pi = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Moto Voice")
             .setContentText("กำลังฟัง...")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setContentIntent(tapIntent)
+            .setContentIntent(pi)
             .setOngoing(true)
             .build()
     }

@@ -8,69 +8,75 @@ import android.content.IntentFilter
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import androidx.annotation.RequiresPermission
 
 class BluetoothAudioRouter(private val context: Context) {
 
     private val audioManager = context.getSystemService(AudioManager::class.java)
     private var scoReceiver: BroadcastReceiver? = null
+    private val handler = Handler(Looper.getMainLooper())
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
-    fun connect(onReady: () -> Unit) {
+    fun connect(timeoutMs: Long = 3_000L, onReady: (scoConnected: Boolean) -> Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            connectApi31(onReady)
+            val btSco = audioManager.availableCommunicationDevices
+                .firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+            if (btSco != null) audioManager.setCommunicationDevice(btSco)
+            onReady(btSco != null)
         } else {
-            connectLegacy(onReady)
+            connectLegacy(timeoutMs, onReady)
         }
-    }
-
-    private fun connectApi31(onReady: () -> Unit) {
-        val btSco = audioManager.availableCommunicationDevices
-            .firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
-        if (btSco != null) {
-            audioManager.setCommunicationDevice(btSco)
-        }
-        onReady()
     }
 
     @Suppress("DEPRECATION")
-    private fun connectLegacy(onReady: () -> Unit) {
+    private fun connectLegacy(timeoutMs: Long, onReady: (Boolean) -> Unit) {
         if (!audioManager.isBluetoothScoAvailableOffCall) {
-            onReady()
+            onReady(false)
             return
         }
+
+        val timeoutTask = Runnable {
+            unregisterSafe()
+            try { audioManager.stopBluetoothSco() } catch (_: Exception) {}
+            onReady(false)
+        }
+
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 val state = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)
-                if (state == AudioManager.SCO_AUDIO_STATE_CONNECTED) {
-                    unregisterSafe()
-                    onReady()
-                } else if (state == AudioManager.SCO_AUDIO_STATE_DISCONNECTED) {
-                    // BT not available — fall through to phone mic/speaker
-                    unregisterSafe()
-                    onReady()
+                when (state) {
+                    AudioManager.SCO_AUDIO_STATE_CONNECTED -> {
+                        handler.removeCallbacks(timeoutTask)
+                        unregisterSafe()
+                        onReady(true)
+                    }
+                    AudioManager.SCO_AUDIO_STATE_DISCONNECTED -> {
+                        handler.removeCallbacks(timeoutTask)
+                        unregisterSafe()
+                        onReady(false)
+                    }
                 }
             }
         }
         scoReceiver = receiver
-        context.registerReceiver(
-            receiver,
-            IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_CHANGED)
-        )
+        context.registerReceiver(receiver, IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_CHANGED))
         audioManager.startBluetoothSco()
         audioManager.isBluetoothScoOn = true
+        handler.postDelayed(timeoutTask, timeoutMs)
     }
 
     @Suppress("DEPRECATION")
     fun disconnect() {
         unregisterSafe()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            audioManager.clearCommunicationDevice()
-        } else {
-            try {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                audioManager.clearCommunicationDevice()
+            } else {
                 audioManager.stopBluetoothSco()
                 audioManager.isBluetoothScoOn = false
-            } catch (_: Exception) {}
+            }
         }
     }
 

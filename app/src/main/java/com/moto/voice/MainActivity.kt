@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.moto.voice.databinding.ActivityMainBinding
+import com.moto.voice.debug.DebugLogActivity
 
 class MainActivity : AppCompatActivity() {
 
@@ -37,19 +38,13 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.btnMic.setOnClickListener {
-            requestSinglePermission.launch(Manifest.permission.RECORD_AUDIO)
-        }
-        binding.btnContacts.setOnClickListener {
-            requestSinglePermission.launch(Manifest.permission.READ_CONTACTS)
-        }
-        binding.btnCall.setOnClickListener {
-            requestSinglePermission.launch(Manifest.permission.CALL_PHONE)
-        }
-        binding.btnBluetooth.setOnClickListener {
-            requestSinglePermission.launch(Manifest.permission.BLUETOOTH_CONNECT)
-        }
+        binding.btnMic.setOnClickListener { requestSinglePermission.launch(Manifest.permission.RECORD_AUDIO) }
+        binding.btnContacts.setOnClickListener { requestSinglePermission.launch(Manifest.permission.READ_CONTACTS) }
+        binding.btnCall.setOnClickListener { requestSinglePermission.launch(Manifest.permission.CALL_PHONE) }
+        binding.btnBluetooth.setOnClickListener { requestSinglePermission.launch(Manifest.permission.BLUETOOTH_CONNECT) }
         binding.btnSetDefault.setOnClickListener { openDefaultAssistantSettings() }
+        binding.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
+        binding.btnDebugLog.setOnClickListener { startActivity(Intent(this, DebugLogActivity::class.java)) }
     }
 
     override fun onResume() {
@@ -65,20 +60,10 @@ class MainActivity : AppCompatActivity() {
 
         val allGranted = allPermissions.all { hasPermission(it) }
         val isDefault = isDefaultAssistant()
-
         when {
-            isDefault && allGranted -> {
-                binding.tvStatusIcon.text = "✅"
-                binding.tvStatus.text = getString(R.string.status_ready)
-            }
-            !isDefault -> {
-                binding.tvStatusIcon.text = "⚠️"
-                binding.tvStatus.text = getString(R.string.status_not_default)
-            }
-            else -> {
-                binding.tvStatusIcon.text = "⚠️"
-                binding.tvStatus.text = getString(R.string.status_missing_perms)
-            }
+            isDefault && allGranted -> { binding.tvStatusIcon.text = "✅"; binding.tvStatus.text = getString(R.string.status_ready) }
+            !isDefault -> { binding.tvStatusIcon.text = "⚠️"; binding.tvStatus.text = getString(R.string.status_not_default) }
+            else -> { binding.tvStatusIcon.text = "⚠️"; binding.tvStatus.text = getString(R.string.status_missing_perms) }
         }
     }
 
@@ -88,36 +73,30 @@ class MainActivity : AppCompatActivity() {
         btn.isEnabled = !granted
     }
 
-    private fun hasPermission(permission: String) =
-        ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+    private fun hasPermission(p: String) =
+        ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED
 
     private fun isDefaultAssistant(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val roleManager = getSystemService(RoleManager::class.java)
-            roleManager.isRoleHeld(RoleManager.ROLE_ASSISTANT)
+            getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_ASSISTANT)
         } else {
-            val setting = Settings.Secure.getString(contentResolver, "assistant")
-            setting?.contains(packageName) == true
+            Settings.Secure.getString(contentResolver, "assistant")?.contains(packageName) == true
         }
     }
 
     private fun openDefaultAssistantSettings() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val roleManager = getSystemService(RoleManager::class.java)
-            if (!roleManager.isRoleHeld(RoleManager.ROLE_ASSISTANT)) {
-                val intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT)
-                requestRoleResult.launch(intent)
+            val rm = getSystemService(RoleManager::class.java)
+            if (!rm.isRoleHeld(RoleManager.ROLE_ASSISTANT)) {
+                requestRoleResult.launch(rm.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
                 return
             }
         }
-        try {
-            startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS))
-        } catch (_: Exception) {
-            startActivity(
-                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                    data = Uri.fromParts("package", packageName, null)
-                }
-            )
+        try { startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) }
+        catch (_: Exception) {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", packageName, null)
+            })
         }
     }
 }
