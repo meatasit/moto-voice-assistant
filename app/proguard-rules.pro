@@ -10,8 +10,13 @@
 -keepattributes *Annotation*
 -keep class com.google.gson.stream.** { *; }
 -keep class com.moto.voice.network.** { *; }
+-keep class com.moto.voice.network.WebhookResponse$* { *; }
 -keepclassmembers,allowobfuscation class * {
     @com.google.gson.annotations.SerializedName <fields>;
+}
+-keepclassmembers,allowobfuscation class com.moto.voice.network.** {
+    <init>(...);
+    <fields>;
 }
 
 # ── OkHttp ────────────────────────────────────────────────────────────────────
