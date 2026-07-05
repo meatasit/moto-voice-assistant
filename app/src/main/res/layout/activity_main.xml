@@ -163,8 +163,49 @@
             android:layout_height="56dp"
             android:text="@string/btn_set_default"
             android:textSize="16sp"
-            android:layout_marginBottom="24dp"
+            android:layout_marginBottom="16dp"
             app:cornerRadius="12dp" />
+
+        <!-- Quick access: Riding Mode / History / Favorites -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnRidingMode"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:text="🏍️  โหมดขี่ (Riding Mode)"
+            android:textSize="16sp"
+            android:layout_marginBottom="8dp"
+            app:cornerRadius="12dp"
+            app:backgroundTint="@color/purple_500" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="24dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnHistory"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                android:text="📜 ประวัติ"
+                android:textColor="@color/white"
+                app:cornerRadius="12dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnFavorites"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                android:text="⭐ โปรด"
+                android:textColor="@color/white"
+                app:cornerRadius="12dp" />
+
+        </LinearLayout>
 
         <!-- How to use -->
         <com.google.android.material.card.MaterialCardView

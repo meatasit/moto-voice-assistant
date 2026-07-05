@@ -44,6 +44,11 @@
 -keep class com.moto.voice.recognition.VoiceCommand { *; }
 -keep class com.moto.voice.recognition.VoiceCommand$* { *; }
 
+# History JSON — persisted, must survive R8
+-keep class com.moto.voice.data.HistoryEntry { *; }
+-keep class com.moto.voice.data.HistoryAction { *; }
+-keep class com.moto.voice.data.HistoryAction$* { *; }
+
 # Coroutines
 -keepclassmembers class kotlinx.coroutines.internal.MainDispatcherFactory { *; }
 -keepclassmembers class kotlinx.coroutines.CoroutineExceptionHandler { *; }

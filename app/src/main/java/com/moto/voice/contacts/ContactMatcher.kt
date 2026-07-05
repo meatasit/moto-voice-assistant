@@ -4,28 +4,33 @@ import android.Manifest
 import android.content.Context
 import android.provider.ContactsContract
 import androidx.annotation.RequiresPermission
+import com.moto.voice.data.FavoritesStore
 
 class ContactMatcher(private val context: Context) {
 
     companion object {
         private val THAI_PREFIXES = listOf(
-            "คุณ", "นาย", "นางสาว", "นาง", "เด็กชาย", "เด็กหญิง",
+            "คุณ", "พี่", "น้อง",
+            "นาย", "นางสาว", "นาง", "เด็กชาย", "เด็กหญิง",
             "ดร.", "ศ.", "รศ.", "ผศ.", "พล.", "พ.ต.", "ร.ต.", "ส.ต.",
             "Mr.", "Mrs.", "Ms.", "Dr.", "Prof.",
         )
         private const val HIGH_CONFIDENCE = 0.75f
+        /** Multiplier applied to score for contacts in the Favorites list (spec §7). */
+        private const val FAVORITE_BOOST = 1.5f
     }
 
     @RequiresPermission(Manifest.permission.READ_CONTACTS)
     fun findMatches(query: String): List<MatchResult> {
         val normalizedQuery = normalize(query)
+        val favoriteIds = FavoritesStore(context).ids()
         val contacts = loadContacts()
         return contacts
             .map { contact ->
-                MatchResult(
-                    contact = contact,
-                    score = similarity(normalizedQuery, normalize(contact.displayName)),
-                )
+                val base = similarity(normalizedQuery, normalize(contact.displayName))
+                val boosted = if (contact.id in favoriteIds) (base * FAVORITE_BOOST).coerceAtMost(1.0f)
+                              else base
+                MatchResult(contact = contact, score = boosted)
             }
             .filter { it.score >= 0.45f }
             .sortedByDescending { it.score }
