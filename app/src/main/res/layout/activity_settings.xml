@@ -68,7 +68,7 @@
                 </LinearLayout>
 
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="Timeout (วินาที)" android:textColor="#AAFFFFFF" android:textSize="12sp"
+                    android:text="Timeout (วินาที) — 5 ถึง 30 default 15" android:textColor="#AAFFFFFF" android:textSize="12sp"
                     android:layout_marginBottom="4dp" />
                 <com.google.android.material.textfield.TextInputLayout
                     android:layout_width="120dp" android:layout_height="wrap_content"
@@ -80,7 +80,7 @@
                         android:layout_width="match_parent" android:layout_height="wrap_content"
                         android:textColor="@color/white" android:textSize="14sp"
                         android:inputType="number"
-                        android:hint="4" />
+                        android:hint="15" />
                 </com.google.android.material.textfield.TextInputLayout>
 
                 <com.google.android.material.button.MaterialButton
