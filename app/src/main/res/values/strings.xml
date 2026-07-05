@@ -13,5 +13,8 @@
     <string name="status_missing_perms">ยังขาดสิทธิ์บางอย่าง</string>
 
     <string name="how_to_use_title">วิธีใช้</string>
-    <string name="how_to_use_body">กด Bluetooth BVRA หรือปุ่ม Home ค้าง แล้วพูดว่า\n\"โทรหา [ชื่อ]\"</string>
+    <string name="how_to_use_body">กด Bluetooth BVRA หรือปุ่ม Home ค้าง แล้วพูดว่า\n\"โทรหา [ชื่อ]\"\n\"เปิด YouTube [ชื่อเพลง]\"\n\"เปิดวิทยุ FM [ความถี่]\"</string>
+
+    <string name="title_settings">ตั้งค่า</string>
+    <string name="title_debug_log">Debug Log</string>
 </resources>

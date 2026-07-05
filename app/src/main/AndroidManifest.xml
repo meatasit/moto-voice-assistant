@@ -8,6 +8,9 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:allowBackup="true"
@@ -46,10 +49,28 @@
             </intent-filter>
         </activity>
 
-        <!-- Foreground service that runs the actual voice pipeline -->
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:label="@string/title_settings"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
+            android:name=".debug.DebugLogActivity"
+            android:exported="false"
+            android:label="@string/title_debug_log"
+            android:parentActivityName=".MainActivity" />
+
+        <!-- Foreground service that runs the voice pipeline (microphone) -->
         <service
             android:name=".service.VoiceCommandService"
             android:foregroundServiceType="microphone"
+            android:exported="false" />
+
+        <!-- FM radio streaming service (mediaPlayback) -->
+        <service
+            android:name=".media.FmPlayerService"
+            android:foregroundServiceType="mediaPlayback"
             android:exported="false" />
 
         <!--
@@ -72,6 +93,16 @@
             android:name=".service.MotoVoiceSessionService"
             android:permission="android.permission.BIND_VOICE_INTERACTION_SERVICE"
             android:exported="true" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_provider_paths" />
+        </provider>
 
     </application>
 
