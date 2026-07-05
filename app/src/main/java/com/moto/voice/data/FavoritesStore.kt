@@ -13,8 +13,6 @@ class FavoritesStore(context: Context) {
 
     data class Favorite(val contactId: String, val displayName: String)
 
-    companion object { const val MAX = 5 }
-
     private val prefs = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     fun list(): List<Favorite> = (0 until MAX).mapNotNull { slot ->
@@ -57,5 +55,8 @@ class FavoritesStore(context: Context) {
     private fun keyId(slot: Int) = "fav_${slot}_id"
     private fun keyName(slot: Int) = "fav_${slot}_name"
 
-    private companion object { const val FILE = "moto_voice_favorites" }
+    companion object {
+        const val MAX = 5
+        private const val FILE = "moto_voice_favorites"
+    }
 }
