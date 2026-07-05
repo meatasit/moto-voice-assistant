@@ -149,6 +149,24 @@
                         android:layout_width="wrap_content" android:layout_height="wrap_content" />
                 </LinearLayout>
 
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="64dp"
+                    android:orientation="horizontal" android:gravity="center_vertical"
+                    android:paddingHorizontal="8dp">
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:orientation="vertical">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="ถามก่อนเปิด YouTube" android:textColor="@color/white" android:textSize="15sp" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="เปิด = อ่านตัวเลือก 3 อัน ให้เลือก / ปิด = เปิดอันแรกทันที"
+                            android:textColor="#88FFFFFF" android:textSize="12sp" />
+                    </LinearLayout>
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switchAskYoutube"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                </LinearLayout>
+
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

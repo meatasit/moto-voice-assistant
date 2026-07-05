@@ -64,4 +64,9 @@ class AppSettings(context: Context) {
     var confirmBeforeCall: Boolean
         get() = prefs.getBoolean("confirm_call", true)
         set(v) { prefs.edit().putBoolean("confirm_call", v).apply() }
+
+    /** Spec §4/§8: default OFF — YouTube opens first result silently. */
+    var askBeforeYoutube: Boolean
+        get() = prefs.getBoolean("ask_youtube", false)
+        set(v) { prefs.edit().putBoolean("ask_youtube", v).apply() }
 }

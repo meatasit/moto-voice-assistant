@@ -42,6 +42,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.etTimeout.setText(settings.timeoutSeconds.toString())
         binding.switchLlm.isChecked = settings.llmMode
         binding.switchConfirmCall.isChecked = settings.confirmBeforeCall
+        binding.switchAskYoutube.isChecked = settings.askBeforeYoutube
     }
 
     private fun setupListeners() {
@@ -55,6 +56,7 @@ class SettingsActivity : AppCompatActivity() {
 
         binding.switchLlm.setOnCheckedChangeListener { _, v -> settings.llmMode = v }
         binding.switchConfirmCall.setOnCheckedChangeListener { _, v -> settings.confirmBeforeCall = v }
+        binding.switchAskYoutube.setOnCheckedChangeListener { _, v -> settings.askBeforeYoutube = v }
 
         binding.btnTestConnection.setOnClickListener { testConnection() }
 

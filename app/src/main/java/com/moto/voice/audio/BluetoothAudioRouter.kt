@@ -41,10 +41,22 @@ class BluetoothAudioRouter(private val context: Context) {
             val btSco = am.availableCommunicationDevices
                 .firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
             val ok = btSco != null && am.setCommunicationDevice(btSco)
-            fireOnce(ok)
+            if (!ok) {
+                fireOnce(false)
+                return
+            }
+            // setCommunicationDevice() returns true immediately even though the SCO link
+            // may take a moment to actually carry audio. Give it a beat before we start
+            // recording — otherwise the first ~200ms of speech gets recorded from the
+            // phone mic during the switchover. Empirically ~300ms is enough on the S24.
+            handler.postDelayed({ fireOnce(true) }, SCO_SETTLE_MS)
         } else {
             connectLegacy(am, timeoutMs)
         }
+    }
+
+    private companion object {
+        const val SCO_SETTLE_MS = 300L
     }
 
     @Suppress("DEPRECATION")
