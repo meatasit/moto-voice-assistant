@@ -302,7 +302,9 @@ class VoiceCommandPipeline(
             return
         }
         if (contact.phoneNumber.isBlank()) {
-            Log.w(TAG, "empty phone number for ${contact.displayName}"); return
+            Log.w(TAG, "empty phone number for ${contact.displayName}")
+            scope.launch { speakAndRemember("ไม่มีเบอร์โทรของ ${contact.displayName}") }
+            return
         }
         runCatching {
             context.startActivity(
@@ -311,7 +313,10 @@ class VoiceCommandPipeline(
             )
             memory.rememberCall(contact.phoneNumber, contact.displayName)
             recordHistory(HistoryAction.Call(contact.displayName, contact.phoneNumber))
-        }.onFailure { Log.e(TAG, "call failed", it) }
+        }.onFailure {
+            Log.e(TAG, "call failed", it)
+            scope.launch { speakAndRemember("โทรไม่ได้ ลองอีกที") }
+        }
     }
 
     // ─── YouTube ──────────────────────────────────────────────────────────────

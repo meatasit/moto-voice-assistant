@@ -11,6 +11,7 @@ import androidx.lifecycle.lifecycleScope
 import com.moto.voice.data.AppSettings
 import com.moto.voice.databinding.ActivitySettingsBinding
 import com.moto.voice.network.WebhookClient
+import com.moto.voice.tts.ThaiTTS
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -20,6 +21,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var settings: AppSettings
     private var tokenVisible = false
     private var testJob: Job? = null
+    private var previewTts: ThaiTTS? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,7 +46,11 @@ class SettingsActivity : AppCompatActivity() {
         binding.switchConfirmCall.isChecked = settings.confirmBeforeCall
         binding.switchAskYoutube.isChecked = settings.askBeforeYoutube
         binding.switchGreetOnConnect.isChecked = settings.greetOnConnect
+        binding.sliderTtsRate.value = settings.ttsSpeechRate
+        binding.tvTtsRateValue.text = formatRate(settings.ttsSpeechRate)
     }
+
+    private fun formatRate(rate: Float): String = "%.1fx".format(rate)
 
     private fun setupListeners() {
         binding.btnShowToken.setOnClickListener {
@@ -60,6 +66,12 @@ class SettingsActivity : AppCompatActivity() {
         binding.switchAskYoutube.setOnCheckedChangeListener { _, v -> settings.askBeforeYoutube = v }
         binding.switchGreetOnConnect.setOnCheckedChangeListener { _, v -> settings.greetOnConnect = v }
 
+        binding.sliderTtsRate.addOnChangeListener { _, value, _ ->
+            binding.tvTtsRateValue.text = formatRate(value)
+            settings.ttsSpeechRate = value
+        }
+        binding.btnPreviewTts.setOnClickListener { previewSpeech() }
+
         binding.btnTestConnection.setOnClickListener { testConnection() }
 
         binding.btnDefaultAssistant.setOnClickListener {
@@ -72,6 +84,12 @@ class SettingsActivity : AppCompatActivity() {
             }
             runCatching { startActivity(intent) }
                 .onFailure { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
+        }
+        binding.btnAppPermissions.setOnClickListener { openAppSettings() }
+        binding.btnReopenOnboarding.setOnClickListener {
+            // Force re-entry even if the user has already completed onboarding.
+            settings.onboardingComplete = false
+            startActivity(Intent(this, OnboardingActivity::class.java))
         }
     }
 
@@ -109,9 +127,24 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    private fun previewSpeech() {
+        // Save first so the new instance picks up the current slider value.
+        settings.ttsSpeechRate = binding.sliderTtsRate.value
+        previewTts?.stop()
+        previewTts = ThaiTTS(this).apply {
+            speak("สวัสดีครับ ทดสอบความเร็วเสียงพูด")
+        }
+    }
+
     override fun onPause() {
         super.onPause()
         saveSettings()
+    }
+
+    override fun onDestroy() {
+        previewTts?.stop()
+        previewTts = null
+        super.onDestroy()
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {

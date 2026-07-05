@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import com.moto.voice.data.AppSettings
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.Locale
 import java.util.UUID
@@ -40,9 +41,11 @@ class ThaiTTS(private val context: Context) {
     }
 
     init {
+        val rate = runCatching { AppSettings(context).ttsSpeechRate }.getOrDefault(AppSettings.DEFAULT_TTS_RATE)
         tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale("th", "TH")
+                tts?.setSpeechRate(rate)
                 tts?.setAudioAttributes(
                     AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_ASSISTANT)
