@@ -69,4 +69,9 @@ class AppSettings(context: Context) {
     var askBeforeYoutube: Boolean
         get() = prefs.getBoolean("ask_youtube", false)
         set(v) { prefs.edit().putBoolean("ask_youtube", v).apply() }
+
+    /** Spec §7/§8: default ON — TTS says "พร้อมใช้งานครับ" through the helmet on connect. */
+    var greetOnConnect: Boolean
+        get() = prefs.getBoolean("greet_on_connect", true)
+        set(v) { prefs.edit().putBoolean("greet_on_connect", v).apply() }
 }

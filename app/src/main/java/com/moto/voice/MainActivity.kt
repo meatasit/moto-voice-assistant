@@ -11,6 +11,7 @@ import android.provider.Settings
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.moto.voice.data.NetworkState
 import com.moto.voice.databinding.ActivityMainBinding
 import com.moto.voice.debug.DebugLogActivity
 
@@ -60,10 +61,12 @@ class MainActivity : AppCompatActivity() {
 
         val allGranted = allPermissions.all { hasPermission(it) }
         val isDefault = isDefaultAssistant()
+        val online = NetworkState.isOnline(this)
+        val offlineSuffix = if (!online) "  •  ออฟไลน์" else ""
         when {
-            isDefault && allGranted -> { binding.tvStatusIcon.text = "✅"; binding.tvStatus.text = getString(R.string.status_ready) }
-            !isDefault -> { binding.tvStatusIcon.text = "⚠️"; binding.tvStatus.text = getString(R.string.status_not_default) }
-            else -> { binding.tvStatusIcon.text = "⚠️"; binding.tvStatus.text = getString(R.string.status_missing_perms) }
+            isDefault && allGranted -> { binding.tvStatusIcon.text = if (online) "✅" else "📡"; binding.tvStatus.text = getString(R.string.status_ready) + offlineSuffix }
+            !isDefault -> { binding.tvStatusIcon.text = "⚠️"; binding.tvStatus.text = getString(R.string.status_not_default) + offlineSuffix }
+            else -> { binding.tvStatusIcon.text = "⚠️"; binding.tvStatus.text = getString(R.string.status_missing_perms) + offlineSuffix }
         }
     }
 
