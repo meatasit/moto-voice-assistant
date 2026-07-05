@@ -1,4 +1,4 @@
-package com.moto.voice.recognition
+package com.moto.voice.nlu
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull

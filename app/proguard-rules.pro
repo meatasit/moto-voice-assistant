@@ -41,8 +41,8 @@
 -keep class com.moto.voice.VoiceAssistActivity { *; }
 
 # Sealed classes / data classes used by pipeline
--keep class com.moto.voice.recognition.VoiceCommand { *; }
--keep class com.moto.voice.recognition.VoiceCommand$* { *; }
+-keep class com.moto.voice.nlu.VoiceCommand { *; }
+-keep class com.moto.voice.nlu.VoiceCommand$* { *; }
 
 # History JSON — persisted, must survive R8
 -keep class com.moto.voice.data.HistoryEntry { *; }

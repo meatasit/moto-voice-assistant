@@ -31,8 +31,8 @@ import com.moto.voice.network.WebhookClient
 import com.moto.voice.network.WebhookResponse
 import com.moto.voice.nlu.LocalIntercept
 import com.moto.voice.nlu.NumberWordParser
-import com.moto.voice.recognition.CommandParser
-import com.moto.voice.recognition.VoiceCommand
+import com.moto.voice.nlu.CommandParser
+import com.moto.voice.nlu.VoiceCommand
 import com.moto.voice.tts.ThaiTTS
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

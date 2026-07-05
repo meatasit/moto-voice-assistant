@@ -5,34 +5,33 @@ import android.content.Context
 import android.provider.ContactsContract
 import androidx.annotation.RequiresPermission
 import com.moto.voice.data.FavoritesStore
+import com.moto.voice.nlu.ThaiNormalizer
 
+/**
+ * Loads contacts and fuzzy-matches them to a spoken query. Purely Android-glue —
+ * all string-similarity logic lives in [ThaiNormalizer].
+ */
 class ContactMatcher(private val context: Context) {
 
     companion object {
-        private val THAI_PREFIXES = listOf(
-            "คุณ", "พี่", "น้อง",
-            "นาย", "นางสาว", "นาง", "เด็กชาย", "เด็กหญิง",
-            "ดร.", "ศ.", "รศ.", "ผศ.", "พล.", "พ.ต.", "ร.ต.", "ส.ต.",
-            "Mr.", "Mrs.", "Ms.", "Dr.", "Prof.",
-        )
-        private const val HIGH_CONFIDENCE = 0.75f
-        /** Multiplier applied to score for contacts in the Favorites list (spec §7). */
+        /** Score multiplier applied to Favorites-listed contacts (spec §7). Capped at 1.0. */
         private const val FAVORITE_BOOST = 1.5f
+        private const val MIN_KEEP_SCORE = 0.45f
     }
 
     @RequiresPermission(Manifest.permission.READ_CONTACTS)
     fun findMatches(query: String): List<MatchResult> {
-        val normalizedQuery = normalize(query)
+        val normalizedQuery = ThaiNormalizer.normalize(query)
         val favoriteIds = FavoritesStore(context).ids()
         val contacts = loadContacts()
         return contacts
             .map { contact ->
-                val base = similarity(normalizedQuery, normalize(contact.displayName))
+                val base = ThaiNormalizer.similarity(normalizedQuery, ThaiNormalizer.normalize(contact.displayName))
                 val boosted = if (contact.id in favoriteIds) (base * FAVORITE_BOOST).coerceAtMost(1.0f)
                               else base
                 MatchResult(contact = contact, score = boosted)
             }
-            .filter { it.score >= 0.45f }
+            .filter { it.score >= MIN_KEEP_SCORE }
             .sortedByDescending { it.score }
     }
 
@@ -61,41 +60,7 @@ class ContactMatcher(private val context: Context) {
                 result.add(ContactEntry(id, name, cleaned))
             }
         }
-        // One entry per contact (keep first phone number)
+        // Keep first phone number per contact.
         return result.distinctBy { it.id }
-    }
-
-    private fun normalize(name: String): String {
-        var s = name.trim()
-        for (prefix in THAI_PREFIXES) {
-            if (s.startsWith(prefix)) {
-                s = s.removePrefix(prefix).trim()
-            }
-        }
-        return s.lowercase()
-    }
-
-    private fun similarity(a: String, b: String): Float {
-        if (a == b) return 1.0f
-        if (b.contains(a) || a.contains(b)) return 0.9f
-        val distance = levenshtein(a, b)
-        val maxLen = maxOf(a.length, b.length)
-        return if (maxLen == 0) 1.0f else (1.0f - distance.toFloat() / maxLen).coerceAtLeast(0f)
-    }
-
-    private fun levenshtein(a: String, b: String): Int {
-        val dp = Array(a.length + 1) { IntArray(b.length + 1) }
-        for (i in 0..a.length) dp[i][0] = i
-        for (j in 0..b.length) dp[0][j] = j
-        for (i in 1..a.length) {
-            for (j in 1..b.length) {
-                dp[i][j] = if (a[i - 1] == b[j - 1]) {
-                    dp[i - 1][j - 1]
-                } else {
-                    1 + minOf(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
-                }
-            }
-        }
-        return dp[a.length][b.length]
     }
 }
