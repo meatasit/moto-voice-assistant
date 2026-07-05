@@ -32,13 +32,12 @@ object LocalIntercept {
         val t = normalize(text)
         if (t.isEmpty()) return Intercept.None
 
-        if (matchesAny(t, STOP_PATTERNS)) return Intercept.Stop
-        if (matchesAny(t, HELP_PATTERNS)) return Intercept.Help
-        if (matchesAny(t, REPEAT_PATTERNS)) return Intercept.RepeatLast
-        if (matchesAny(t, CALL_BACK_PATTERNS)) return Intercept.CallBackLast
-        // Order matters: "เปิดวิทยุ" alone (no station name) → resume last;
-        // longer forms like "เปิดวิทยุ 91.5" go to webhook, so require exact match.
+        // Exact resume-radio wins over Stop's substring "ปิดวิทยุ" collision with "เปิดวิทยุ".
         if (RESUME_RADIO_PATTERNS.any { it == t }) return Intercept.ResumeLastRadio
+        if (matchesAsPhrase(t, STOP_PATTERNS)) return Intercept.Stop
+        if (matchesAsPhrase(t, HELP_PATTERNS)) return Intercept.Help
+        if (matchesAsPhrase(t, REPEAT_PATTERNS)) return Intercept.RepeatLast
+        if (matchesAsPhrase(t, CALL_BACK_PATTERNS)) return Intercept.CallBackLast
 
         return Intercept.None
     }
@@ -47,7 +46,14 @@ object LocalIntercept {
     internal fun normalize(text: String): String =
         text.trim().replace(Regex("\\s+"), " ").lowercase()
 
-    private fun matchesAny(t: String, patterns: List<String>) = patterns.any { it in t }
+    /**
+     * Substring match, but the match must start at position 0 or immediately after a space.
+     * Prevents "ปิดวิทยุ" (stop-radio) from firing inside "เปิดวิทยุ" (open-radio).
+     */
+    private fun matchesAsPhrase(t: String, patterns: List<String>) = patterns.any { p ->
+        val idx = t.indexOf(p)
+        idx >= 0 && (idx == 0 || t[idx - 1] == ' ')
+    }
 
     // Substring matches — user may have padding like "เอ่อ หยุด".
     private val STOP_PATTERNS = listOf(
