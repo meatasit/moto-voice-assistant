@@ -10,79 +10,123 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import androidx.annotation.RequiresPermission
+
+private const val TAG = "BluetoothAudioRouter"
 
 class BluetoothAudioRouter(private val context: Context) {
 
     private val audioManager = context.getSystemService(AudioManager::class.java)
     private var scoReceiver: BroadcastReceiver? = null
     private val handler = Handler(Looper.getMainLooper())
+    private var timeoutTask: Runnable? = null
+
+    @Volatile private var callbackFired = false
+    @Volatile private var readyCallback: ((Boolean) -> Unit)? = null
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun connect(timeoutMs: Long = 3_000L, onReady: (scoConnected: Boolean) -> Unit) {
+        callbackFired = false
+        readyCallback = onReady
+
+        val am = audioManager
+        if (am == null) {
+            Log.w(TAG, "AudioManager unavailable")
+            fireOnce(false)
+            return
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val btSco = audioManager.availableCommunicationDevices
+            val btSco = am.availableCommunicationDevices
                 .firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
-            if (btSco != null) audioManager.setCommunicationDevice(btSco)
-            onReady(btSco != null)
+            val ok = btSco != null && am.setCommunicationDevice(btSco)
+            fireOnce(ok)
         } else {
-            connectLegacy(timeoutMs, onReady)
+            connectLegacy(am, timeoutMs)
         }
     }
 
     @Suppress("DEPRECATION")
-    private fun connectLegacy(timeoutMs: Long, onReady: (Boolean) -> Unit) {
-        if (!audioManager.isBluetoothScoAvailableOffCall) {
-            onReady(false)
+    private fun connectLegacy(am: AudioManager, timeoutMs: Long) {
+        if (!am.isBluetoothScoAvailableOffCall) {
+            fireOnce(false)
             return
         }
 
-        val timeoutTask = Runnable {
+        val task = Runnable {
             unregisterSafe()
-            try { audioManager.stopBluetoothSco() } catch (_: Exception) {}
-            onReady(false)
+            runCatching { am.stopBluetoothSco() }
+            fireOnce(false)
         }
+        timeoutTask = task
 
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
-                val state = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)
-                when (state) {
+                if (callbackFired) return
+                when (intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)) {
                     AudioManager.SCO_AUDIO_STATE_CONNECTED -> {
-                        handler.removeCallbacks(timeoutTask)
+                        handler.removeCallbacks(task)
                         unregisterSafe()
-                        onReady(true)
+                        fireOnce(true)
                     }
                     AudioManager.SCO_AUDIO_STATE_DISCONNECTED -> {
-                        handler.removeCallbacks(timeoutTask)
+                        handler.removeCallbacks(task)
                         unregisterSafe()
-                        onReady(false)
+                        fireOnce(false)
                     }
                 }
             }
         }
         scoReceiver = receiver
-        context.registerReceiver(receiver, IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_CHANGED))
-        audioManager.startBluetoothSco()
-        audioManager.isBluetoothScoOn = true
-        handler.postDelayed(timeoutTask, timeoutMs)
+
+        // Register BEFORE starting SCO so we don't race the CONNECTED broadcast.
+        val filter = IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_CHANGED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            context.registerReceiver(receiver, filter)
+        }
+        handler.postDelayed(task, timeoutMs)
+
+        runCatching {
+            am.startBluetoothSco()
+            am.isBluetoothScoOn = true
+        }.onFailure {
+            Log.w(TAG, "startBluetoothSco failed", it)
+            handler.removeCallbacks(task)
+            unregisterSafe()
+            fireOnce(false)
+        }
     }
 
     @Suppress("DEPRECATION")
     fun disconnect() {
+        timeoutTask?.let { handler.removeCallbacks(it) }
+        timeoutTask = null
         unregisterSafe()
+        val am = audioManager ?: return
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                audioManager.clearCommunicationDevice()
+                am.clearCommunicationDevice()
             } else {
-                audioManager.stopBluetoothSco()
-                audioManager.isBluetoothScoOn = false
+                am.stopBluetoothSco()
+                am.isBluetoothScoOn = false
             }
         }
     }
 
+    private fun fireOnce(connected: Boolean) {
+        if (callbackFired) return
+        callbackFired = true
+        val cb = readyCallback
+        readyCallback = null
+        cb?.invoke(connected)
+    }
+
     private fun unregisterSafe() {
         scoReceiver?.let {
-            try { context.unregisterReceiver(it) } catch (_: Exception) {}
+            runCatching { context.unregisterReceiver(it) }
             scoReceiver = null
         }
     }

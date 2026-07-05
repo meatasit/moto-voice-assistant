@@ -49,9 +49,11 @@ class ContactMatcher(private val context: Context) {
             val numIdx = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
             while (cursor.moveToNext()) {
                 val id = cursor.getString(idIdx) ?: continue
-                val name = cursor.getString(nameIdx) ?: continue
+                val name = cursor.getString(nameIdx)?.takeIf { it.isNotBlank() } ?: continue
                 val number = cursor.getString(numIdx) ?: continue
-                result.add(ContactEntry(id, name, number.filter { it.isDigit() || it == '+' }))
+                val cleaned = number.filter { it.isDigit() || it == '+' }
+                if (cleaned.count { it.isDigit() } < 3) continue
+                result.add(ContactEntry(id, name, cleaned))
             }
         }
         // One entry per contact (keep first phone number)

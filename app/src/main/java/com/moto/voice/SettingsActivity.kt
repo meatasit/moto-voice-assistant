@@ -3,32 +3,36 @@ package com.moto.voice
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.provider.Settings
 import android.text.method.PasswordTransformationMethod
 import android.view.MenuItem
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.moto.voice.data.AppSettings
 import com.moto.voice.databinding.ActivitySettingsBinding
 import com.moto.voice.network.WebhookClient
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySettingsBinding
     private lateinit var settings: AppSettings
-    private val handler = Handler(Looper.getMainLooper())
     private var tokenVisible = false
+    private var testJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivitySettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        supportActionBar?.apply { title = "ตั้งค่า"; setDisplayHomeAsUpEnabled(true) }
+        supportActionBar?.apply { title = getString(R.string.title_settings); setDisplayHomeAsUpEnabled(true) }
 
         settings = AppSettings(this)
         loadSettings()
         setupListeners()
+        if (!settings.isTokenStoreSecure) {
+            binding.tvTestResult.text = getString(R.string.token_store_insecure_warning)
+        }
     }
 
     private fun loadSettings() {
@@ -46,7 +50,7 @@ class SettingsActivity : AppCompatActivity() {
             binding.etToken.transformationMethod =
                 if (tokenVisible) null else PasswordTransformationMethod.getInstance()
             binding.etToken.setSelection(binding.etToken.text?.length ?: 0)
-            binding.btnShowToken.text = if (tokenVisible) "ซ่อน" else "แสดง"
+            binding.btnShowToken.text = if (tokenVisible) getString(R.string.token_hide) else getString(R.string.token_show)
         }
 
         binding.switchLlm.setOnCheckedChangeListener { _, v -> settings.llmMode = v }
@@ -55,38 +59,34 @@ class SettingsActivity : AppCompatActivity() {
         binding.btnTestConnection.setOnClickListener { testConnection() }
 
         binding.btnDefaultAssistant.setOnClickListener {
-            try { startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) }
-            catch (_: Exception) { openAppSettings() }
+            runCatching { startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) }
+                .onFailure { openAppSettings() }
         }
         binding.btnBatteryOpt.setOnClickListener {
-            try {
-                startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                    data = Uri.parse("package:$packageName")
-                })
-            } catch (_: Exception) {
-                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.fromParts("package", packageName, null)
             }
+            runCatching { startActivity(intent) }
+                .onFailure { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
         }
     }
 
     private fun testConnection() {
         saveSettings()
         binding.btnTestConnection.isEnabled = false
-        binding.tvTestResult.text = "กำลังทดสอบ..."
+        binding.tvTestResult.text = getString(R.string.testing)
+        testJob?.cancel()
         val url = settings.webhookUrl
         val token = settings.authToken
         val timeout = settings.timeoutSeconds
-        Thread {
-            val result = WebhookClient(url, token, timeout).send("ทดสอบระบบ")
-            handler.post {
-                binding.btnTestConnection.isEnabled = true
-                binding.tvTestResult.text = if (result.error == null) {
-                    "✅ ${result.elapsedMs}ms\n${result.rawJson.take(400)}"
-                } else {
-                    "❌ ${result.error}\n(${result.elapsedMs}ms)"
-                }
+        testJob = lifecycleScope.launch {
+            val result = WebhookClient(url, token, timeout).call("ทดสอบระบบ")
+            binding.btnTestConnection.isEnabled = true
+            binding.tvTestResult.text = when (result) {
+                is WebhookClient.Result.Success -> "✅ ${result.elapsedMs}ms\n${result.rawJson.take(400)}"
+                is WebhookClient.Result.Failure -> "❌ ${result.error}\n(${result.elapsedMs}ms)"
             }
-        }.start()
+        }
     }
 
     private fun saveSettings() {
@@ -98,9 +98,11 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun openAppSettings() {
-        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = Uri.fromParts("package", packageName, null)
-        })
+        runCatching {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", packageName, null)
+            })
+        }
     }
 
     override fun onPause() {

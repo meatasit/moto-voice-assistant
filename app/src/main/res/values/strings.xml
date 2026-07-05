@@ -17,4 +17,12 @@
 
     <string name="title_settings">ตั้งค่า</string>
     <string name="title_debug_log">Debug Log</string>
+
+    <string name="token_show">แสดง</string>
+    <string name="token_hide">ซ่อน</string>
+    <string name="testing">กำลังทดสอบ...</string>
+    <string name="token_store_insecure_warning">⚠️ อุปกรณ์ไม่รองรับการเข้ารหัส Auth Token จะถูกเก็บแบบไม่เข้ารหัส</string>
+
+    <string name="cd_debug_log">Debug log</string>
+    <string name="cd_settings">Settings</string>
 </resources>

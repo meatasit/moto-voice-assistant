@@ -8,8 +8,6 @@ import android.media.AudioManager
 import android.media.ToneGenerator
 import android.net.Uri
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -28,255 +26,276 @@ import com.moto.voice.network.WebhookResponse
 import com.moto.voice.recognition.CommandParser
 import com.moto.voice.recognition.VoiceCommand
 import com.moto.voice.tts.ThaiTTS
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.resume
 
 private const val TAG = "VoiceCommandPipeline"
 private const val HIGH_CONF = 0.75f
+private val YOUTUBE_ID = Regex("^[A-Za-z0-9_-]{11}$")
 
 class VoiceCommandPipeline(
     private val context: Context,
     private val settings: AppSettings,
     private val onFinished: () -> Unit,
 ) {
-    private val handler = Handler(Looper.getMainLooper())
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val btRouter = BluetoothAudioRouter(context)
     private val tts = ThaiTTS(context)
     private val contactMatcher = ContactMatcher(context)
+
+    private val finished = AtomicBoolean(false)
+    private var runJob: Job? = null
+
+    // Recognizer is only touched on the main thread (coroutine dispatcher).
     private var recognizer: SpeechRecognizer? = null
-    private var disambigCandidates: List<MatchResult> = emptyList()
 
     fun start() {
+        if (runJob?.isActive == true) return
+        runJob = scope.launch { runPipeline() }
+    }
+
+    private suspend fun runPipeline() {
         val entry = DebugLog.new()
         val t0 = System.currentTimeMillis()
 
-        if (hasPerm(Manifest.permission.BLUETOOTH_CONNECT)) {
-            btRouter.connect(3_000L) { scoOk ->
+        val scoOk = if (hasPerm(Manifest.permission.BLUETOOTH_CONNECT)) {
+            connectSco(3_000L).also {
                 entry.scoTimeMs = System.currentTimeMillis() - t0
-                Log.d(TAG, "SCO: $scoOk in ${entry.scoTimeMs}ms")
-                beginListening(entry)
+                Log.d(TAG, "SCO: $it in ${entry.scoTimeMs}ms")
             }
-        } else {
-            beginListening(entry)
-        }
-    }
+        } else false
 
-    private fun beginListening(entry: DebugEntry) {
-        playTing {
-            val t1 = System.currentTimeMillis()
-            listenForSpeech(entry) { text ->
-                entry.sttTimeMs = System.currentTimeMillis() - t1
-                if (text.isBlank()) {
-                    tts.speak("ไม่ได้ยินเสียง") { finish() }
-                    return@listenForSpeech
-                }
-                processText(text, entry)
-            }
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            entry.error = "no speech recognition service"
+            tts.speakAwait("อุปกรณ์ไม่รองรับการรับเสียง")
+            finish(); return
         }
+
+        playTing()
+
+        val t1 = System.currentTimeMillis()
+        val text = listenOnce(entry)
+        entry.sttTimeMs = System.currentTimeMillis() - t1
+        entry.sttFinal = text
+
+        if (text.isBlank()) {
+            tts.speakAwait("ไม่ได้ยินเสียง")
+            finish(); return
+        }
+
+        processText(text, entry)
     }
 
     // ─── Command processing ───────────────────────────────────────────────────
 
-    private fun processText(text: String, entry: DebugEntry) {
+    private suspend fun processText(text: String, entry: DebugEntry) {
         entry.webhookRequest = text
-        if (settings.llmMode && settings.webhookUrl.isNotBlank()) {
-            val client = WebhookClient(settings.webhookUrl, settings.authToken, settings.timeoutSeconds)
-            Thread {
-                val result = client.send(text)
-                entry.webhookResponse = result.rawJson
-                entry.webhookTimeMs = result.elapsedMs
-                handler.post {
-                    if (result.response != null) {
-                        val t2 = System.currentTimeMillis()
-                        executeWebhookAction(result.response, entry) {
-                            entry.actionTimeMs = System.currentTimeMillis() - t2
-                            finish()
-                        }
-                    } else {
-                        entry.error = result.error
-                        tts.speak("โหมดออฟไลน์") { executeRuleBased(text, entry) }
-                    }
-                }
-            }.start()
-        } else {
-            executeRuleBased(text, entry)
+        val useWebhook = settings.llmMode && settings.webhookUrl.isNotBlank()
+        if (!useWebhook) {
+            executeRuleBased(text, entry); return
+        }
+
+        val client = WebhookClient(settings.webhookUrl, settings.authToken, settings.timeoutSeconds)
+        val result = client.call(text)
+        entry.webhookResponse = result.rawJson
+        entry.webhookTimeMs = result.elapsedMs
+
+        when (result) {
+            is WebhookClient.Result.Success -> {
+                val t2 = System.currentTimeMillis()
+                executeWebhookAction(result.response, entry)
+                entry.actionTimeMs = System.currentTimeMillis() - t2
+                finish()
+            }
+            is WebhookClient.Result.Failure -> {
+                entry.error = result.error
+                Log.w(TAG, "webhook failed: ${result.error}")
+                tts.speakAwait("โหมดออฟไลน์")
+                executeRuleBased(text, entry)
+            }
         }
     }
 
-    private fun executeWebhookAction(resp: WebhookResponse, entry: DebugEntry, onDone: () -> Unit) {
+    private suspend fun executeWebhookAction(resp: WebhookResponse, entry: DebugEntry) {
         Log.d(TAG, "action=${resp.action} speak=${resp.speak}")
         when (resp.action.lowercase()) {
             "call" -> {
-                val name = resp.contact ?: resp.speak
-                handleCallByName(name, resp.speak, onDone)
+                val name = resp.contact?.takeIf { it.isNotBlank() } ?: resp.speak
+                handleCallByName(name, resp.speak)
             }
             "youtube_play" -> {
-                tts.speak(resp.speak.ifBlank { "กำลังเปิด YouTube" }) {
-                    openYoutube(resp.videoId, resp.query)
-                    onDone()
-                }
+                tts.speakAwait(resp.speak.ifBlank { "กำลังเปิด YouTube" })
+                openYoutube(resp.videoId, resp.query, entry)
             }
             "fm" -> {
                 if (!resp.streamUrl.isNullOrBlank()) {
-                    tts.speak(resp.speak.ifBlank { "กำลังเล่นวิทยุ" }) {
-                        startFm(resp.streamUrl, resp.frequency ?: "FM")
-                        onDone()
-                    }
+                    tts.speakAwait(resp.speak.ifBlank { "กำลังเล่นวิทยุ" })
+                    startFm(resp.streamUrl, resp.frequency ?: "FM")
                 } else {
-                    tts.speak(resp.speak.ifBlank { "ไม่มี stream URL" }) { onDone() }
+                    tts.speakAwait(resp.speak.ifBlank { "ไม่มี stream URL" })
                 }
             }
-            else -> tts.speak(resp.speak.ifBlank { "เข้าใจแล้ว" }) { onDone() }
+            else -> tts.speakAwait(resp.speak.ifBlank { "เข้าใจแล้ว" })
         }
     }
 
     // ─── Rule-based fallback ──────────────────────────────────────────────────
 
-    private fun executeRuleBased(text: String, entry: DebugEntry) {
+    private suspend fun executeRuleBased(text: String, entry: DebugEntry) {
         val cmd = CommandParser.parse(text)
         if (cmd == null) {
-            tts.speak("ไม่เข้าใจคำสั่ง ลองพูดว่า โทรหา ตามด้วยชื่อ") { finish() }
-            return
+            tts.speakAwait("ไม่เข้าใจคำสั่ง ลองพูดว่า โทรหา ตามด้วยชื่อ")
+            finish(); return
         }
         when (cmd) {
-            is VoiceCommand.Call -> handleCallByName(cmd.name, null) { finish() }
+            is VoiceCommand.Call -> handleCallByName(cmd.name, null)
         }
+        finish()
     }
 
     // ─── Call handling ────────────────────────────────────────────────────────
 
-    private fun handleCallByName(name: String, speakOverride: String?, onDone: () -> Unit) {
+    private suspend fun handleCallByName(name: String, speakOverride: String?) {
         if (!hasPerm(Manifest.permission.READ_CONTACTS)) {
-            tts.speak("ไม่มีสิทธิ์รายชื่อ") { onDone() }
-            return
+            tts.speakAwait("ไม่มีสิทธิ์รายชื่อ"); return
         }
         val matches = contactMatcher.findMatches(name)
         when {
-            matches.isEmpty() -> tts.speak("ไม่พบ $name ในรายชื่อ") { onDone() }
+            matches.isEmpty() -> tts.speakAwait("ไม่พบ $name ในรายชื่อ")
             matches.size == 1 && matches[0].score >= HIGH_CONF ->
-                confirmThenCall(matches[0].contact, speakOverride, onDone)
+                confirmThenCall(matches[0].contact, speakOverride)
             else -> {
-                disambigCandidates = matches.take(3)
-                askDisambig(disambigCandidates) { idx ->
-                    if (idx < 0) tts.speak("ยกเลิกแล้ว") { onDone() }
-                    else confirmThenCall(disambigCandidates[idx].contact, null, onDone)
-                }
+                val candidates = matches.take(3)
+                val choice = askDisambig(candidates)
+                if (choice < 0) tts.speakAwait("ยกเลิกแล้ว")
+                else confirmThenCall(candidates[choice].contact, null)
             }
         }
     }
 
-    private fun confirmThenCall(contact: ContactEntry, speakOverride: String?, onDone: () -> Unit) {
-        val confirmMsg = speakOverride?.ifBlank { null }
-            ?: "กำลังโทรหา ${contact.displayName}"
+    private suspend fun confirmThenCall(contact: ContactEntry, speakOverride: String?) {
+        val msg = speakOverride?.takeIf { it.isNotBlank() } ?: "กำลังโทรหา ${contact.displayName}"
         if (settings.confirmBeforeCall) {
-            tts.speak("$confirmMsg ยืนยันไหม") {
-                listenForSpeech(null) { answer ->
-                    if (isConfirmed(answer)) makeCall(contact, onDone)
-                    else tts.speak("ยกเลิกแล้ว") { onDone() }
-                }
-            }
+            tts.speakAwait("$msg ยืนยันไหม")
+            val answer = listenOnce(null)
+            if (isConfirmed(answer)) makeCall(contact)
+            else tts.speakAwait("ยกเลิกแล้ว")
         } else {
-            tts.speak(confirmMsg) { makeCall(contact, onDone) }
+            tts.speakAwait(msg)
+            makeCall(contact)
         }
     }
 
-    private fun askDisambig(candidates: List<MatchResult>, onChoice: (Int) -> Unit) {
+    private suspend fun askDisambig(candidates: List<MatchResult>): Int {
         val labels = listOf("คนแรก", "คนที่สอง", "คนที่สาม")
         val list = candidates.mapIndexed { i, m ->
             "${labels.getOrElse(i) { "คนที่ ${i + 1}" }} ${m.contact.displayName}"
         }.joinToString(", ")
-        tts.speak("พบหลายคน ได้แก่ $list พูด คนแรก คนที่สอง หรือ ยกเลิก") {
-            listenForSpeech(null) { ans ->
-                val lower = ans.trim()
-                val idx = when {
-                    lower.contains("แรก") || lower.contains("หนึ่ง") -> 0
-                    lower.contains("สอง") -> 1
-                    lower.contains("สาม") -> 2
-                    lower.contains("ยกเลิก") || lower.contains("cancel", ignoreCase = true) -> -1
-                    else -> -1
-                }
-                onChoice(idx)
-            }
+        tts.speakAwait("พบหลายคน ได้แก่ $list พูด คนแรก คนที่สอง หรือ ยกเลิก")
+        val ans = listenOnce(null).trim()
+        return when {
+            ans.contains("แรก") || ans.contains("หนึ่ง") -> 0
+            ans.contains("สอง") -> 1
+            ans.contains("สาม") -> 2
+            else -> -1
         }
     }
 
-    private fun makeCall(contact: ContactEntry, onDone: () -> Unit) {
+    private fun makeCall(contact: ContactEntry) {
         if (!hasPerm(Manifest.permission.CALL_PHONE)) {
-            tts.speak("ไม่มีสิทธิ์โทรออก") { onDone() }
+            scope.launch { tts.speakAwait("ไม่มีสิทธิ์โทรออก") }
             return
         }
-        try {
+        if (contact.phoneNumber.isBlank()) {
+            Log.w(TAG, "empty phone number for ${contact.displayName}"); return
+        }
+        runCatching {
             context.startActivity(
-                Intent(Intent.ACTION_CALL, Uri.parse("tel:${contact.phoneNumber}"))
+                Intent(Intent.ACTION_CALL, Uri.parse("tel:${Uri.encode(contact.phoneNumber)}"))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
-        } catch (e: Exception) {
-            Log.e(TAG, "call failed", e)
-        }
-        onDone()
+        }.onFailure { Log.e(TAG, "call failed", it) }
     }
 
     // ─── YouTube ──────────────────────────────────────────────────────────────
 
-    private fun openYoutube(videoId: String?, query: String?) {
-        fun intent(uri: Uri) = Intent(Intent.ACTION_VIEW, uri)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    private fun openYoutube(videoId: String?, query: String?, entry: DebugEntry) {
+        fun view(uri: Uri) = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val pm = context.packageManager
 
-        if (!videoId.isNullOrBlank()) {
-            val ytUri = Uri.parse("vnd.youtube:$videoId")
-            val launched = runCatching {
-                if (intent(ytUri).resolveActivity(context.packageManager) != null) {
-                    context.startActivity(intent(ytUri)); true
-                } else false
-            }.getOrDefault(false)
-            if (!launched) {
-                context.startActivity(intent(Uri.parse("https://www.youtube.com/watch?v=$videoId")))
-            }
-        } else if (!query.isNullOrBlank()) {
-            val searchIntent = Intent(Intent.ACTION_SEARCH).apply {
-                setPackage("com.google.android.youtube")
-                putExtra("query", query)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            val launched = runCatching {
-                if (searchIntent.resolveActivity(context.packageManager) != null) {
-                    context.startActivity(searchIntent); true
-                } else false
-            }.getOrDefault(false)
-            if (!launched) {
-                context.startActivity(
-                    intent(Uri.parse("https://www.youtube.com/results?search_query=${Uri.encode(query)}"))
-                )
-            }
+        val safeId = videoId?.takeIf { YOUTUBE_ID.matches(it) }
+        if (safeId != null) {
+            val app = view(Uri.parse("vnd.youtube:$safeId"))
+            val web = view(Uri.parse("https://www.youtube.com/watch?v=$safeId"))
+            val target = if (app.resolveActivity(pm) != null) app else web
+            runCatching { context.startActivity(target) }
+                .onFailure { entry.error = "youtube launch failed" }
+            return
         }
+        if (videoId != null && !YOUTUBE_ID.matches(videoId)) {
+            Log.w(TAG, "rejected malformed videoId: $videoId")
+        }
+        val q = query?.takeIf { it.isNotBlank() } ?: return
+        val search = Intent(Intent.ACTION_SEARCH).apply {
+            setPackage("com.google.android.youtube")
+            putExtra("query", q)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val target = if (search.resolveActivity(pm) != null) search
+            else view(Uri.parse("https://www.youtube.com/results?search_query=${Uri.encode(q)}"))
+        runCatching { context.startActivity(target) }
+            .onFailure { entry.error = "youtube search failed" }
     }
 
     // ─── FM radio ────────────────────────────────────────────────────────────
 
     private fun startFm(streamUrl: String, label: String) {
-        context.startService(
-            Intent(context, FmPlayerService::class.java)
-                .setAction(FmPlayerService.ACTION_PLAY)
-                .putExtra(FmPlayerService.EXTRA_STREAM_URL, streamUrl)
-                .putExtra(FmPlayerService.EXTRA_LABEL, label)
-        )
+        val intent = Intent(context, FmPlayerService::class.java)
+            .setAction(FmPlayerService.ACTION_PLAY)
+            .putExtra(FmPlayerService.EXTRA_STREAM_URL, streamUrl)
+            .putExtra(FmPlayerService.EXTRA_LABEL, label)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
     }
 
     // ─── Audio helpers ────────────────────────────────────────────────────────
 
-    private fun playTing(onDone: () -> Unit) {
-        handler.post {
-            runCatching {
-                val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 80)
-                tone.startTone(ToneGenerator.TONE_PROP_BEEP, 180)
-                handler.postDelayed({ runCatching { tone.release() }; onDone() }, 300)
-            }.onFailure { onDone() }
+    private suspend fun playTing() {
+        runCatching {
+            val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 80)
+            tone.startTone(ToneGenerator.TONE_PROP_BEEP, 180)
+            delay(240)
+            tone.release()
         }
     }
 
-    private fun listenForSpeech(entry: DebugEntry?, onResult: (String) -> Unit) {
-        handler.post {
+    private suspend fun connectSco(timeoutMs: Long): Boolean =
+        suspendCancellableCoroutine { cont ->
+            btRouter.connect(timeoutMs) { ok ->
+                if (cont.isActive) cont.resume(ok)
+            }
+            cont.invokeOnCancellation { runCatching { btRouter.disconnect() } }
+        }
+
+    private suspend fun listenOnce(entry: DebugEntry?): String =
+        suspendCancellableCoroutine { cont ->
             recognizer?.destroy()
-            recognizer = SpeechRecognizer.createSpeechRecognizer(context)
-            recognizer?.setRecognitionListener(object : RecognitionListener {
+            val rec = SpeechRecognizer.createSpeechRecognizer(context)
+            recognizer = rec
+            val resumed = AtomicBoolean(false)
+
+            rec.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(p: Bundle?) {}
                 override fun onBeginningOfSpeech() {}
                 override fun onRmsChanged(r: Float) {}
@@ -293,23 +312,18 @@ class VoiceCommandPipeline(
                 }
 
                 override fun onResults(results: Bundle?) {
+                    if (!resumed.compareAndSet(false, true)) return
                     val text = results
                         ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         ?.firstOrNull() ?: ""
-                    onResult(text)
+                    if (cont.isActive) cont.resume(text)
                 }
 
                 override fun onError(error: Int) {
+                    if (!resumed.compareAndSet(false, true)) return
                     Log.w(TAG, "STT error $error")
-                    val msg = when (error) {
-                        SpeechRecognizer.ERROR_NO_MATCH,
-                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "ไม่ได้ยินเสียง"
-                        SpeechRecognizer.ERROR_AUDIO -> "ข้อผิดพลาดไมโครโฟน"
-                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "ระบบรับเสียงยุ่ง"
-                        else -> "ข้อผิดพลาด"
-                    }
-                    if (entry != null) entry.error = "STT $error: $msg"
-                    tts.speak(msg) { finish() }
+                    entry?.error = "STT $error"
+                    if (cont.isActive) cont.resume("")
                 }
             })
 
@@ -322,9 +336,19 @@ class VoiceCommandPipeline(
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             }
-            recognizer?.startListening(intent)
+            runCatching { rec.startListening(intent) }.onFailure { err ->
+                if (resumed.compareAndSet(false, true) && cont.isActive) {
+                    entry?.error = "STT start failed: ${err.message}"
+                    cont.resume("")
+                }
+            }
+
+            cont.invokeOnCancellation {
+                runCatching { rec.cancel() }
+                runCatching { rec.destroy() }
+                if (recognizer === rec) recognizer = null
+            }
         }
-    }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -335,12 +359,25 @@ class VoiceCommandPipeline(
                t.contains("เลย") || t.contains("ได้")
     }
 
-    private fun finish() { stop(); onFinished() }
+    private fun finish() {
+        if (!finished.compareAndSet(false, true)) return
+        cleanup()
+        onFinished()
+    }
 
     fun stop() {
-        handler.post { recognizer?.destroy(); recognizer = null }
-        btRouter.disconnect()
-        tts.stop()
+        if (finished.getAndSet(true)) return
+        runJob?.cancel()
+        cleanup()
+    }
+
+    private fun cleanup() {
+        runCatching { recognizer?.cancel() }
+        runCatching { recognizer?.destroy() }
+        recognizer = null
+        runCatching { btRouter.disconnect() }
+        runCatching { tts.stop() }
+        scope.cancel()
     }
 
     private fun hasPerm(p: String) =

@@ -35,7 +35,8 @@
                 android:layout_height="36dp"
                 android:text="📋"
                 android:textSize="18sp"
-                android:textColor="@color/white" />
+                android:textColor="@color/white"
+                android:contentDescription="@string/cd_debug_log" />
 
             <Button
                 android:id="@+id/btnSettings"
@@ -44,7 +45,8 @@
                 android:layout_height="36dp"
                 android:text="⚙️"
                 android:textSize="18sp"
-                android:textColor="@color/white" />
+                android:textColor="@color/white"
+                android:contentDescription="@string/cd_settings" />
 
         </LinearLayout>
 
