@@ -4,8 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.AudioManager
-import android.media.ToneGenerator
 import android.net.Uri
 import android.os.Bundle
 import android.speech.RecognitionListener
@@ -15,6 +13,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import com.moto.voice.actions.MediaStopper
 import com.moto.voice.audio.BluetoothAudioRouter
+import com.moto.voice.audio.Earcon
 import com.moto.voice.audio.PhoneStateGuard
 import com.moto.voice.contacts.ContactEntry
 import com.moto.voice.contacts.ContactMatcher
@@ -27,6 +26,7 @@ import com.moto.voice.media.FmPlayerService
 import com.moto.voice.network.WebhookClient
 import com.moto.voice.network.WebhookResponse
 import com.moto.voice.nlu.LocalIntercept
+import com.moto.voice.nlu.NumberWordParser
 import com.moto.voice.recognition.CommandParser
 import com.moto.voice.recognition.VoiceCommand
 import com.moto.voice.tts.ThaiTTS
@@ -35,7 +35,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.atomic.AtomicBoolean
@@ -77,20 +76,28 @@ class VoiceCommandPipeline(
             finish(); return
         }
 
-        val scoOk = if (hasPerm(Manifest.permission.BLUETOOTH_CONNECT)) {
+        val hasBt = hasPerm(Manifest.permission.BLUETOOTH_CONNECT)
+        val scoOk = if (hasBt) {
             connectSco(3_000L).also {
                 entry.scoTimeMs = System.currentTimeMillis() - t0
                 Log.d(TAG, "SCO: $it in ${entry.scoTimeMs}ms")
             }
         } else false
 
+        // Tell the rider we're falling back to the phone mic — but only when we tried and
+        // failed. Skip the announcement entirely when there's no BT permission (no helmet expected).
+        if (hasBt && !scoOk) {
+            tts.speakAwait("ใช้ไมค์โทรศัพท์")
+        }
+
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             entry.error = "no speech recognition service"
+            Earcon.error()
             speakAndRemember("อุปกรณ์ไม่รองรับการรับเสียง")
             finish(); return
         }
 
-        playTing()
+        Earcon.ready()
 
         val t1 = System.currentTimeMillis()
         val text = listenOnce(entry)
@@ -98,9 +105,12 @@ class VoiceCommandPipeline(
         entry.sttFinal = text
 
         if (text.isBlank()) {
+            Earcon.error()
             speakAndRemember("ไม่ได้ยินเสียง")
             finish(); return
         }
+
+        Earcon.end()
 
         // Local intercept ALWAYS runs before webhook — offline-first, sub-second response.
         when (val intercept = LocalIntercept.match(text)) {
@@ -182,15 +192,7 @@ class VoiceCommandPipeline(
                 val name = resp.contact?.takeIf { it.isNotBlank() } ?: resp.speak
                 handleCallByName(name, resp.speak)
             }
-            "youtube_play" -> {
-                // Sprint 3 will add picker (settings.askBeforeYoutube). For now open first result.
-                val id = resp.videoId?.takeIf { YOUTUBE_ID.matches(it) }
-                    ?: resp.videos?.firstOrNull()?.id?.takeIf { YOUTUBE_ID.matches(it) }
-                val title = resp.videoTitle ?: resp.videos?.firstOrNull()?.title
-                val spoken = resp.speak.ifBlank { title?.let { "กำลังเปิด $it" } ?: "กำลังเปิด YouTube" }
-                speakAndRemember(spoken)
-                openYoutube(id, resp.query, entry)
-            }
+            "youtube_play" -> handleYoutube(resp, entry)
             "fm" -> {
                 if (!resp.streamUrl.isNullOrBlank()) {
                     val name = resp.stationName ?: resp.frequency?.let { "FM $it" } ?: "วิทยุ"
@@ -262,11 +264,9 @@ class VoiceCommandPipeline(
             "${labels.getOrElse(i) { "คนที่ ${i + 1}" }} ${m.contact.displayName}"
         }.joinToString(", ")
         speakAndRemember("พบหลายคน ได้แก่ $list พูด คนแรก คนที่สอง หรือ ยกเลิก")
-        val ans = listenOnce(null).trim()
-        return when {
-            ans.contains("แรก") || ans.contains("หนึ่ง") -> 0
-            ans.contains("สอง") -> 1
-            ans.contains("สาม") -> 2
+        val ans = listenOnce(null)
+        return when (val c = NumberWordParser.parse(ans, candidates.size)) {
+            is NumberWordParser.Choice.Index -> c.zeroBased
             else -> -1
         }
     }
@@ -289,6 +289,78 @@ class VoiceCommandPipeline(
     }
 
     // ─── YouTube ──────────────────────────────────────────────────────────────
+
+    private suspend fun handleYoutube(resp: WebhookResponse, entry: DebugEntry) {
+        val candidates = collectYoutubeCandidates(resp)
+        val autoPick = !settings.askBeforeYoutube || candidates.size <= 1
+
+        val chosen = if (autoPick) candidates.firstOrNull()
+            else pickYoutubeFromCandidates(candidates, entry)
+
+        if (chosen == null) {
+            val spoken = resp.speak.ifBlank { "ไม่พบวิดีโอ ลองพูดชื่อเพลงอีกที" }
+            speakAndRemember(spoken)
+            // Nothing to launch — but if we have a query, fall back to search.
+            if (!resp.query.isNullOrBlank()) openYoutube(null, resp.query, entry)
+            return
+        }
+
+        val spoken = when {
+            resp.speak.isNotBlank() -> resp.speak
+            chosen.title.isNotBlank() -> "กำลังเปิด ${chosen.title}"
+            else -> "กำลังเปิด YouTube"
+        }
+        speakAndRemember(spoken)
+        openYoutube(chosen.id, resp.query, entry)
+    }
+
+    /** Merge legacy video_id/video_title with the newer videos[] into a single list, deduped, valid ids only. */
+    private fun collectYoutubeCandidates(resp: WebhookResponse): List<WebhookResponse.Video> {
+        val out = linkedMapOf<String, WebhookResponse.Video>()
+        resp.videoId
+            ?.takeIf { YOUTUBE_ID.matches(it) }
+            ?.let { out[it] = WebhookResponse.Video(it, resp.videoTitle ?: "") }
+        resp.videos?.forEach { v ->
+            if (v.id.isNotBlank() && YOUTUBE_ID.matches(v.id) && !out.containsKey(v.id)) out[v.id] = v
+        }
+        return out.values.toList()
+    }
+
+    /**
+     * Spec §4 YouTube picker:
+     *   - TTS reads titles of up to 3 candidates.
+     *   - Listens for หนึ่ง/สอง/สาม/อันแรก/อันสุดท้าย/ยกเลิก, up to 2 rounds.
+     *   - Silence or unparseable answer twice → default to first + "เปิดอันแรกให้นะครับ".
+     *   - No dead-end silence: always speaks before returning.
+     */
+    private suspend fun pickYoutubeFromCandidates(
+        candidates: List<WebhookResponse.Video>, entry: DebugEntry
+    ): WebhookResponse.Video? {
+        val top = candidates.take(3)
+        if (top.isEmpty()) return null
+
+        val labels = listOf("หนึ่ง", "สอง", "สาม")
+        val menuText = "เจอ ${top.size} รายการ " + top.mapIndexed { i, v ->
+            "${labels[i]} ${v.title}"
+        }.joinToString(" ") + " เอาอันไหนดี"
+
+        repeat(2) { attempt ->
+            speakAndRemember(if (attempt == 0) menuText else "ไม่ชัดครับ ลองอีกที $menuText")
+            val ans = listenOnce(entry)
+            when (val choice = NumberWordParser.parse(ans, top.size)) {
+                is NumberWordParser.Choice.Index -> return top[choice.zeroBased]
+                NumberWordParser.Choice.Cancel -> {
+                    speakAndRemember("ยกเลิกแล้ว")
+                    return null
+                }
+                NumberWordParser.Choice.None -> Unit  // ask again next iteration
+            }
+        }
+
+        // Default per spec: open first + tell the rider we did.
+        speakAndRemember("เปิดอันแรกให้นะครับ")
+        return top.first()
+    }
 
     private fun openYoutube(videoId: String?, query: String?, entry: DebugEntry) {
         fun view(uri: Uri) = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -330,15 +402,6 @@ class VoiceCommandPipeline(
     }
 
     // ─── Audio helpers ────────────────────────────────────────────────────────
-
-    private suspend fun playTing() {
-        runCatching {
-            val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 80)
-            tone.startTone(ToneGenerator.TONE_PROP_BEEP, 180)
-            delay(240)
-            tone.release()
-        }
-    }
 
     private suspend fun connectSco(timeoutMs: Long): Boolean =
         suspendCancellableCoroutine { cont ->
