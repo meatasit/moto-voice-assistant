@@ -48,4 +48,22 @@ class LocalInterceptTest {
         assertEquals("stop please", LocalIntercept.normalize("STOP Please"))
 
     @Test fun helpTextIsNotBlank() = assertTrue(LocalIntercept.HELP_TEXT.isNotBlank())
+
+    // ── Regression tests for phrase-boundary matching bug (Sprint 2) ────────
+    // These caught the "ปิดวิทยุ" substring appearing inside "เปิดวิทยุ".
+
+    @Test fun openRadioDoesNotTriggerStop() =
+        assertSame(LocalIntercept.Intercept.ResumeLastRadio, LocalIntercept.match("เปิดวิทยุ"))
+
+    @Test fun openRadioWithFrequencyGoesToWebhook() =
+        assertSame(LocalIntercept.Intercept.None, LocalIntercept.match("เปิดวิทยุ 91.5"))
+
+    @Test fun stopMusicMatches() =
+        assertSame(LocalIntercept.Intercept.Stop, LocalIntercept.match("ปิดเพลง"))
+
+    @Test fun openMusicDoesNotTriggerStop() =
+        assertSame(LocalIntercept.Intercept.None, LocalIntercept.match("เปิดเพลง"))
+
+    @Test fun callBackWithSuffix() =
+        assertSame(LocalIntercept.Intercept.CallBackLast, LocalIntercept.match("โทรกลับหน่อย"))
 }

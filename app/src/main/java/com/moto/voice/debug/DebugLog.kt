@@ -34,7 +34,7 @@ data class DebugEntry(
 }
 
 object DebugLog {
-    private const val MAX = 30
+    private const val MAX = 50  // spec §9
     private val list = CopyOnWriteArrayList<DebugEntry>()
     private val gson = GsonBuilder().setPrettyPrinting().create()
 

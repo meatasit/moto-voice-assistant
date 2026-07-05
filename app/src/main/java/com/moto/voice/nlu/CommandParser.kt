@@ -1,5 +1,10 @@
-package com.moto.voice.recognition
+package com.moto.voice.nlu
 
+/**
+ * Rule-based Thai command parser — the offline fallback when the LLM webhook is
+ * unreachable. Only handles the "call" verb today; add more sealed variants + regex
+ * patterns here if you need to grow it.
+ */
 sealed class VoiceCommand {
     data class Call(val name: String) : VoiceCommand()
 }
