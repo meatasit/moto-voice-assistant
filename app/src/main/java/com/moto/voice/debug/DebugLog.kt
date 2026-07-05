@@ -19,6 +19,8 @@ data class DebugEntry(
     var webhookTimeMs: Long = 0,
     var actionTimeMs: Long = 0,
     var error: String? = null,
+    /** How the pipeline finished. See [FinishReason]. Populated near the end of runPipeline. */
+    var finishReason: String? = null,
 ) {
     fun time(): String = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date(timestamp))
 
@@ -29,8 +31,27 @@ data class DebugEntry(
         if (sttTimeMs > 0) append("  STT:${sttTimeMs}ms")
         if (webhookTimeMs > 0) append("  WH:${webhookTimeMs}ms")
         if (actionTimeMs > 0) append("  ACT:${actionTimeMs}ms")
+        if (finishReason != null) append("  end:${finishReason}")
         if (error != null) append("  ⚠️ $error")
     }
+}
+
+/**
+ * String constants for [DebugEntry.finishReason] — kept as plain strings (not an enum)
+ * so the JSON export stays human-readable and stable across refactors.
+ */
+object FinishReason {
+    const val OK = "ok"
+    const val TIMEOUT_FALLBACK = "timeout_fallback"
+    const val HTTP_401 = "http_401"
+    const val HTTP_OTHER = "http_other"
+    const val NETWORK = "network"
+    const val OFFLINE_RULE = "offline_rule"
+    const val NO_SPEECH = "no_speech"
+    const val PHONE_UNAVAILABLE = "phone_unavailable"
+    const val INTERCEPTED = "intercepted"
+    const val LLM_OFF = "llm_off"
+    const val PARSE_ERROR = "parse_error"
 }
 
 object DebugLog {

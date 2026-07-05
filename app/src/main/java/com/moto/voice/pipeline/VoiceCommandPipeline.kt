@@ -26,6 +26,8 @@ import com.moto.voice.data.HistoryEntry
 import com.moto.voice.data.OfflineNotifier
 import com.moto.voice.debug.DebugEntry
 import com.moto.voice.debug.DebugLog
+import com.moto.voice.debug.FinishReason
+import com.moto.voice.nlu.ErrorSpeech
 import com.moto.voice.media.FmPlayerService
 import com.moto.voice.network.WebhookClient
 import com.moto.voice.network.WebhookResponse
@@ -83,6 +85,7 @@ class VoiceCommandPipeline(
         val availability = PhoneStateGuard.availability(context)
         if (availability != PhoneStateGuard.Availability.Available) {
             entry.error = "phone unavailable: $availability"
+            entry.finishReason = FinishReason.PHONE_UNAVAILABLE
             speakAndRemember(PhoneStateGuard.reasonText(availability))
             finish(); return
         }
@@ -117,7 +120,8 @@ class VoiceCommandPipeline(
 
         if (text.isBlank()) {
             Earcon.error()
-            speakAndRemember("ไม่ได้ยินเสียง")
+            entry.finishReason = FinishReason.NO_SPEECH
+            speakAndRemember(ErrorSpeech.NOT_HEARD_GIVING_UP)
             finish(); return
         }
 
@@ -146,6 +150,7 @@ class VoiceCommandPipeline(
 
     private suspend fun handleIntercept(intercept: LocalIntercept.Intercept, entry: DebugEntry) {
         entry.webhookRequest = "[intercepted: ${intercept::class.simpleName}]"
+        entry.finishReason = FinishReason.INTERCEPTED
         when (intercept) {
             LocalIntercept.Intercept.Stop -> {
                 MediaStopper.stopAny(context)
@@ -185,11 +190,25 @@ class VoiceCommandPipeline(
         entry.webhookRequest = text
         val useWebhook = settings.llmMode && settings.webhookUrl.isNotBlank()
         if (!useWebhook) {
+            entry.finishReason = FinishReason.LLM_OFF
             executeRuleBased(text, entry); return
         }
 
+        // Progress markers so the rider knows we didn't hang. Fire at most once each.
+        val progress1Spoken = AtomicBoolean(false)
+        val progress2Spoken = AtomicBoolean(false)
+
         val client = WebhookClient(settings.webhookUrl, settings.authToken, settings.timeoutSeconds)
-        val result = client.call(text)
+        val result = client.call(text) { elapsed ->
+            when {
+                elapsed <= 5_000L && progress1Spoken.compareAndSet(false, true) -> {
+                    speakAndRemember(ErrorSpeech.THINKING)
+                }
+                elapsed > 5_000L && progress2Spoken.compareAndSet(false, true) -> {
+                    speakAndRemember(ErrorSpeech.ONE_MORE_MOMENT)
+                }
+            }
+        }
         entry.webhookResponse = result.rawJson
         entry.webhookTimeMs = result.elapsedMs
 
@@ -199,13 +218,59 @@ class VoiceCommandPipeline(
                 val t2 = System.currentTimeMillis()
                 executeWebhookAction(result.response, entry)
                 entry.actionTimeMs = System.currentTimeMillis() - t2
+                entry.finishReason = FinishReason.OK
                 finish()
             }
-            is WebhookClient.Result.Failure -> {
-                entry.error = result.error
-                Log.w(TAG, "webhook failed: ${result.error}")
-                // Announce offline only ONCE per outage — spec §7.
-                if (OfflineNotifier.shouldAnnounce()) speakAndRemember("โหมดออฟไลน์")
+            is WebhookClient.Result.Failure -> handleWebhookFailure(text, entry, result)
+        }
+    }
+
+    /**
+     * Per §1.4 / §6.2 / §6.3: pick a rider-informative TTS line based on the failure
+     * type. For each failure we EITHER (a) speak the diagnostic then run rule-based
+     * fallback for the parts we still can, OR (b) speak a self-contained line and stop
+     * — never back-to-back diagnostics because the rider is on a bike and every extra
+     * second matters. Never silent.
+     */
+    private suspend fun handleWebhookFailure(
+        text: String, entry: DebugEntry, result: WebhookClient.Result.Failure
+    ) {
+        entry.error = "${result.kind}:${result.error}"
+        Log.w(TAG, "webhook ${result.kind}: ${result.error}")
+
+        val ruleMatches = CommandParser.parse(text) != null
+        val stopMatches = LocalIntercept.match(text) is LocalIntercept.Intercept.Stop
+        val canFallBack = ruleMatches || stopMatches
+
+        entry.finishReason = when (result.kind) {
+            WebhookClient.Kind.Timeout -> FinishReason.TIMEOUT_FALLBACK
+            WebhookClient.Kind.Http401 -> FinishReason.HTTP_401
+            WebhookClient.Kind.HttpOther -> FinishReason.HTTP_OTHER
+            WebhookClient.Kind.Network -> FinishReason.NETWORK
+            WebhookClient.Kind.Parse -> FinishReason.PARSE_ERROR
+        }
+
+        when (result.kind) {
+            WebhookClient.Kind.Timeout -> {
+                if (canFallBack) {
+                    speakAndRemember(ErrorSpeech.TIMEOUT_WITH_FALLBACK)
+                    executeRuleBased(text, entry)  // executes the matched intent, no "ไม่เข้าใจ" branch
+                } else {
+                    speakAndRemember(ErrorSpeech.TIMEOUT_NO_FALLBACK)
+                    finish()
+                }
+            }
+            WebhookClient.Kind.Http401 -> {
+                // Auth issue can't be worked around by rules; give the rider one clear line.
+                speakAndRemember(ErrorSpeech.HTTP_401)
+                finish()
+            }
+            WebhookClient.Kind.HttpOther -> {
+                speakAndRemember(ErrorSpeech.HTTP_OTHER)
+                if (canFallBack) executeRuleBased(text, entry) else finish()
+            }
+            WebhookClient.Kind.Network, WebhookClient.Kind.Parse -> {
+                if (OfflineNotifier.shouldAnnounce()) speakAndRemember(ErrorSpeech.OFFLINE_LIMITED)
                 executeRuleBased(text, entry)
             }
         }

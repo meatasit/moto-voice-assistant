@@ -16,8 +16,10 @@ class AppSettings(context: Context) {
         private const val SECURE_PREFS_FALLBACK = "moto_voice_secure_fb"
         const val DEFAULT_WEBHOOK_URL = "https://n8n.nodes-core.com/webhook/Javis"
         const val DEFAULT_TOKEN = "meatasit"
-        /** Icecast streams + slow n8n cold-starts need generous headroom; 15s per spec. */
+        /** Icecast streams + slow n8n cold-starts need generous headroom; 15s per spec §1.1. */
         const val DEFAULT_TIMEOUT = 15
+        const val MIN_TIMEOUT = 5
+        const val MAX_TIMEOUT = 30
         const val MIN_TTS_RATE = 0.8f
         const val MAX_TTS_RATE = 1.5f
         const val DEFAULT_TTS_RATE = 1.0f
@@ -55,10 +57,10 @@ class AppSettings(context: Context) {
     }
 
     private fun migrateLegacyDefaults() {
-        // If an old install had a short (≤ 10s) timeout from previous defaults, bump
-        // it. Users who deliberately set 12s or higher keep whatever they set.
+        // If an old install had a short timeout from previous defaults (< MIN),
+        // bump to the new default. Users who set a value within range keep theirs.
         val currentTimeout = prefs.getInt("timeout", DEFAULT_TIMEOUT)
-        if (currentTimeout < DEFAULT_TIMEOUT) {
+        if (currentTimeout < MIN_TIMEOUT) {
             prefs.edit().putInt("timeout", DEFAULT_TIMEOUT).apply()
         }
         // Preseed the auth token if the store is empty (fresh install or previous
@@ -78,8 +80,8 @@ class AppSettings(context: Context) {
         set(v) { secure.edit().putString("auth_token", v).apply() }
 
     var timeoutSeconds: Int
-        get() = prefs.getInt("timeout", DEFAULT_TIMEOUT).coerceIn(1, 30)
-        set(v) { prefs.edit().putInt("timeout", v.coerceIn(1, 30)).apply() }
+        get() = prefs.getInt("timeout", DEFAULT_TIMEOUT).coerceIn(MIN_TIMEOUT, MAX_TIMEOUT)
+        set(v) { prefs.edit().putInt("timeout", v.coerceIn(MIN_TIMEOUT, MAX_TIMEOUT)).apply() }
 
     var llmMode: Boolean
         get() = prefs.getBoolean("llm_mode", true)
