@@ -39,6 +39,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.atomic.AtomicBoolean
@@ -46,7 +47,12 @@ import kotlin.coroutines.resume
 
 private const val TAG = "VoiceCommandPipeline"
 private const val HIGH_CONF = 0.75f
-private val YOUTUBE_ID = Regex("^[A-Za-z0-9_-]{11}$")
+/** Extract 11-char YouTube video id from anywhere in the string (bare id, URL, whatever). */
+private val YOUTUBE_ID_EXTRACT = Regex("([A-Za-z0-9_-]{11})")
+private val YOUTUBE_STRIP_PREFIXES = listOf(
+    "เปิดยูทูป", "เปิดยูทูบ", "เปิด youtube", "เปิด yt", "เปิดเพลง",
+    "ยูทูป", "ยูทูบ", "youtube", "เพลง",
+)
 
 class VoiceCommandPipeline(
     private val context: Context,
@@ -328,34 +334,72 @@ class VoiceCommandPipeline(
         val chosen = if (autoPick) candidates.firstOrNull()
             else pickYoutubeFromCandidates(candidates, entry)
 
-        if (chosen == null) {
-            val spoken = resp.speak.ifBlank { "ไม่พบวิดีโอ ลองพูดชื่อเพลงอีกที" }
+        if (chosen != null) {
+            val spoken = when {
+                resp.speak.isNotBlank() -> resp.speak
+                chosen.title.isNotBlank() -> "กำลังเปิด ${chosen.title}"
+                else -> "กำลังเปิด YouTube"
+            }
             speakAndRemember(spoken)
-            // Nothing to launch — but if we have a query, fall back to search.
-            if (!resp.query.isNullOrBlank()) openYoutube(null, resp.query, entry)
+            openYoutube(chosen.id, resp.query, entry)
+            recordHistory(HistoryAction.YoutubeOpen(chosen.id, chosen.title))
             return
         }
 
-        val spoken = when {
-            resp.speak.isNotBlank() -> resp.speak
-            chosen.title.isNotBlank() -> "กำลังเปิด ${chosen.title}"
-            else -> "กำลังเปิด YouTube"
+        // No usable video id from the webhook — but we should never dead-end silent.
+        // Prefer the webhook's own query, then fall back to what the rider actually said
+        // (stripped of "เปิด YouTube" filler words) so YouTube search still opens.
+        val fallbackQuery = resp.query?.takeIf { it.isNotBlank() }
+            ?: stripYoutubeFillerFromHeard(heardText).takeIf { it.isNotBlank() }
+
+        if (fallbackQuery != null) {
+            val spoken = resp.speak.ifBlank { "กำลังค้นหา $fallbackQuery" }
+            speakAndRemember(spoken)
+            openYoutube(null, fallbackQuery, entry)
+            recordHistory(HistoryAction.YoutubeOpen("", fallbackQuery))
+        } else {
+            speakAndRemember(resp.speak.ifBlank { "ไม่พบวิดีโอ ลองพูดชื่อเพลงอีกที" })
         }
-        speakAndRemember(spoken)
-        openYoutube(chosen.id, resp.query, entry)
-        recordHistory(HistoryAction.YoutubeOpen(chosen.id, chosen.title))
     }
 
-    /** Merge legacy video_id/video_title with the newer videos[] into a single list, deduped, valid ids only. */
+    /**
+     * Merge legacy video_id/video_title with the newer videos[] into a single deduped list.
+     * IDs may arrive as bare 11-char ids OR embedded in URLs like "https://youtu.be/xxx" —
+     * we extract the id in both cases.
+     */
     private fun collectYoutubeCandidates(resp: WebhookResponse): List<WebhookResponse.Video> {
         val out = linkedMapOf<String, WebhookResponse.Video>()
-        resp.videoId
-            ?.takeIf { YOUTUBE_ID.matches(it) }
-            ?.let { out[it] = WebhookResponse.Video(it, resp.videoTitle ?: "") }
+        extractYoutubeId(resp.videoId)?.let {
+            out[it] = WebhookResponse.Video(it, resp.videoTitle ?: "")
+        }
         resp.videos?.forEach { v ->
-            if (v.id.isNotBlank() && YOUTUBE_ID.matches(v.id) && !out.containsKey(v.id)) out[v.id] = v
+            val id = extractYoutubeId(v.id)
+            if (id != null && !out.containsKey(id)) out[id] = v.copy(id = id)
         }
         return out.values.toList()
+    }
+
+    /** Return the first 11-char alphanumeric-with-_- token found in [raw], or null. */
+    private fun extractYoutubeId(raw: String?): String? {
+        val s = raw?.trim() ?: return null
+        if (s.isEmpty()) return null
+        return YOUTUBE_ID_EXTRACT.find(s)?.value
+    }
+
+    /** Strip "เปิด YouTube / เปิดเพลง / ..." prefixes so the remainder is a searchable query. */
+    private fun stripYoutubeFillerFromHeard(raw: String): String {
+        var s = raw.trim().lowercase()
+        var changed = true
+        while (changed) {
+            changed = false
+            for (pfx in YOUTUBE_STRIP_PREFIXES) {
+                if (s.startsWith(pfx)) {
+                    s = s.substring(pfx.length).trim()
+                    changed = true
+                }
+            }
+        }
+        return s
     }
 
     /**
@@ -444,12 +488,37 @@ class VoiceCommandPipeline(
             cont.invokeOnCancellation { runCatching { btRouter.disconnect() } }
         }
 
-    private suspend fun listenOnce(entry: DebugEntry?): String =
+    /**
+     * Listen once with automatic single retry on transient recognizer errors.
+     * After TTS finishes the audio route needs a beat to switch back to mic — without
+     * that beat the second-round STT (call confirmation / disambig / YouTube picker)
+     * would fire ERROR_RECOGNIZER_BUSY or ERROR_CLIENT immediately and we'd treat it
+     * as silence → auto-cancel. See bug report §1.
+     */
+    private suspend fun listenOnce(entry: DebugEntry?): String {
+        // Small settle delay so TTS audio can fully drain and the recognizer isn't
+        // still holding the mic from a previous session.
+        delay(350)
+        val first = listenOnceRaw(entry, isRetry = false)
+        if (first.text.isNotBlank()) return first.text
+        // Only retry when the failure was a transient recognizer error, not real silence.
+        if (first.wasTransientError) {
+            Log.d(TAG, "STT transient error — retrying once")
+            delay(400)
+            return listenOnceRaw(entry, isRetry = true).text
+        }
+        return first.text
+    }
+
+    private data class SttOutcome(val text: String, val wasTransientError: Boolean)
+
+    private suspend fun listenOnceRaw(entry: DebugEntry?, isRetry: Boolean): SttOutcome =
         suspendCancellableCoroutine { cont ->
             recognizer?.destroy()
             val rec = SpeechRecognizer.createSpeechRecognizer(context)
             recognizer = rec
             val resumed = AtomicBoolean(false)
+            val startedAt = System.currentTimeMillis()
 
             rec.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(p: Bundle?) {}
@@ -472,14 +541,22 @@ class VoiceCommandPipeline(
                     val text = results
                         ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         ?.firstOrNull() ?: ""
-                    if (cont.isActive) cont.resume(text)
+                    if (cont.isActive) cont.resume(SttOutcome(text, wasTransientError = false))
                 }
 
                 override fun onError(error: Int) {
                     if (!resumed.compareAndSet(false, true)) return
-                    Log.w(TAG, "STT error $error")
+                    Log.w(TAG, "STT error $error after ${System.currentTimeMillis() - startedAt}ms")
                     entry?.error = "STT $error"
-                    if (cont.isActive) cont.resume("")
+                    // If it errored within 800ms it almost certainly never actually listened —
+                    // classify as transient so the outer layer can retry once.
+                    val transient = !isRetry && (System.currentTimeMillis() - startedAt) < 800 && error in setOf(
+                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
+                        SpeechRecognizer.ERROR_CLIENT,
+                        SpeechRecognizer.ERROR_AUDIO,
+                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
+                    )
+                    if (cont.isActive) cont.resume(SttOutcome("", wasTransientError = transient))
                 }
             })
 
@@ -488,6 +565,9 @@ class VoiceCommandPipeline(
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "th-TH")
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
                 putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
+                // Force at least 3s of listening so the user has time to respond to
+                // confirmation prompts even if there's a moment of silence up front.
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 3_000L)
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
@@ -495,7 +575,7 @@ class VoiceCommandPipeline(
             runCatching { rec.startListening(intent) }.onFailure { err ->
                 if (resumed.compareAndSet(false, true) && cont.isActive) {
                     entry?.error = "STT start failed: ${err.message}"
-                    cont.resume("")
+                    cont.resume(SttOutcome("", wasTransientError = !isRetry))
                 }
             }
 
