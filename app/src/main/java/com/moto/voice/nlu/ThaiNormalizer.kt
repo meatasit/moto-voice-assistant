@@ -23,10 +23,8 @@ object ThaiNormalizer {
         var s = name.trim()
         for (prefix in PREFIXES) {
             if (s.startsWith(prefix, ignoreCase = true)) {
-                s = s.removePrefix(prefix).removePrefix(prefix.lowercase())
-                    .removePrefix(prefix.uppercase())
-                    .trim()
-                break  // only strip one — "คุณคุณ" is real (and rare, but valid input)
+                s = s.substring(prefix.length).trim()  // strip exactly once
+                break
             }
         }
         return s.lowercase()
