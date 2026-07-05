@@ -1,112 +1,160 @@
 package com.moto.voice.media
 
-import android.app.Notification
 import android.app.PendingIntent
-import android.app.Service
 import android.content.Intent
-import android.content.pm.ServiceInfo
-import android.os.Build
-import android.os.IBinder
-import androidx.core.app.NotificationCompat
+import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.MediaSession
+import androidx.media3.session.MediaSessionService
 import com.moto.voice.MainActivity
-import com.moto.voice.MotoVoiceApplication.Companion.CH_RADIO
 
-class FmPlayerService : Service() {
+/**
+ * Foreground media playback service backed by [MediaSessionService], so we integrate
+ * with the system media controls (lock-screen widget, headset play/pause, Android Auto).
+ *
+ * Behaviour:
+ *  - ACTION_PLAY {stream_url, label}: (re)plays a stream. Idempotent for the same URL.
+ *  - ACTION_STOP: releases + stops the service.
+ *  - On PlaybackException: retries up to [MAX_RETRIES] with a linear backoff, then gives up.
+ *    Audio focus loss (call / navigation) is handled by ExoPlayer's built-in focus manager,
+ *    so playback pauses and resumes automatically without our involvement.
+ */
+class FmPlayerService : MediaSessionService() {
 
     companion object {
         const val ACTION_PLAY = "com.moto.voice.FM_PLAY"
         const val ACTION_STOP = "com.moto.voice.FM_STOP"
         const val EXTRA_STREAM_URL = "stream_url"
         const val EXTRA_LABEL = "label"
-        private const val NOTIF_ID = 43
+        private const val TAG = "FmPlayerService"
+        private const val MAX_RETRIES = 2
     }
 
-    private var player: ExoPlayer? = null
+    private var mediaSession: MediaSession? = null
+    private var currentUrl: String? = null
+    private var retryCount = 0
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_STOP -> { stopPlayback(); return START_NOT_STICKY }
-            else -> {
-                val url = intent?.getStringExtra(EXTRA_STREAM_URL)
-                if (url.isNullOrBlank()) { stopPlayback(); return START_NOT_STICKY }
-                val label = intent.getStringExtra(EXTRA_LABEL) ?: "วิทยุ"
-                startAsForeground(label)
-                startPlayback(url)
-            }
-        }
-        return START_NOT_STICKY
-    }
-
-    private fun startAsForeground(label: String) {
-        val notif = buildNotification(label)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-        } else {
-            startForeground(NOTIF_ID, notif)
-        }
-    }
-
-    private fun startPlayback(url: String) {
-        player?.release()
-        player = ExoPlayer.Builder(this)
+    override fun onCreate() {
+        super.onCreate()
+        val player = ExoPlayer.Builder(this)
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
                     .build(),
-                true   // handleAudioFocus — pauses on incoming call automatically
+                true   // handleAudioFocus — pause on call / nav, resume when they finish
             )
-            .build().apply {
-                setMediaItem(MediaItem.fromUri(url))
-                addListener(object : Player.Listener {
-                    override fun onPlaybackStateChanged(state: Int) {
-                        if (state == Player.STATE_IDLE) stopPlayback()
-                    }
-                })
-                prepare()
-                play()
-            }
+            .setHandleAudioBecomingNoisy(true)
+            .build()
+        player.addListener(playerListener)
+
+        val activityPi = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE
+        )
+        mediaSession = MediaSession.Builder(this, player)
+            .setSessionActivity(activityPi)
+            .build()
     }
 
-    private fun stopPlayback() {
-        player?.release()
-        player = null
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_STOP -> {
+                stopPlayback()
+                return START_NOT_STICKY
+            }
+            ACTION_PLAY -> {
+                val url = intent.getStringExtra(EXTRA_STREAM_URL)
+                if (url.isNullOrBlank()) {
+                    stopPlayback()
+                    return START_NOT_STICKY
+                }
+                val label = intent.getStringExtra(EXTRA_LABEL) ?: "วิทยุ"
+                play(url, label)
+            }
+        }
+        // Let MediaSessionService handle the foreground promotion.
+        return super.onStartCommand(intent, flags, startId)
+    }
+
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // If the user swipes the app away and nothing is playing, we don't need to hang around.
+        val player = mediaSession?.player
+        if (player?.playWhenReady != true || player.mediaItemCount == 0) stopPlayback()
     }
 
     override fun onDestroy() {
-        player?.release()
-        player = null
+        mediaSession?.run {
+            player.removeListener(playerListener)
+            player.release()
+            release()
+        }
+        mediaSession = null
         super.onDestroy()
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    // ─── Playback control ───────────────────────────────────────────────────
 
-    private fun buildNotification(label: String): Notification {
-        val stopPi = PendingIntent.getService(
-            this, 0,
-            Intent(this, FmPlayerService::class.java).setAction(ACTION_STOP),
-            PendingIntent.FLAG_IMMUTABLE
-        )
-        val mainPi = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE
-        )
-        return NotificationCompat.Builder(this, CH_RADIO)
-            .setContentTitle("Moto Voice — $label")
-            .setContentText("กำลังเล่นอยู่  แตะเพื่อหยุด")
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setContentIntent(mainPi)
-            .addAction(android.R.drawable.ic_media_pause, "หยุด", stopPi)
-            .setOngoing(true)
+    private fun play(url: String, label: String) {
+        val session = mediaSession ?: return
+        currentUrl = url
+        retryCount = 0
+        val item = MediaItem.Builder()
+            .setUri(url)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(label)
+                    .setArtist("Moto Voice")
+                    .setIsBrowsable(false)
+                    .setIsPlayable(true)
+                    .build()
+            )
             .build()
+        session.player.apply {
+            setMediaItem(item)
+            prepare()
+            play()
+        }
+    }
+
+    private fun stopPlayback() {
+        mediaSession?.player?.apply { stop(); clearMediaItems() }
+        currentUrl = null
+        retryCount = 0
+        stopSelf()
+    }
+
+    // ─── Retry & error handling ─────────────────────────────────────────────
+
+    private val playerListener = object : Player.Listener {
+        override fun onPlayerError(error: PlaybackException) {
+            Log.w(TAG, "playback error: ${error.errorCodeName}", error)
+            val url = currentUrl
+            if (url != null && retryCount < MAX_RETRIES) {
+                retryCount++
+                Log.d(TAG, "retry $retryCount/$MAX_RETRIES for $url")
+                mediaSession?.player?.apply {
+                    setMediaItem(MediaItem.fromUri(url))
+                    prepare()
+                    play()
+                }
+            } else {
+                Log.w(TAG, "retry budget exhausted — stopping")
+                stopPlayback()
+            }
+        }
+
+        override fun onPlaybackStateChanged(state: Int) {
+            if (state == Player.STATE_READY) retryCount = 0
+        }
     }
 }

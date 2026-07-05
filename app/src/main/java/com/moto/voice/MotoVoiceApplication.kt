@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
+import com.moto.voice.bt.HelmetGreeter
 
 class MotoVoiceApplication : Application() {
 
@@ -12,9 +13,18 @@ class MotoVoiceApplication : Application() {
         const val CH_RADIO = "moto_voice_fm"
     }
 
+    private var greeter: HelmetGreeter? = null
+
     override fun onCreate() {
         super.onCreate()
         createChannels()
+        greeter = HelmetGreeter(this).also { it.start() }
+    }
+
+    override fun onTerminate() {
+        greeter?.stop()
+        greeter = null
+        super.onTerminate()
     }
 
     private fun createChannels() {

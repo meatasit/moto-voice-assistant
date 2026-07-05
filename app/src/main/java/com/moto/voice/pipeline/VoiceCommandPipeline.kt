@@ -20,6 +20,7 @@ import com.moto.voice.contacts.ContactMatcher
 import com.moto.voice.contacts.MatchResult
 import com.moto.voice.data.AppMemory
 import com.moto.voice.data.AppSettings
+import com.moto.voice.data.OfflineNotifier
 import com.moto.voice.debug.DebugEntry
 import com.moto.voice.debug.DebugLog
 import com.moto.voice.media.FmPlayerService
@@ -171,6 +172,7 @@ class VoiceCommandPipeline(
 
         when (result) {
             is WebhookClient.Result.Success -> {
+                OfflineNotifier.onWebhookSuccess()
                 val t2 = System.currentTimeMillis()
                 executeWebhookAction(result.response, entry)
                 entry.actionTimeMs = System.currentTimeMillis() - t2
@@ -179,7 +181,8 @@ class VoiceCommandPipeline(
             is WebhookClient.Result.Failure -> {
                 entry.error = result.error
                 Log.w(TAG, "webhook failed: ${result.error}")
-                speakAndRemember("โหมดออฟไลน์")
+                // Announce offline only ONCE per outage — spec §7.
+                if (OfflineNotifier.shouldAnnounce()) speakAndRemember("โหมดออฟไลน์")
                 executeRuleBased(text, entry)
             }
         }

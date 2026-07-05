@@ -72,11 +72,16 @@
             android:foregroundServiceType="microphone"
             android:exported="false" />
 
-        <!-- FM radio streaming service (mediaPlayback) -->
+        <!-- FM radio streaming service (mediaPlayback). Exported so system media controls
+             and Android Auto can connect via MediaSessionService. -->
         <service
             android:name=".media.FmPlayerService"
             android:foregroundServiceType="mediaPlayback"
-            android:exported="false" />
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
 
         <!--
             VoiceInteractionService — additional registration for devices that support
