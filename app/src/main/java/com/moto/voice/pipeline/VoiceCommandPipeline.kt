@@ -49,10 +49,6 @@ private const val TAG = "VoiceCommandPipeline"
 private const val HIGH_CONF = 0.75f
 /** Extract 11-char YouTube video id from anywhere in the string (bare id, URL, whatever). */
 private val YOUTUBE_ID_EXTRACT = Regex("([A-Za-z0-9_-]{11})")
-private val YOUTUBE_STRIP_PREFIXES = listOf(
-    "เปิดยูทูป", "เปิดยูทูบ", "เปิด youtube", "เปิด yt", "เปิดเพลง",
-    "ยูทูป", "ยูทูบ", "youtube", "เพลง",
-)
 
 class VoiceCommandPipeline(
     private val context: Context,
@@ -278,15 +274,21 @@ class VoiceCommandPipeline(
 
     private suspend fun confirmThenCall(contact: ContactEntry, speakOverride: String?) {
         val msg = speakOverride?.takeIf { it.isNotBlank() } ?: "กำลังโทรหา ${contact.displayName}"
-        if (settings.confirmBeforeCall) {
-            speakAndRemember("$msg ยืนยันไหม")
-            val answer = listenOnce(null)
-            if (isConfirmed(answer)) makeCall(contact)
-            else speakAndRemember("ยกเลิกแล้ว")
-        } else {
+        if (!settings.confirmBeforeCall) {
             speakAndRemember(msg)
             makeCall(contact)
+            return
         }
+
+        // Confirmation flow: prompt, listen for a positive/negative reply. If the reply
+        // clearly says "ไม่/ยกเลิก" we cancel; otherwise (positive keyword OR unusable
+        // response OR silence) we CALL — riders don't have time to re-do this on a bike
+        // and they can always cancel the outgoing call from the phone dialer.
+        speakAndRemember("$msg พูด ยกเลิก เพื่อยกเลิก")
+        val answer = listenOnce(null)
+        val explicitCancel = answer.contains("ไม่") || answer.contains("ยกเลิก") || answer.contains("cancel", ignoreCase = true)
+        if (explicitCancel) speakAndRemember("ยกเลิกแล้ว")
+        else makeCall(contact)
     }
 
     private suspend fun askDisambig(candidates: List<MatchResult>): Int {
@@ -346,20 +348,12 @@ class VoiceCommandPipeline(
             return
         }
 
-        // No usable video id from the webhook — but we should never dead-end silent.
-        // Prefer the webhook's own query, then fall back to what the rider actually said
-        // (stripped of "เปิด YouTube" filler words) so YouTube search still opens.
-        val fallbackQuery = resp.query?.takeIf { it.isNotBlank() }
-            ?: stripYoutubeFillerFromHeard(heardText).takeIf { it.isNotBlank() }
-
-        if (fallbackQuery != null) {
-            val spoken = resp.speak.ifBlank { "กำลังค้นหา $fallbackQuery" }
-            speakAndRemember(spoken)
-            openYoutube(null, fallbackQuery, entry)
-            recordHistory(HistoryAction.YoutubeOpen("", fallbackQuery))
-        } else {
-            speakAndRemember(resp.speak.ifBlank { "ไม่พบวิดีโอ ลองพูดชื่อเพลงอีกที" })
-        }
+        // No usable video id from the webhook.
+        // Deliberately DO NOT open YouTube search — while riding you can't tap results
+        // and being dumped in YouTube is worse than being told to try again. Just speak
+        // an actionable retry hint and let the rider re-trigger.
+        val hint = "หาวิดีโอไม่เจอ ลองพูดชื่อเจาะจงกว่านี้แล้วกดปุ่มลองใหม่"
+        speakAndRemember(hint)
     }
 
     /**
@@ -384,22 +378,6 @@ class VoiceCommandPipeline(
         val s = raw?.trim() ?: return null
         if (s.isEmpty()) return null
         return YOUTUBE_ID_EXTRACT.find(s)?.value
-    }
-
-    /** Strip "เปิด YouTube / เปิดเพลง / ..." prefixes so the remainder is a searchable query. */
-    private fun stripYoutubeFillerFromHeard(raw: String): String {
-        var s = raw.trim().lowercase()
-        var changed = true
-        while (changed) {
-            changed = false
-            for (pfx in YOUTUBE_STRIP_PREFIXES) {
-                if (s.startsWith(pfx)) {
-                    s = s.substring(pfx.length).trim()
-                    changed = true
-                }
-            }
-        }
-        return s
     }
 
     /**
@@ -595,14 +573,6 @@ class VoiceCommandPipeline(
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
-
-    private fun isConfirmed(text: String): Boolean {
-        val t = text.lowercase().trim()
-        if (t.contains("ไม่") || t.contains("ยกเลิก")) return false
-        return t.contains("ใช่") || t.contains("โทร") || t.contains("ตกลง") ||
-               t.contains("ok", ignoreCase = true) || t.contains("yes", ignoreCase = true) ||
-               t.contains("เลย") || t.contains("ได้")
-    }
 
     private fun finish() {
         if (!finished.compareAndSet(false, true)) return

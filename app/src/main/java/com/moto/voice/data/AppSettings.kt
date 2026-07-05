@@ -15,7 +15,9 @@ class AppSettings(context: Context) {
         private const val SECURE_PREFS = "moto_voice_secure"
         private const val SECURE_PREFS_FALLBACK = "moto_voice_secure_fb"
         const val DEFAULT_WEBHOOK_URL = "https://n8n.nodes-core.com/webhook/Javis"
-        const val DEFAULT_TIMEOUT = 4
+        const val DEFAULT_TOKEN = "meatasit"
+        /** Icecast streams + slow n8n cold-starts need generous headroom; 15s per spec. */
+        const val DEFAULT_TIMEOUT = 15
         const val MIN_TTS_RATE = 0.8f
         const val MAX_TTS_RATE = 1.5f
         const val DEFAULT_TTS_RATE = 1.0f
@@ -46,6 +48,25 @@ class AppSettings(context: Context) {
         }
         secure = store
         isTokenStoreSecure = secureOk
+
+        // Auto-migrate legacy defaults so existing installs get the new baseline
+        // without the user having to open Settings.
+        migrateLegacyDefaults()
+    }
+
+    private fun migrateLegacyDefaults() {
+        // If an old install had a short (≤ 10s) timeout from previous defaults, bump
+        // it. Users who deliberately set 12s or higher keep whatever they set.
+        val currentTimeout = prefs.getInt("timeout", DEFAULT_TIMEOUT)
+        if (currentTimeout < DEFAULT_TIMEOUT) {
+            prefs.edit().putInt("timeout", DEFAULT_TIMEOUT).apply()
+        }
+        // Preseed the auth token if the store is empty (fresh install or previous
+        // version left it blank).
+        val currentToken = secure.getString("auth_token", "") ?: ""
+        if (currentToken.isBlank()) {
+            secure.edit().putString("auth_token", DEFAULT_TOKEN).apply()
+        }
     }
 
     var webhookUrl: String
