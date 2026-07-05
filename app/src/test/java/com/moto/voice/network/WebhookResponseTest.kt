@@ -35,10 +35,11 @@ class WebhookResponseTest {
              "videos":[{"id":"A","title":"first"},{"id":"B","title":"second"},{"id":"C","title":"third"}]}
         """.trimIndent()
         val r = gson.fromJson(json, WebhookResponse::class.java)
-        assertNotNull(r.videos)
-        assertEquals(3, r.videos!!.size)
-        assertEquals("A", r.videos[0].id)
-        assertEquals("third", r.videos[2].title)
+        val videos = r.videos
+        assertNotNull(videos)
+        assertEquals(3, videos!!.size)
+        assertEquals("A", videos[0].id)
+        assertEquals("third", videos[2].title)
     }
 
     @Test
@@ -81,8 +82,9 @@ class WebhookResponseTest {
     fun tolerantOfEmptyVideosArray() {
         val json = """{"action":"youtube_play","query":"hello","videos":[],"speak":"ค้นหา"}"""
         val r = gson.fromJson(json, WebhookResponse::class.java)
-        assertNotNull(r.videos)
-        assertTrue(r.videos!!.isEmpty())
+        val videos = r.videos
+        assertNotNull(videos)
+        assertTrue(videos!!.isEmpty())
         assertEquals("hello", r.query)
     }
 
