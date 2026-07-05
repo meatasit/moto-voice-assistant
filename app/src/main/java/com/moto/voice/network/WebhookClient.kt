@@ -55,7 +55,7 @@ class WebhookClient(
         val t0 = System.currentTimeMillis()
         val request = buildRequest(text)
         try {
-            suspendCancellableCoroutine { cont ->
+            suspendCancellableCoroutine<Result> { cont ->
                 val httpCall = http.newCall(request)
                 cont.invokeOnCancellation { runCatching { httpCall.cancel() } }
                 httpCall.enqueue(object : Callback {
