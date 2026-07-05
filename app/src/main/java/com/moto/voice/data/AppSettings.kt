@@ -16,6 +16,9 @@ class AppSettings(context: Context) {
         private const val SECURE_PREFS_FALLBACK = "moto_voice_secure_fb"
         const val DEFAULT_WEBHOOK_URL = "https://n8n.nodes-core.com/webhook/Javis"
         const val DEFAULT_TIMEOUT = 4
+        const val MIN_TTS_RATE = 0.8f
+        const val MAX_TTS_RATE = 1.5f
+        const val DEFAULT_TTS_RATE = 1.0f
     }
 
     /** true if the auth token store is hardware-backed encrypted, false if using plaintext fallback. */
@@ -74,4 +77,14 @@ class AppSettings(context: Context) {
     var greetOnConnect: Boolean
         get() = prefs.getBoolean("greet_on_connect", true)
         set(v) { prefs.edit().putBoolean("greet_on_connect", v).apply() }
+
+    /** Spec §8: TTS speech rate 0.8 (slower) .. 1.5 (faster). Default 1.0 (normal). */
+    var ttsSpeechRate: Float
+        get() = prefs.getFloat("tts_rate", DEFAULT_TTS_RATE).coerceIn(MIN_TTS_RATE, MAX_TTS_RATE)
+        set(v) { prefs.edit().putFloat("tts_rate", v.coerceIn(MIN_TTS_RATE, MAX_TTS_RATE)).apply() }
+
+    /** Marker: first-run wizard completed. Set to true when the user finishes Onboarding. */
+    var onboardingComplete: Boolean
+        get() = prefs.getBoolean("onboarding_done", false)
+        set(v) { prefs.edit().putBoolean("onboarding_done", v).apply() }
 }

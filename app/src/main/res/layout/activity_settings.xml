@@ -185,6 +185,43 @@
                         android:layout_width="wrap_content" android:layout_height="wrap_content" />
                 </LinearLayout>
 
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
+
+                <!-- TTS speech rate 0.8 – 1.5 -->
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="16dp">
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:gravity="center_vertical"
+                        android:layout_marginBottom="4dp">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="ความเร็วเสียงพูด (TTS)" android:textColor="@color/white" android:textSize="15sp" />
+                        <TextView android:id="@+id/tvTtsRateValue"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="1.0x" android:textColor="@color/purple_200"
+                            android:textSize="14sp" android:fontFamily="monospace" />
+                    </LinearLayout>
+
+                    <com.google.android.material.slider.Slider
+                        android:id="@+id/sliderTtsRate"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:stepSize="0.1"
+                        android:value="1.0"
+                        android:valueFrom="0.8"
+                        android:valueTo="1.5" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnPreviewTts"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="🔊 ทดลองฟัง" android:textColor="@color/white"
+                        android:layout_marginTop="8dp"
+                        app:cornerRadius="8dp" />
+
+                </LinearLayout>
+
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -216,6 +253,24 @@
                     style="@style/Widget.MaterialComponents.Button.TextButton"
                     android:layout_width="match_parent" android:layout_height="48dp"
                     android:text="🔋  ยกเว้น Battery Optimization"
+                    android:textColor="@color/white" android:gravity="start|center_vertical"
+                    android:paddingStart="8dp" />
+
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
+
+                <Button android:id="@+id/btnAppPermissions"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="match_parent" android:layout_height="48dp"
+                    android:text="🔐  App permissions"
+                    android:textColor="@color/white" android:gravity="start|center_vertical"
+                    android:paddingStart="8dp" />
+
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
+
+                <Button android:id="@+id/btnReopenOnboarding"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="match_parent" android:layout_height="48dp"
+                    android:text="🧭  เปิด Onboarding อีกครั้ง"
                     android:textColor="@color/white" android:gravity="start|center_vertical"
                     android:paddingStart="8dp" />
 

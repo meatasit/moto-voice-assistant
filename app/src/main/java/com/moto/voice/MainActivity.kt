@@ -11,6 +11,7 @@ import android.provider.Settings
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.moto.voice.data.AppSettings
 import com.moto.voice.data.NetworkState
 import com.moto.voice.databinding.ActivityMainBinding
 import com.moto.voice.debug.DebugLogActivity
@@ -19,12 +20,13 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
 
-    private val allPermissions = arrayOf(
-        Manifest.permission.RECORD_AUDIO,
-        Manifest.permission.READ_CONTACTS,
-        Manifest.permission.CALL_PHONE,
-        Manifest.permission.BLUETOOTH_CONNECT,
-    )
+    private val allPermissions: Array<String> = buildList {
+        add(Manifest.permission.RECORD_AUDIO)
+        add(Manifest.permission.READ_CONTACTS)
+        add(Manifest.permission.CALL_PHONE)
+        add(Manifest.permission.BLUETOOTH_CONNECT)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
+    }.toTypedArray()
 
     private val requestSinglePermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -38,6 +40,10 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        if (!AppSettings(this).onboardingComplete) {
+            startActivity(Intent(this, OnboardingActivity::class.java))
+        }
 
         binding.btnMic.setOnClickListener { requestSinglePermission.launch(Manifest.permission.RECORD_AUDIO) }
         binding.btnContacts.setOnClickListener { requestSinglePermission.launch(Manifest.permission.READ_CONTACTS) }
