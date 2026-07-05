@@ -17,6 +17,9 @@
 
     <string name="title_settings">ตั้งค่า</string>
     <string name="title_debug_log">Debug Log</string>
+    <string name="title_history">ประวัติการใช้งาน</string>
+    <string name="title_favorites">รายการโปรด</string>
+    <string name="title_riding_mode">โหมดขี่</string>
 
     <string name="token_show">แสดง</string>
     <string name="token_hide">ซ่อน</string>

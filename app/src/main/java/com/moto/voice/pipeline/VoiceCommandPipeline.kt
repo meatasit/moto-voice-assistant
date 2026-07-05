@@ -18,8 +18,11 @@ import com.moto.voice.audio.PhoneStateGuard
 import com.moto.voice.contacts.ContactEntry
 import com.moto.voice.contacts.ContactMatcher
 import com.moto.voice.contacts.MatchResult
+import com.moto.voice.data.AppHistory
 import com.moto.voice.data.AppMemory
 import com.moto.voice.data.AppSettings
+import com.moto.voice.data.HistoryAction
+import com.moto.voice.data.HistoryEntry
 import com.moto.voice.data.OfflineNotifier
 import com.moto.voice.debug.DebugEntry
 import com.moto.voice.debug.DebugLog
@@ -55,6 +58,11 @@ class VoiceCommandPipeline(
     private val tts = ThaiTTS(context)
     private val contactMatcher = ContactMatcher(context)
     private val memory = AppMemory(context)
+    private val history = AppHistory(context)
+
+    // The text the STT captured this session. Used to attach to history entries so
+    // "you said X → we did Y" is visible without the debug log.
+    private var heardText: String = ""
 
     private val finished = AtomicBoolean(false)
     private var runJob: Job? = null
@@ -111,6 +119,7 @@ class VoiceCommandPipeline(
             finish(); return
         }
 
+        heardText = text
         Earcon.end()
 
         // Local intercept ALWAYS runs before webhook — offline-first, sub-second response.
@@ -118,6 +127,17 @@ class VoiceCommandPipeline(
             is LocalIntercept.Intercept.None -> processText(text, entry)
             else -> handleIntercept(intercept, entry)
         }
+    }
+
+    private fun recordHistory(action: HistoryAction) {
+        history.record(
+            HistoryEntry(
+                timestamp = System.currentTimeMillis(),
+                heard = heardText,
+                spoken = memory.lastSpoken.orEmpty(),
+                action = action,
+            )
+        )
     }
 
     // ─── Local intercept handlers ────────────────────────────────────────────
@@ -128,6 +148,7 @@ class VoiceCommandPipeline(
             LocalIntercept.Intercept.Stop -> {
                 MediaStopper.stopAny(context)
                 speakAndRemember("หยุดแล้ว")
+                recordHistory(HistoryAction.Stop)
             }
             LocalIntercept.Intercept.Help -> speakAndRemember(LocalIntercept.HELP_TEXT)
             LocalIntercept.Intercept.RepeatLast -> {
@@ -208,6 +229,7 @@ class VoiceCommandPipeline(
             "stop" -> {
                 MediaStopper.stopAny(context)
                 speakAndRemember(resp.speak.ifBlank { "หยุดแล้ว" })
+                recordHistory(HistoryAction.Stop)
             }
             "none" -> speakAndRemember(resp.speak.ifBlank { "รับทราบ" })
             else -> speakAndRemember(resp.speak.ifBlank { "เข้าใจแล้ว" })
@@ -288,6 +310,7 @@ class VoiceCommandPipeline(
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
             memory.rememberCall(contact.phoneNumber, contact.displayName)
+            recordHistory(HistoryAction.Call(contact.displayName, contact.phoneNumber))
         }.onFailure { Log.e(TAG, "call failed", it) }
     }
 
@@ -315,6 +338,7 @@ class VoiceCommandPipeline(
         }
         speakAndRemember(spoken)
         openYoutube(chosen.id, resp.query, entry)
+        recordHistory(HistoryAction.YoutubeOpen(chosen.id, chosen.title))
     }
 
     /** Merge legacy video_id/video_title with the newer videos[] into a single list, deduped, valid ids only. */
@@ -402,6 +426,7 @@ class VoiceCommandPipeline(
         } else {
             context.startService(intent)
         }
+        recordHistory(HistoryAction.FmPlay(streamUrl, label, frequency))
     }
 
     // ─── Audio helpers ────────────────────────────────────────────────────────

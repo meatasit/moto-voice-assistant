@@ -66,6 +66,37 @@
             android:label="@string/title_debug_log"
             android:parentActivityName=".MainActivity" />
 
+        <activity
+            android:name=".HistoryActivity"
+            android:exported="false"
+            android:label="@string/title_history"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
+            android:name=".FavoritesActivity"
+            android:exported="false"
+            android:label="@string/title_favorites"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
+            android:name=".RidingModeActivity"
+            android:exported="false"
+            android:label="@string/title_riding_mode"
+            android:screenOrientation="portrait"
+            android:parentActivityName=".MainActivity" />
+
+        <!-- Quick Settings tile — start listening without opening the app. -->
+        <service
+            android:name=".tile.MotoVoiceTileService"
+            android:exported="true"
+            android:icon="@android:drawable/ic_btn_speak_now"
+            android:label="Moto Voice"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <!-- Foreground service that runs the voice pipeline (microphone) -->
         <service
             android:name=".service.VoiceCommandService"
