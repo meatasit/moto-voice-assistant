@@ -13,7 +13,9 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.moto.voice.MainActivity
@@ -48,7 +50,22 @@ class FmPlayerService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // Icecast + Shoutcast streams commonly redirect HTTPS→HTTP and require a real
+        // User-Agent. ExoPlayer's default rejects cross-protocol redirects, which is
+        // why some FM streams (e.g. radiosolo.ru) played silently on build-22. Also
+        // give the connection a generous timeout — streaming servers under load can
+        // take a couple of seconds to start pushing bytes.
+        val httpFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("MotoVoice/1.1 (Android)")
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(8_000)
+            .setReadTimeoutMs(8_000)
+        val mediaSourceFactory = DefaultMediaSourceFactory(this)
+            .setDataSourceFactory(httpFactory)
+
         val player = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
