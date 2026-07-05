@@ -13,16 +13,20 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.moto.voice.actions.MediaStopper
 import com.moto.voice.audio.BluetoothAudioRouter
+import com.moto.voice.audio.PhoneStateGuard
 import com.moto.voice.contacts.ContactEntry
 import com.moto.voice.contacts.ContactMatcher
 import com.moto.voice.contacts.MatchResult
+import com.moto.voice.data.AppMemory
 import com.moto.voice.data.AppSettings
 import com.moto.voice.debug.DebugEntry
 import com.moto.voice.debug.DebugLog
 import com.moto.voice.media.FmPlayerService
 import com.moto.voice.network.WebhookClient
 import com.moto.voice.network.WebhookResponse
+import com.moto.voice.nlu.LocalIntercept
 import com.moto.voice.recognition.CommandParser
 import com.moto.voice.recognition.VoiceCommand
 import com.moto.voice.tts.ThaiTTS
@@ -50,11 +54,11 @@ class VoiceCommandPipeline(
     private val btRouter = BluetoothAudioRouter(context)
     private val tts = ThaiTTS(context)
     private val contactMatcher = ContactMatcher(context)
+    private val memory = AppMemory(context)
 
     private val finished = AtomicBoolean(false)
     private var runJob: Job? = null
 
-    // Recognizer is only touched on the main thread (coroutine dispatcher).
     private var recognizer: SpeechRecognizer? = null
 
     fun start() {
@@ -66,6 +70,13 @@ class VoiceCommandPipeline(
         val entry = DebugLog.new()
         val t0 = System.currentTimeMillis()
 
+        val availability = PhoneStateGuard.availability(context)
+        if (availability != PhoneStateGuard.Availability.Available) {
+            entry.error = "phone unavailable: $availability"
+            speakAndRemember(PhoneStateGuard.reasonText(availability))
+            finish(); return
+        }
+
         val scoOk = if (hasPerm(Manifest.permission.BLUETOOTH_CONNECT)) {
             connectSco(3_000L).also {
                 entry.scoTimeMs = System.currentTimeMillis() - t0
@@ -75,7 +86,7 @@ class VoiceCommandPipeline(
 
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             entry.error = "no speech recognition service"
-            tts.speakAwait("อุปกรณ์ไม่รองรับการรับเสียง")
+            speakAndRemember("อุปกรณ์ไม่รองรับการรับเสียง")
             finish(); return
         }
 
@@ -87,11 +98,51 @@ class VoiceCommandPipeline(
         entry.sttFinal = text
 
         if (text.isBlank()) {
-            tts.speakAwait("ไม่ได้ยินเสียง")
+            speakAndRemember("ไม่ได้ยินเสียง")
             finish(); return
         }
 
-        processText(text, entry)
+        // Local intercept ALWAYS runs before webhook — offline-first, sub-second response.
+        when (val intercept = LocalIntercept.match(text)) {
+            is LocalIntercept.Intercept.None -> processText(text, entry)
+            else -> handleIntercept(intercept, entry)
+        }
+    }
+
+    // ─── Local intercept handlers ────────────────────────────────────────────
+
+    private suspend fun handleIntercept(intercept: LocalIntercept.Intercept, entry: DebugEntry) {
+        entry.webhookRequest = "[intercepted: ${intercept::class.simpleName}]"
+        when (intercept) {
+            LocalIntercept.Intercept.Stop -> {
+                MediaStopper.stopAny(context)
+                speakAndRemember("หยุดแล้ว")
+            }
+            LocalIntercept.Intercept.Help -> speakAndRemember(LocalIntercept.HELP_TEXT)
+            LocalIntercept.Intercept.RepeatLast -> {
+                val last = memory.lastSpoken
+                if (last.isNullOrBlank()) speakAndRemember("ยังไม่มีข้อความให้พูดซ้ำ")
+                // Speak-without-remember: repeating shouldn't overwrite the memory itself.
+                else tts.speakAwait(last)
+            }
+            LocalIntercept.Intercept.ResumeLastRadio -> {
+                val url = memory.lastStationUrl
+                val name = memory.lastStationName ?: "วิทยุ"
+                if (url.isNullOrBlank()) speakAndRemember("ยังไม่เคยเปิดวิทยุ พูดชื่อคลื่นได้เลย")
+                else {
+                    speakAndRemember("เปิด $name")
+                    startFm(url, name, memory.lastStationFrequency)
+                }
+            }
+            LocalIntercept.Intercept.CallBackLast -> {
+                val number = memory.lastCallNumber
+                val name = memory.lastCallName ?: "เบอร์ล่าสุด"
+                if (number.isNullOrBlank()) speakAndRemember("ยังไม่มีเบอร์ล่าสุดในแอปนี้")
+                else confirmThenCall(ContactEntry(id = "last", displayName = name, phoneNumber = number), null)
+            }
+            LocalIntercept.Intercept.None -> Unit  // handled in caller
+        }
+        finish()
     }
 
     // ─── Command processing ───────────────────────────────────────────────────
@@ -118,7 +169,7 @@ class VoiceCommandPipeline(
             is WebhookClient.Result.Failure -> {
                 entry.error = result.error
                 Log.w(TAG, "webhook failed: ${result.error}")
-                tts.speakAwait("โหมดออฟไลน์")
+                speakAndRemember("โหมดออฟไลน์")
                 executeRuleBased(text, entry)
             }
         }
@@ -132,18 +183,29 @@ class VoiceCommandPipeline(
                 handleCallByName(name, resp.speak)
             }
             "youtube_play" -> {
-                tts.speakAwait(resp.speak.ifBlank { "กำลังเปิด YouTube" })
-                openYoutube(resp.videoId, resp.query, entry)
+                // Sprint 3 will add picker (settings.askBeforeYoutube). For now open first result.
+                val id = resp.videoId?.takeIf { YOUTUBE_ID.matches(it) }
+                    ?: resp.videos?.firstOrNull()?.id?.takeIf { YOUTUBE_ID.matches(it) }
+                val title = resp.videoTitle ?: resp.videos?.firstOrNull()?.title
+                val spoken = resp.speak.ifBlank { title?.let { "กำลังเปิด $it" } ?: "กำลังเปิด YouTube" }
+                speakAndRemember(spoken)
+                openYoutube(id, resp.query, entry)
             }
             "fm" -> {
                 if (!resp.streamUrl.isNullOrBlank()) {
-                    tts.speakAwait(resp.speak.ifBlank { "กำลังเล่นวิทยุ" })
-                    startFm(resp.streamUrl, resp.frequency ?: "FM")
+                    val name = resp.stationName ?: resp.frequency?.let { "FM $it" } ?: "วิทยุ"
+                    speakAndRemember(resp.speak.ifBlank { "กำลังเปิด $name" })
+                    startFm(resp.streamUrl, name, resp.frequency)
                 } else {
-                    tts.speakAwait(resp.speak.ifBlank { "ไม่มี stream URL" })
+                    speakAndRemember(resp.speak.ifBlank { "ไม่มี stream URL" })
                 }
             }
-            else -> tts.speakAwait(resp.speak.ifBlank { "เข้าใจแล้ว" })
+            "stop" -> {
+                MediaStopper.stopAny(context)
+                speakAndRemember(resp.speak.ifBlank { "หยุดแล้ว" })
+            }
+            "none" -> speakAndRemember(resp.speak.ifBlank { "รับทราบ" })
+            else -> speakAndRemember(resp.speak.ifBlank { "เข้าใจแล้ว" })
         }
     }
 
@@ -152,7 +214,7 @@ class VoiceCommandPipeline(
     private suspend fun executeRuleBased(text: String, entry: DebugEntry) {
         val cmd = CommandParser.parse(text)
         if (cmd == null) {
-            tts.speakAwait("ไม่เข้าใจคำสั่ง ลองพูดว่า โทรหา ตามด้วยชื่อ")
+            speakAndRemember("ไม่เข้าใจคำสั่ง ลองพูดว่า โทรหา ตามด้วยชื่อ")
             finish(); return
         }
         when (cmd) {
@@ -165,17 +227,17 @@ class VoiceCommandPipeline(
 
     private suspend fun handleCallByName(name: String, speakOverride: String?) {
         if (!hasPerm(Manifest.permission.READ_CONTACTS)) {
-            tts.speakAwait("ไม่มีสิทธิ์รายชื่อ"); return
+            speakAndRemember("ไม่มีสิทธิ์รายชื่อ"); return
         }
         val matches = contactMatcher.findMatches(name)
         when {
-            matches.isEmpty() -> tts.speakAwait("ไม่พบ $name ในรายชื่อ")
+            matches.isEmpty() -> speakAndRemember("ไม่พบ $name ในรายชื่อ")
             matches.size == 1 && matches[0].score >= HIGH_CONF ->
                 confirmThenCall(matches[0].contact, speakOverride)
             else -> {
                 val candidates = matches.take(3)
                 val choice = askDisambig(candidates)
-                if (choice < 0) tts.speakAwait("ยกเลิกแล้ว")
+                if (choice < 0) speakAndRemember("ยกเลิกแล้ว")
                 else confirmThenCall(candidates[choice].contact, null)
             }
         }
@@ -184,12 +246,12 @@ class VoiceCommandPipeline(
     private suspend fun confirmThenCall(contact: ContactEntry, speakOverride: String?) {
         val msg = speakOverride?.takeIf { it.isNotBlank() } ?: "กำลังโทรหา ${contact.displayName}"
         if (settings.confirmBeforeCall) {
-            tts.speakAwait("$msg ยืนยันไหม")
+            speakAndRemember("$msg ยืนยันไหม")
             val answer = listenOnce(null)
             if (isConfirmed(answer)) makeCall(contact)
-            else tts.speakAwait("ยกเลิกแล้ว")
+            else speakAndRemember("ยกเลิกแล้ว")
         } else {
-            tts.speakAwait(msg)
+            speakAndRemember(msg)
             makeCall(contact)
         }
     }
@@ -199,7 +261,7 @@ class VoiceCommandPipeline(
         val list = candidates.mapIndexed { i, m ->
             "${labels.getOrElse(i) { "คนที่ ${i + 1}" }} ${m.contact.displayName}"
         }.joinToString(", ")
-        tts.speakAwait("พบหลายคน ได้แก่ $list พูด คนแรก คนที่สอง หรือ ยกเลิก")
+        speakAndRemember("พบหลายคน ได้แก่ $list พูด คนแรก คนที่สอง หรือ ยกเลิก")
         val ans = listenOnce(null).trim()
         return when {
             ans.contains("แรก") || ans.contains("หนึ่ง") -> 0
@@ -211,7 +273,7 @@ class VoiceCommandPipeline(
 
     private fun makeCall(contact: ContactEntry) {
         if (!hasPerm(Manifest.permission.CALL_PHONE)) {
-            scope.launch { tts.speakAwait("ไม่มีสิทธิ์โทรออก") }
+            scope.launch { speakAndRemember("ไม่มีสิทธิ์โทรออก") }
             return
         }
         if (contact.phoneNumber.isBlank()) {
@@ -222,6 +284,7 @@ class VoiceCommandPipeline(
                 Intent(Intent.ACTION_CALL, Uri.parse("tel:${Uri.encode(contact.phoneNumber)}"))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
+            memory.rememberCall(contact.phoneNumber, contact.displayName)
         }.onFailure { Log.e(TAG, "call failed", it) }
     }
 
@@ -231,17 +294,13 @@ class VoiceCommandPipeline(
         fun view(uri: Uri) = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val pm = context.packageManager
 
-        val safeId = videoId?.takeIf { YOUTUBE_ID.matches(it) }
-        if (safeId != null) {
-            val app = view(Uri.parse("vnd.youtube:$safeId"))
-            val web = view(Uri.parse("https://www.youtube.com/watch?v=$safeId"))
+        if (videoId != null) {
+            val app = view(Uri.parse("vnd.youtube:$videoId"))
+            val web = view(Uri.parse("https://www.youtube.com/watch?v=$videoId"))
             val target = if (app.resolveActivity(pm) != null) app else web
             runCatching { context.startActivity(target) }
                 .onFailure { entry.error = "youtube launch failed" }
             return
-        }
-        if (videoId != null && !YOUTUBE_ID.matches(videoId)) {
-            Log.w(TAG, "rejected malformed videoId: $videoId")
         }
         val q = query?.takeIf { it.isNotBlank() } ?: return
         val search = Intent(Intent.ACTION_SEARCH).apply {
@@ -257,7 +316,8 @@ class VoiceCommandPipeline(
 
     // ─── FM radio ────────────────────────────────────────────────────────────
 
-    private fun startFm(streamUrl: String, label: String) {
+    private fun startFm(streamUrl: String, label: String, frequency: Double?) {
+        memory.rememberStation(streamUrl, label, frequency)
         val intent = Intent(context, FmPlayerService::class.java)
             .setAction(FmPlayerService.ACTION_PLAY)
             .putExtra(FmPlayerService.EXTRA_STREAM_URL, streamUrl)
@@ -350,10 +410,19 @@ class VoiceCommandPipeline(
             }
         }
 
+    // ─── TTS + memory ────────────────────────────────────────────────────────
+
+    /** Speak and remember for the "พูดอีกที" intercept. */
+    private suspend fun speakAndRemember(text: String) {
+        memory.lastSpoken = text
+        tts.speakAwait(text)
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private fun isConfirmed(text: String): Boolean {
         val t = text.lowercase().trim()
+        if (t.contains("ไม่") || t.contains("ยกเลิก")) return false
         return t.contains("ใช่") || t.contains("โทร") || t.contains("ตกลง") ||
                t.contains("ok", ignoreCase = true) || t.contains("yes", ignoreCase = true) ||
                t.contains("เลย") || t.contains("ได้")
