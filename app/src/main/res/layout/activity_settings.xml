@@ -326,6 +326,33 @@
                     android:textColor="@color/white" android:gravity="start|center_vertical"
                     android:paddingStart="8dp" />
 
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
+
+                <Button android:id="@+id/btnSystemStatus"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="match_parent" android:layout_height="48dp"
+                    android:text="🩺  สถานะระบบ"
+                    android:textColor="@color/white" android:gravity="start|center_vertical"
+                    android:paddingStart="8dp" />
+
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
+
+                <Button android:id="@+id/btnExportSettings"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="match_parent" android:layout_height="48dp"
+                    android:text="⬇  Export การตั้งค่าเป็นไฟล์ JSON"
+                    android:textColor="@color/white" android:gravity="start|center_vertical"
+                    android:paddingStart="8dp" />
+
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
+
+                <Button android:id="@+id/btnImportSettings"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="match_parent" android:layout_height="48dp"
+                    android:text="⬆  Import การตั้งค่าจากไฟล์ JSON"
+                    android:textColor="@color/white" android:gravity="start|center_vertical"
+                    android:paddingStart="8dp" />
+
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

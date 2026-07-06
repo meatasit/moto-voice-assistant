@@ -8,12 +8,17 @@ import android.text.method.PasswordTransformationMethod
 import android.view.MenuItem
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import com.moto.voice.data.AppSettings
+import com.moto.voice.data.SettingsBackup
 import com.moto.voice.databinding.ActivitySettingsBinding
 import com.moto.voice.network.WebhookClient
 import com.moto.voice.tts.ThaiTTS
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -22,6 +27,16 @@ class SettingsActivity : AppCompatActivity() {
     private var tokenVisible = false
     private var testJob: Job? = null
     private var previewTts: ThaiTTS? = null
+
+    /** SAF: pick a destination and write the current settings as JSON. */
+    private val createBackupFile = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri -> uri?.let { writeBackup(it) } }
+
+    /** SAF: pick an existing backup JSON and restore. */
+    private val openBackupFile = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let { readBackup(it) } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -98,6 +113,50 @@ class SettingsActivity : AppCompatActivity() {
             // Force re-entry even if the user has already completed onboarding.
             settings.onboardingComplete = false
             startActivity(Intent(this, OnboardingActivity::class.java))
+        }
+        binding.btnSystemStatus.setOnClickListener {
+            startActivity(Intent(this, SystemStatusActivity::class.java))
+        }
+        binding.btnExportSettings.setOnClickListener {
+            createBackupFile.launch("moto_voice_backup.json")
+        }
+        binding.btnImportSettings.setOnClickListener {
+            openBackupFile.launch(arrayOf("application/json"))
+        }
+    }
+
+    private fun writeBackup(uri: android.net.Uri) {
+        lifecycleScope.launch {
+            val ok = runCatching {
+                val json = SettingsBackup.toJson(SettingsBackup.snapshot(this@SettingsActivity))
+                withContext(Dispatchers.IO) {
+                    contentResolver.openOutputStream(uri, "w")?.use { it.write(json.toByteArray()) }
+                        ?: throw IllegalStateException("cannot open output stream")
+                }
+                true
+            }.getOrElse {
+                Toast.makeText(this@SettingsActivity, "Export ล้มเหลว: ${it.message}", Toast.LENGTH_LONG).show()
+                false
+            }
+            if (ok) Toast.makeText(this@SettingsActivity, "Export สำเร็จ", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun readBackup(uri: android.net.Uri) {
+        lifecycleScope.launch {
+            val backup = runCatching {
+                val bytes = withContext(Dispatchers.IO) {
+                    contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: throw IllegalStateException("cannot read file")
+                }
+                SettingsBackup.fromJson(bytes.toString(Charsets.UTF_8))
+            }.getOrElse {
+                Toast.makeText(this@SettingsActivity, "Import ล้มเหลว: ${it.message}", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            SettingsBackup.restore(this@SettingsActivity, backup)
+            loadSettings()  // refresh UI to reflect restored values
+            Toast.makeText(this@SettingsActivity, "Import สำเร็จ — เข้ารหัส Auth Token ใหม่ในหน้านี้", Toast.LENGTH_LONG).show()
         }
     }
 
