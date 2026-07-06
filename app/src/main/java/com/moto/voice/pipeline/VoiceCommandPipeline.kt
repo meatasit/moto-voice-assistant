@@ -51,6 +51,8 @@ import kotlin.coroutines.resume
 
 private const val TAG = "VoiceCommandPipeline"
 private const val HIGH_CONF = 0.75f
+/** Spec §4.3: a 1-char final result is almost always wind or a stray beep, not a command. */
+private const val MIN_MEANINGFUL_LEN = 2
 /** Extract 11-char YouTube video id from anywhere in the string (bare id, URL, whatever). */
 private val YOUTUBE_ID_EXTRACT = Regex("([A-Za-z0-9_-]{11})")
 
@@ -132,7 +134,7 @@ class VoiceCommandPipeline(
         Earcon.ready()
 
         val t1 = System.currentTimeMillis()
-        val text = listenOnce(entry)
+        val text = listenMainWithMissRetry(entry)
         entry.sttTimeMs = System.currentTimeMillis() - t1
         entry.sttFinal = text
 
@@ -562,28 +564,61 @@ class VoiceCommandPipeline(
         }
 
     /**
-     * Listen once with automatic single retry on transient recognizer errors.
-     * After TTS finishes the audio route needs a beat to switch back to mic — without
-     * that beat the second-round STT (call confirmation / disambig / YouTube picker)
-     * would fire ERROR_RECOGNIZER_BUSY or ERROR_CLIENT immediately and we'd treat it
-     * as silence → auto-cancel. See bug report §1.
+     * Convenience wrapper for callers that only care about the recognised text
+     * (confirm / disambig / picker paths). Applies the settle delay + retries once on
+     * transient recognizer errors. Does NOT retry on real silence — for that use
+     * [listenMainWithMissRetry] which speaks a prompt between attempts.
      */
-    private suspend fun listenOnce(entry: DebugEntry?): String {
-        // Small settle delay so TTS audio can fully drain and the recognizer isn't
-        // still holding the mic from a previous session.
+    private suspend fun listenOnce(entry: DebugEntry?): String = listenOnceDetailed(entry).text
+
+    /** Exposes the outcome so the main-flow retry logic can decide what to do next. */
+    private suspend fun listenOnceDetailed(entry: DebugEntry?): SttOutcome {
+        // Settle delay so TTS audio finishes draining and the recognizer isn't still
+        // holding the mic from a previous session. See bug report §1.
         delay(350)
         val first = listenOnceRaw(entry, isRetry = false)
-        if (first.text.isNotBlank()) return first.text
-        // Only retry when the failure was a transient recognizer error, not real silence.
+        if (first.text.isNotBlank()) return first
         if (first.wasTransientError) {
             Log.d(TAG, "STT transient error — retrying once")
             delay(400)
-            return listenOnceRaw(entry, isRetry = true).text
+            return listenOnceRaw(entry, isRetry = true)
         }
-        return first.text
+        return first
     }
 
-    private data class SttOutcome(val text: String, val wasTransientError: Boolean)
+    /**
+     * Main-STT flavour: if the first attempt hears nothing (NO_MATCH / SPEECH_TIMEOUT /
+     * result too short to be a real command), automatically prompt with
+     * "ไม่ได้ยินค่ะ พูดอีกครั้งนะคะ" and listen once more — the rider doesn't need to
+     * press the button again. Spec §4.1 + §4.3.
+     *
+     * Only applied to the main STT of an interaction; confirm / disambig / picker
+     * listens have their own re-prompt loops and shouldn't nest another retry inside.
+     */
+    private suspend fun listenMainWithMissRetry(entry: DebugEntry): String {
+        val first = listenOnceDetailed(entry)
+        val firstText = first.text.trim()
+        if (firstText.length >= MIN_MEANINGFUL_LEN) return firstText
+
+        // A permission/audio problem won't be helped by asking the rider to speak up.
+        // Only re-prompt for real "no speech heard" outcomes (or a too-short result,
+        // which is common when wind noise gets recognised as a single syllable).
+        val shouldPrompt = first.wasNoSpeech || firstText.isNotEmpty()
+        if (!shouldPrompt) return ""
+
+        entry.sttRetryCount = 1
+        speakAndRemember(ErrorSpeech.NOT_HEARD_RETRY)
+        val second = listenOnceDetailed(entry)
+        val secondText = second.text.trim()
+        return if (secondText.length < MIN_MEANINGFUL_LEN) "" else secondText
+    }
+
+    private data class SttOutcome(
+        val text: String,
+        val wasTransientError: Boolean,
+        val wasNoSpeech: Boolean = false,
+        val confidence: Float = -1f,
+    )
 
     private suspend fun listenOnceRaw(entry: DebugEntry?, isRetry: Boolean): SttOutcome =
         suspendCancellableCoroutine { cont ->
@@ -614,7 +649,15 @@ class VoiceCommandPipeline(
                     val text = results
                         ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         ?.firstOrNull() ?: ""
-                    if (cont.isActive) cont.resume(SttOutcome(text, wasTransientError = false))
+                    // Confidence of the top-1 result if the engine provided any (§4.4).
+                    val conf = results
+                        ?.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
+                        ?.firstOrNull() ?: -1f
+                    if (entry != null && conf >= 0f) entry.sttConfidence = conf
+                    Log.d(TAG, "final: '$text' confidence=$conf")
+                    if (cont.isActive) cont.resume(
+                        SttOutcome(text, wasTransientError = false, wasNoSpeech = false, confidence = conf)
+                    )
                 }
 
                 override fun onError(error: Int) {
@@ -629,7 +672,11 @@ class VoiceCommandPipeline(
                         SpeechRecognizer.ERROR_AUDIO,
                         SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
                     )
-                    if (cont.isActive) cont.resume(SttOutcome("", wasTransientError = transient))
+                    val noSpeech = error == SpeechRecognizer.ERROR_NO_MATCH ||
+                                   error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                    if (cont.isActive) cont.resume(
+                        SttOutcome("", wasTransientError = transient, wasNoSpeech = noSpeech)
+                    )
                 }
             })
 
@@ -638,11 +685,11 @@ class VoiceCommandPipeline(
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "th-TH")
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
                 putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-                // Force at least 3s of listening so the user has time to respond to
-                // confirmation prompts even if there's a moment of silence up front.
+                // §4.2: shorter complete-silence so the rider isn't left hanging in wind
+                // noise; minimum-length still 3s so slow speakers get a fair chance.
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 3_000L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_200L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 800L)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             }
             runCatching { rec.startListening(intent) }.onFailure { err ->
