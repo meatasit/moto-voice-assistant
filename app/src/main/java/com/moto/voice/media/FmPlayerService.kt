@@ -20,6 +20,15 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.moto.voice.MainActivity
 import com.moto.voice.MotoVoiceApplication.Companion.CH_RADIO
+import com.moto.voice.nlu.ErrorSpeech
+import com.moto.voice.tts.ThaiTTS
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Foreground media playback service backed by [MediaSessionService], so system media
@@ -50,6 +59,10 @@ class FmPlayerService : MediaSessionService() {
     private var currentUrl: String? = null
     private var currentLabel: String = "วิทยุ"
     private var retryCount = 0
+
+    /** Ephemeral scope for the "retry exhausted → speak error → stop" flow. */
+    private val ttsScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var errorSpeakJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -131,6 +144,8 @@ class FmPlayerService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        errorSpeakJob?.cancel()
+        ttsScope.cancel()
         mediaSession?.run {
             player.removeListener(playerListener)
             player.release()
@@ -138,6 +153,23 @@ class FmPlayerService : MediaSessionService() {
         }
         mediaSession = null
         super.onDestroy()
+    }
+
+    /**
+     * Speak the FM error line via a temporary TTS instance, then stop playback.
+     * Bounded by a timeout so a broken TTS engine can't keep the service alive forever.
+     */
+    private fun speakFatalErrorThenStop() {
+        // Prevent silently stacking multiple TTS jobs if onPlayerError fires again.
+        if (errorSpeakJob?.isActive == true) return
+        errorSpeakJob = ttsScope.launch {
+            withTimeoutOrNull(6_000L) {
+                val tts = ThaiTTS(this@FmPlayerService)
+                tts.speakAwait(ErrorSpeech.FM_STREAM_FAILED)
+                tts.stop()
+            }
+            stopPlayback()
+        }
     }
 
     // ─── Foreground + notification ──────────────────────────────────────────
@@ -230,8 +262,11 @@ class FmPlayerService : MediaSessionService() {
                     play()
                 }
             } else {
-                Log.w(TAG, "retry budget exhausted — stopping")
-                stopPlayback()
+                // Spec §6.5: after MAX_RETRIES the rider deserves a clear spoken reason
+                // instead of the FM just going silent. Spin up a short-lived ThaiTTS
+                // just for this line and stop the service once it finishes speaking.
+                Log.w(TAG, "retry budget exhausted — announcing and stopping")
+                speakFatalErrorThenStop()
             }
         }
 
