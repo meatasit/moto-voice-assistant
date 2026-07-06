@@ -93,6 +93,12 @@
             android:label="@string/title_onboarding"
             android:parentActivityName=".MainActivity" />
 
+        <activity
+            android:name=".SystemStatusActivity"
+            android:exported="false"
+            android:label="@string/title_system_status"
+            android:parentActivityName=".SettingsActivity" />
+
         <!-- Quick Settings tile — start listening without opening the app. -->
         <service
             android:name=".tile.MotoVoiceTileService"

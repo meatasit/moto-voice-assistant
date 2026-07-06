@@ -1,0 +1,117 @@
+package com.moto.voice.data
+
+import android.content.Context
+import com.google.gson.Gson
+import com.google.gson.GsonBuilder
+import com.google.gson.JsonSyntaxException
+import com.google.gson.annotations.SerializedName
+
+/**
+ * On-disk JSON schema for spec §8 backup/restore. Includes every setting the rider
+ * could reasonably want to preserve across factory resets / device swaps EXCEPT for
+ * secrets — auth token and any future keys must be re-entered by hand.
+ *
+ * The [version] field lets us evolve the schema safely: bump on breaking changes and
+ * add a migration branch in [restore].
+ */
+data class SettingsBackup(
+    val version: Int = CURRENT_VERSION,
+    @SerializedName("webhook_url") val webhookUrl: String,
+    @SerializedName("timeout_seconds") val timeoutSeconds: Int,
+    @SerializedName("llm_mode") val llmMode: Boolean,
+    @SerializedName("confirm_before_call") val confirmBeforeCall: Boolean,
+    @SerializedName("ask_before_youtube") val askBeforeYoutube: Boolean,
+    @SerializedName("greet_on_connect") val greetOnConnect: Boolean,
+    @SerializedName("tts_speech_rate") val ttsSpeechRate: Float,
+    @SerializedName("assistant_volume") val assistantVolume: Float,
+    @SerializedName("resume_after_call") val resumeAfterCall: Boolean,
+    @SerializedName("onboarding_complete") val onboardingComplete: Boolean,
+    val favorites: List<Favorite>,
+    @SerializedName("last_station") val lastStation: LastStation?,
+) {
+    data class Favorite(
+        @SerializedName("contact_id") val contactId: String,
+        @SerializedName("display_name") val displayName: String,
+    )
+
+    data class LastStation(
+        val url: String,
+        val name: String?,
+        val frequency: Double?,
+    )
+
+    companion object {
+        const val CURRENT_VERSION = 1
+        private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
+
+        fun snapshot(context: Context): SettingsBackup {
+            val s = AppSettings(context)
+            val fav = FavoritesStore(context).list()
+                .map { Favorite(it.contactId, it.displayName) }
+            val memory = AppMemory(context)
+            val station = memory.lastStationUrl?.let { url ->
+                LastStation(url, memory.lastStationName, memory.lastStationFrequency)
+            }
+            return SettingsBackup(
+                webhookUrl = s.webhookUrl,
+                timeoutSeconds = s.timeoutSeconds,
+                llmMode = s.llmMode,
+                confirmBeforeCall = s.confirmBeforeCall,
+                askBeforeYoutube = s.askBeforeYoutube,
+                greetOnConnect = s.greetOnConnect,
+                ttsSpeechRate = s.ttsSpeechRate,
+                assistantVolume = s.assistantVolume,
+                resumeAfterCall = s.resumeAfterCall,
+                onboardingComplete = s.onboardingComplete,
+                favorites = fav,
+                lastStation = station,
+            )
+        }
+
+        fun toJson(backup: SettingsBackup): String = gson.toJson(backup)
+
+        /**
+         * @throws IllegalArgumentException if the JSON is malformed or an unsupported
+         *   [version]. Caller (SettingsActivity) turns this into a Toast so the rider
+         *   doesn't get a stack trace on the notification shade.
+         */
+        fun fromJson(json: String): SettingsBackup {
+            val parsed = try {
+                gson.fromJson(json, SettingsBackup::class.java)
+                    ?: throw IllegalArgumentException("empty or null backup")
+            } catch (e: JsonSyntaxException) {
+                throw IllegalArgumentException("ไฟล์ไม่ใช่ backup ที่ถูกต้อง", e)
+            }
+            if (parsed.version > CURRENT_VERSION) {
+                throw IllegalArgumentException(
+                    "backup version ${parsed.version} newer than app supports ($CURRENT_VERSION)"
+                )
+            }
+            return parsed
+        }
+
+        fun restore(context: Context, backup: SettingsBackup) {
+            val s = AppSettings(context)
+            s.webhookUrl = backup.webhookUrl
+            s.timeoutSeconds = backup.timeoutSeconds
+            s.llmMode = backup.llmMode
+            s.confirmBeforeCall = backup.confirmBeforeCall
+            s.askBeforeYoutube = backup.askBeforeYoutube
+            s.greetOnConnect = backup.greetOnConnect
+            s.ttsSpeechRate = backup.ttsSpeechRate
+            s.assistantVolume = backup.assistantVolume
+            s.resumeAfterCall = backup.resumeAfterCall
+            s.onboardingComplete = backup.onboardingComplete
+
+            val favStore = FavoritesStore(context)
+            favStore.clear()
+            backup.favorites.forEach { fav ->
+                favStore.add(FavoritesStore.Favorite(fav.contactId, fav.displayName))
+            }
+
+            backup.lastStation?.let { st ->
+                AppMemory(context).rememberStation(st.url, st.name, st.frequency)
+            }
+        }
+    }
+}
