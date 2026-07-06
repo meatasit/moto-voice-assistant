@@ -11,7 +11,21 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:padding="8dp"
-        android:gravity="end">
+        android:gravity="center_vertical">
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/chipErrorsOnly"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Errors only"
+            android:checkable="true"
+            android:textColor="@color/white"
+            app:chipBackgroundColor="#33FFFFFF" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
 
         <Button android:id="@+id/btnExport"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"

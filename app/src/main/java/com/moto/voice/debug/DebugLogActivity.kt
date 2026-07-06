@@ -25,6 +25,7 @@ class DebugLogActivity : AppCompatActivity() {
             renderEntries()
         }
         binding.btnExport.setOnClickListener { exportLog() }
+        binding.chipErrorsOnly.setOnCheckedChangeListener { _, _ -> renderEntries() }
         renderEntries()
     }
 
@@ -35,9 +36,17 @@ class DebugLogActivity : AppCompatActivity() {
 
     private fun renderEntries() {
         binding.logContainer.removeAllViews()
-        val entries = DebugLog.entries()
+        val errorsOnly = binding.chipErrorsOnly.isChecked
+        val entries = DebugLog.entries().let { all ->
+            // Spec §9.2: filter to entries that actually have an error attached OR whose
+            // finishReason indicates a non-happy path (timeout, http 401, etc.). Rider
+            // usually just wants to see what went wrong on the last ride.
+            if (errorsOnly) all.filter { it.error != null || (it.finishReason != null && it.finishReason != "ok" && it.finishReason != "intercepted") }
+            else all
+        }
         if (entries.isEmpty()) {
-            binding.logContainer.addView(makeTv("ยังไม่มี log", "#AAFFFFFF"))
+            val message = if (errorsOnly) "ไม่พบ error ในช่วงที่ผ่านมา" else "ยังไม่มี log"
+            binding.logContainer.addView(makeTv(message, "#AAFFFFFF"))
             return
         }
         entries.forEach { e ->
