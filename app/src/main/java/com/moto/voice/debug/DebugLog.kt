@@ -21,6 +21,10 @@ data class DebugEntry(
     var error: String? = null,
     /** How the pipeline finished. See [FinishReason]. Populated near the end of runPipeline. */
     var finishReason: String? = null,
+    /** STT confidence of the top result (0..1). -1f = engine didn't provide any. Spec §4.4. */
+    var sttConfidence: Float = -1f,
+    /** How many extra listen attempts the main STT used (0 or 1). Spec §4.1. */
+    var sttRetryCount: Int = 0,
 ) {
     fun time(): String = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date(timestamp))
 
