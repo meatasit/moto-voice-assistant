@@ -26,6 +26,7 @@ import com.moto.voice.data.AppSettings
 import com.moto.voice.data.HistoryAction
 import com.moto.voice.data.HistoryEntry
 import com.moto.voice.data.OfflineNotifier
+import com.moto.voice.debug.AudioRoute
 import com.moto.voice.debug.DebugEntry
 import com.moto.voice.debug.DebugLog
 import com.moto.voice.debug.FinishReason
@@ -134,6 +135,7 @@ class VoiceCommandPipeline(
                 Log.d(TAG, "SCO: $it in ${entry.scoTimeMs}ms")
             }
         } else false
+        entry.audioRoute = if (scoOk) AudioRoute.SCO else AudioRoute.PHONE
 
         // Tell the rider we're falling back to the phone mic — but only when we tried and
         // failed. Skip the announcement entirely when there's no BT permission (no helmet expected).

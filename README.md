@@ -193,7 +193,43 @@ Covered:
 
 ### Debug log
 
-Every pipeline run creates a `DebugEntry` with STT partial/final, webhook request/response, per-stage timings (SCO / STT / webhook / action), and any error. 50 entries retained. Export as JSON via `DebugLogActivity`.
+Every pipeline run creates a `DebugEntry` with STT partial/final, webhook request/response, per-stage timings (SCO / STT / webhook / action), `audioRoute` (SCO helmet vs phone mic), `sttConfidence`, `sttRetryCount`, and `finishReason`. 50 entries retained. Export as JSON via `DebugLogActivity`. The "Errors only" chip filters to entries whose `error` is set or whose `finishReason` isn't `ok` / `intercepted`.
+
+## Troubleshooting
+
+Every failure mode has a spoken diagnostic — the rider never hears silence.
+Grep-friendly mapping from TTS line → root cause → fix:
+
+| The rider hears | What happened | How to fix |
+|---|---|---|
+| "โหมดออฟไลน์ค่ะ ทำได้เฉพาะโทรกับหยุดเล่นนะคะ" | No internet reached the n8n webhook; announced once per outage | Check phone data or Wi-Fi. `SystemStatus → อินเทอร์เน็ต` should show green. |
+| "กำลังคิดค่ะ รอสักครู่นะคะ" | Webhook has taken >3s. LLM likely warming up | Wait; will speak "อีกนิดนะคะ" at 10s. If timeout fires, fallback engages. |
+| "ระบบหลักช้า ทำแบบออฟไลน์ให้ค่ะ" | Webhook timeout AND the spoken command matched a rule (`โทรหา…` / `หยุด`) | Command was executed offline. Check webhook health via `SystemStatus → Webhook`. Increase timeout in Settings if this happens often on your NAS. |
+| "ระบบช้ามากตอนนี้ ทำได้เฉพาะโทรกับหยุดเล่นค่ะ" | Webhook timeout AND command wasn't a rule | Retry with `โทรหา [ชื่อ]` or `หยุด`. Long-term: bring n8n back online. |
+| "ระบบปฏิเสธการเชื่อมต่อค่ะ ตรวจสอบโทเค็นในแอปนะคะ" | HTTP 401 from webhook | Open Settings → Auth Token, verify it matches the value n8n's X-Auth-Token expects. Default: `meatasit`. |
+| "เซิร์ฟเวอร์มีปัญหาชั่วคราวค่ะ ลองใหม่อีกครั้งนะคะ" | HTTP 5xx or other non-401 error | Check n8n logs. Rule-based fallback is attempted for matching commands. |
+| "ค้นหาไม่ได้ชั่วคราวค่ะ ลองพูดชื่อเจาะจงกว่านี้…" | Webhook succeeded but returned no `videos[]` / `video_id` | Say a more specific song / video title. n8n side may also need a wider search query. Deliberately does NOT open YouTube search page — you can't tap results while riding. |
+| "เปิดสถานีไม่สำเร็จค่ะ สถานีอาจมีปัญหาชั่วคราว" | ExoPlayer failed the stream 3 times (2 retries + original) | Try another station. Check n8n's `stations` node URL is still valid. Some icecast streams reject non-standard User-Agents; the app uses `MotoVoice/1.1 (Android)`. |
+| "ตอนนี้ไม่มีสัญญาณโทรศัพท์ค่ะ ลองใหม่อีกครั้งนะคะ" | `TelephonyManager.simState` isn't `READY` or device has no radio | Insert SIM / turn off airplane mode. `SystemStatus` doesn't yet show cell state; rely on the OS status bar. |
+| "ไม่ได้ยินค่ะ พูดอีกครั้งนะคะ" | STT NO_MATCH / TIMEOUT / result <2 chars on the first main listen | Auto-listens again — just speak again louder. Common in wind. Sprint C tuned COMPLETE_SILENCE to 1200ms so this is faster. |
+| "ยังไม่ได้ยินค่ะ ลองใหม่อีกครั้งนะคะ" | STT failed twice in a row | Press BVRA again. Consider closing helmet vents or lowering speed briefly. |
+| "ใช้ไมค์โทรศัพท์" | BT SCO connection didn't complete in 3s | Reconnect helmet (`SystemStatus → หมวก`). Check helmet firmware. Battery is another common cause of intermittent SCO. |
+| "อุปกรณ์ไม่รองรับการรับเสียง" | `SpeechRecognizer.isRecognitionAvailable()` = false | Install Google app / Play Services. Check `SystemStatus → TTS/STT`. |
+| "กำลังใช้สายอยู่ ลองใหม่หลังวางสาย" | `PhoneStateGuard` detected `AudioManager.mode` was IN_CALL / IN_COMMUNICATION / RINGTONE | Hang up first. This is a preflight to avoid competing with the ongoing call. |
+| "สิทธิ์ไมโครโฟนหายไปค่ะ เปิดแอปเพื่อแก้ไขนะคะ" (or contacts / call / Default Assistant variants) | Trigger-time preflight caught a permission or role loss (common after OEM OS update) | Notification is posted with a deep-link. Or use `SystemStatus`. |
+| "ยกเลิกแล้วค่ะ" | Rider double-tapped BVRA (barge-in cancel) — or explicitly said "ยกเลิก" during confirmation | Not an error. Debug log shows `finishReason: barge_in_cancel` on double-tap. |
+
+### System Status page (Settings → 🩺 สถานะระบบ)
+
+Seven rows summarize every subsystem. Green = fine, Yellow = degraded, Red = broken.
+Tap a Red/Yellow row to launch the OS settings page that fixes it.
+"ทดสอบทั้งระบบ" runs everything and speaks the summary — perfect for a
+pre-ride check without needing to unlock the phone.
+
+### Backup / Restore
+
+Settings → `⬇ Export…` writes a versioned JSON via SAF (choose location).
+The file contains every user-tweaked setting **except the auth token** (rider re-enters after import per spec §8.1). `⬆ Import…` validates the schema, applies the values, and shows a Toast summary.
 
 ## License
 

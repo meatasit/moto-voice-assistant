@@ -25,12 +25,15 @@ data class DebugEntry(
     var sttConfidence: Float = -1f,
     /** How many extra listen attempts the main STT used (0 or 1). Spec §4.1. */
     var sttRetryCount: Int = 0,
+    /** Which mic actually recorded ("sco" = helmet, "phone" = built-in). Spec §9.1. */
+    var audioRoute: String? = null,
 ) {
     fun time(): String = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date(timestamp))
 
     fun summary(): String = buildString {
         append("[${time()}]")
         if (sttFinal.isNotBlank()) append("  STT: \"$sttFinal\"")
+        if (audioRoute != null) append("  route:${audioRoute}")
         if (scoTimeMs > 0) append("  SCO:${scoTimeMs}ms")
         if (sttTimeMs > 0) append("  STT:${sttTimeMs}ms")
         if (webhookTimeMs > 0) append("  WH:${webhookTimeMs}ms")
@@ -38,6 +41,14 @@ data class DebugEntry(
         if (finishReason != null) append("  end:${finishReason}")
         if (error != null) append("  ⚠️ $error")
     }
+}
+
+/** Constants for [DebugEntry.audioRoute]. Kept as strings so JSON export is human-readable. */
+object AudioRoute {
+    /** SCO connection to the helmet HFP is up — mic is the helmet. */
+    const val SCO = "sco"
+    /** Falling back to the built-in phone microphone. */
+    const val PHONE = "phone"
 }
 
 /**
