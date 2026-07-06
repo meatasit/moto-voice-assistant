@@ -14,7 +14,13 @@ import com.moto.voice.MainActivity
 import com.moto.voice.MotoVoiceApplication.Companion.CH_LISTENING
 import com.moto.voice.audio.Earcon
 import com.moto.voice.data.AppSettings
+import com.moto.voice.debug.DebugLog
+import com.moto.voice.debug.FinishReason
+import com.moto.voice.pipeline.PreflightCheck
+import com.moto.voice.pipeline.PreflightNotification
 import com.moto.voice.pipeline.VoiceCommandPipeline
+import com.moto.voice.tts.ThaiTTS
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -38,11 +44,39 @@ class VoiceCommandService : LifecycleService() {
         private const val NOTIF_ID = 42
         /** Any trigger within this window of the previous one is treated as noise. */
         private const val DEBOUNCE_MS = 500L
+        /** Shared prefs used only for the restart counter — small enough to keep alongside settings. */
+        private const val WATCHDOG_PREFS = "moto_voice_watchdog"
+        private const val KEY_LAST_CREATE = "last_create_ms"
+        private const val KEY_RESTART_COUNT = "restart_count"
+        /** If onCreate fires within this window of the previous onCreate, we suspect an OS kill. */
+        private const val RESTART_SUSPECT_MS = 60_000L
     }
 
     private var pipeline: VoiceCommandPipeline? = null
 
     @Volatile private var lastTriggerAt: Long = 0L
+
+    override fun onCreate() {
+        super.onCreate()
+        // §5.3: track restart cadence so the debug log can show "the OS killed us 5
+        // times in the last hour" — a symptom of aggressive OEM battery managers.
+        val prefs = getSharedPreferences(WATCHDOG_PREFS, MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        val lastCreate = prefs.getLong(KEY_LAST_CREATE, 0L)
+        val elapsed = if (lastCreate == 0L) Long.MAX_VALUE else now - lastCreate
+        if (elapsed in 1L..RESTART_SUSPECT_MS) {
+            val count = prefs.getInt(KEY_RESTART_COUNT, 0) + 1
+            prefs.edit().putInt(KEY_RESTART_COUNT, count).apply()
+            Log.w(TAG, "onCreate fired ${elapsed}ms after previous — suspected restart (#$count)")
+            // Not tied to a specific interaction — attach to a fresh DebugEntry so it
+            // shows up in the exported log without noise-marking a real invocation.
+            DebugLog.new().apply {
+                error = "service_restarted after ${elapsed}ms (count=$count)"
+                finishReason = "service_restarted"
+            }
+        }
+        prefs.edit().putLong(KEY_LAST_CREATE, now).apply()
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
@@ -77,10 +111,39 @@ class VoiceCommandService : LifecycleService() {
             return START_NOT_STICKY
         }
 
+        // §5.1: fast health check. If the OS took away something we need, tell the
+        // rider exactly what's missing and post a deep-linking notification, then
+        // stop. No pipeline is started in a broken state.
+        PreflightCheck(this).check()?.let { issue ->
+            Log.w(TAG, "preflight failed: ${issue.kind}")
+            handlePreflightMiss(issue, startId)
+            return START_NOT_STICKY
+        }
+        // Clear a stale preflight notification if we're now healthy again.
+        PreflightNotification.cancel(this)
+
         // Fresh interaction.
         pipeline = VoiceCommandPipeline(this, AppSettings(this)) { stopSelf(startId) }
         pipeline?.start()
         return START_NOT_STICKY
+    }
+
+    private fun handlePreflightMiss(issue: PreflightCheck.Issue, startId: Int) {
+        PreflightNotification.show(this, issue)
+        DebugLog.new().apply {
+            error = "preflight_missing:${issue.kind}"
+            finishReason = FinishReason.PHONE_UNAVAILABLE  // reuse existing "can't start" code
+        }
+        // Speak the specific issue through helmet before dying. Short-lived TTS just
+        // for this one line; the pipeline's own ThaiTTS isn't running yet.
+        lifecycleScope.launch {
+            val tts = ThaiTTS(this@VoiceCommandService)
+            tts.speakAwait(issue.speak)
+            // Give the audio a beat to flush before stopSelf tears everything down.
+            delay(300)
+            tts.stop()
+            stopSelf(startId)
+        }
     }
 
     override fun onDestroy() {

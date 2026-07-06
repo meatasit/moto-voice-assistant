@@ -34,4 +34,10 @@ object ErrorSpeech {
 
     // ─── Barge-in (§3) ────────────────────────────────────────────────────────
     const val CANCELLED = "ยกเลิกแล้วค่ะ"
+
+    // ─── Preflight / self-check (§5.1) — spoken from VoiceCommandService ─────
+    const val PREFLIGHT_NOT_DEFAULT = "แอปนี้ยังไม่ได้เป็น Default Assistant ค่ะ เปิดแอปเพื่อแก้ไขนะคะ"
+    const val PREFLIGHT_MISSING_MIC = "สิทธิ์ไมโครโฟนหายไปค่ะ เปิดแอปเพื่อแก้ไขนะคะ"
+    const val PREFLIGHT_MISSING_CONTACTS = "สิทธิ์รายชื่อหายไปค่ะ เปิดแอปเพื่อแก้ไขนะคะ"
+    const val PREFLIGHT_MISSING_CALL = "สิทธิ์โทรออกหายไปค่ะ เปิดแอปเพื่อแก้ไขนะคะ"
 }
