@@ -56,6 +56,8 @@ object FinishReason {
     const val INTERCEPTED = "intercepted"
     const val LLM_OFF = "llm_off"
     const val PARSE_ERROR = "parse_error"
+    /** Rider double-tapped BVRA during an active interaction (spec §3.1). */
+    const val BARGE_IN = "barge_in_cancel"
 }
 
 object DebugLog {

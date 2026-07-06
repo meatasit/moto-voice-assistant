@@ -82,14 +82,30 @@ class VoiceCommandPipeline(
     private var runJob: Job? = null
 
     private var recognizer: SpeechRecognizer? = null
+    /** The debug entry currently owned by [runPipeline] — retained for [markBargeIn]. */
+    private var currentEntry: DebugEntry? = null
+
+    /** True from start() until finish()/stop() runs. Read by VoiceCommandService to decide barge-in vs new interaction. */
+    val isActive: Boolean get() = runJob?.isActive == true && !finished.get()
 
     fun start() {
         if (runJob?.isActive == true) return
         runJob = scope.launch { runPipeline() }
     }
 
+    /**
+     * Called from VoiceCommandService before [stop] on a barge-in cancel so the
+     * DebugEntry reflects the reason. The service is responsible for playing the
+     * cancel earcon — we can't do it from here because our scope is about to die.
+     */
+    fun markBargeIn() {
+        currentEntry?.finishReason = FinishReason.BARGE_IN
+        currentEntry?.error = (currentEntry?.error ?: "") + (if (currentEntry?.error.isNullOrEmpty()) "" else "; ") + "barge_in_cancel"
+    }
+
     private suspend fun runPipeline() {
         val entry = DebugLog.new()
+        currentEntry = entry
         val t0 = System.currentTimeMillis()
 
         val availability = PhoneStateGuard.availability(context)
