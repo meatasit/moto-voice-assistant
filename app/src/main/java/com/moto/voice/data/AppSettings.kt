@@ -23,6 +23,9 @@ class AppSettings(context: Context) {
         const val MIN_TTS_RATE = 0.8f
         const val MAX_TTS_RATE = 1.5f
         const val DEFAULT_TTS_RATE = 1.0f
+        const val MIN_ASSIST_VOLUME = 0.5f
+        const val MAX_ASSIST_VOLUME = 1.5f
+        const val DEFAULT_ASSIST_VOLUME = 1.0f
     }
 
     /** true if the auth token store is hardware-backed encrypted, false if using plaintext fallback. */
@@ -100,6 +103,16 @@ class AppSettings(context: Context) {
     var greetOnConnect: Boolean
         get() = prefs.getBoolean("greet_on_connect", true)
         set(v) { prefs.edit().putBoolean("greet_on_connect", v).apply() }
+
+    /** Spec §2.3: after a phone call ends, resume FM if we were playing before it started. */
+    var resumeAfterCall: Boolean
+        get() = prefs.getBoolean("resume_after_call", true)
+        set(v) { prefs.edit().putBoolean("resume_after_call", v).apply() }
+
+    /** Spec §2.4: per-app assistant volume (0.5–1.5) applied to TTS via KEY_PARAM_VOLUME. */
+    var assistantVolume: Float
+        get() = prefs.getFloat("assistant_volume", DEFAULT_ASSIST_VOLUME).coerceIn(MIN_ASSIST_VOLUME, MAX_ASSIST_VOLUME)
+        set(v) { prefs.edit().putFloat("assistant_volume", v.coerceIn(MIN_ASSIST_VOLUME, MAX_ASSIST_VOLUME)).apply() }
 
     /** Spec §8: TTS speech rate 0.8 (slower) .. 1.5 (faster). Default 1.0 (normal). */
     var ttsSpeechRate: Float

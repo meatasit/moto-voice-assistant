@@ -48,6 +48,9 @@ class SettingsActivity : AppCompatActivity() {
         binding.switchGreetOnConnect.isChecked = settings.greetOnConnect
         binding.sliderTtsRate.value = settings.ttsSpeechRate
         binding.tvTtsRateValue.text = formatRate(settings.ttsSpeechRate)
+        binding.switchResumeAfterCall.isChecked = settings.resumeAfterCall
+        binding.sliderAssistantVolume.value = settings.assistantVolume
+        binding.tvAssistantVolumeValue.text = formatRate(settings.assistantVolume)
     }
 
     private fun formatRate(rate: Float): String = "%.1fx".format(rate)
@@ -70,6 +73,11 @@ class SettingsActivity : AppCompatActivity() {
             binding.tvTtsRateValue.text = formatRate(value)
             settings.ttsSpeechRate = value
         }
+        binding.sliderAssistantVolume.addOnChangeListener { _, value, _ ->
+            binding.tvAssistantVolumeValue.text = formatRate(value)
+            settings.assistantVolume = value
+        }
+        binding.switchResumeAfterCall.setOnCheckedChangeListener { _, v -> settings.resumeAfterCall = v }
         binding.btnPreviewTts.setOnClickListener { previewSpeech() }
 
         binding.btnTestConnection.setOnClickListener { testConnection() }

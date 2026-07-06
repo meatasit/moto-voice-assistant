@@ -36,6 +36,9 @@ class FmPlayerService : MediaSessionService() {
     companion object {
         const val ACTION_PLAY = "com.moto.voice.FM_PLAY"
         const val ACTION_STOP = "com.moto.voice.FM_STOP"
+        /** Soft pause — service stays alive so [ACTION_RESUME] can pick up exactly where we left off. */
+        const val ACTION_PAUSE = "com.moto.voice.FM_PAUSE"
+        const val ACTION_RESUME = "com.moto.voice.FM_RESUME"
         const val EXTRA_STREAM_URL = "stream_url"
         const val EXTRA_LABEL = "label"
         private const val TAG = "FmPlayerService"
@@ -92,6 +95,17 @@ class FmPlayerService : MediaSessionService() {
             ACTION_STOP -> {
                 stopPlayback()
                 return START_NOT_STICKY
+            }
+            ACTION_PAUSE -> {
+                Log.d(TAG, "pause requested")
+                mediaSession?.player?.playWhenReady = false
+                // Foreground notification stays — service remains alive so RESUME can
+                // continue instantly without a fresh SCO/prepare cycle.
+            }
+            ACTION_RESUME -> {
+                Log.d(TAG, "resume requested")
+                mediaSession?.player?.playWhenReady = true
+                FmPlaybackState.clearAssistantPaused()
             }
             ACTION_PLAY -> {
                 val url = intent.getStringExtra(EXTRA_STREAM_URL)
@@ -190,6 +204,8 @@ class FmPlayerService : MediaSessionService() {
         mediaSession?.player?.apply { stop(); clearMediaItems() }
         currentUrl = null
         retryCount = 0
+        FmPlaybackState.setPlaying(false)
+        FmPlaybackState.clearAssistantPaused()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
@@ -230,6 +246,7 @@ class FmPlayerService : MediaSessionService() {
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             Log.d(TAG, "isPlaying=$isPlaying")
+            FmPlaybackState.setPlaying(isPlaying)
         }
     }
 }

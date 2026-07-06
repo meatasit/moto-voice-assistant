@@ -187,6 +187,58 @@
 
                 <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
 
+                <LinearLayout android:layout_width="match_parent" android:layout_height="64dp"
+                    android:orientation="horizontal" android:gravity="center_vertical"
+                    android:paddingHorizontal="8dp">
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:orientation="vertical">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="เล่นวิทยุต่อหลังวางสาย" android:textColor="@color/white" android:textSize="15sp" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="วิทยุ FM ที่ถูกโทรเข้าตัดจะเล่นต่อเองเมื่อวางสาย"
+                            android:textColor="#88FFFFFF" android:textSize="12sp" />
+                    </LinearLayout>
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switchResumeAfterCall"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                </LinearLayout>
+
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
+
+                <!-- Assistant volume 0.5 – 1.5 -->
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="16dp">
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:gravity="center_vertical"
+                        android:layout_marginBottom="4dp">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="ระดับเสียงผู้ช่วย" android:textColor="@color/white" android:textSize="15sp" />
+                        <TextView android:id="@+id/tvAssistantVolumeValue"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="1.0x" android:textColor="@color/purple_200"
+                            android:textSize="14sp" android:fontFamily="monospace" />
+                    </LinearLayout>
+
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="แยกจากระดับเสียง media ปกติ ใช้กับ TTS ของแอปเท่านั้น"
+                        android:textColor="#88FFFFFF" android:textSize="12sp"
+                        android:layout_marginBottom="8dp" />
+
+                    <com.google.android.material.slider.Slider
+                        android:id="@+id/sliderAssistantVolume"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:stepSize="0.1"
+                        android:value="1.0"
+                        android:valueFrom="0.5"
+                        android:valueTo="1.5" />
+
+                </LinearLayout>
+
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
+
                 <!-- TTS speech rate 0.8 – 1.5 -->
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:orientation="vertical" android:padding="16dp">

@@ -12,6 +12,7 @@ import android.speech.SpeechRecognizer
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.moto.voice.actions.MediaStopper
+import com.moto.voice.audio.AudioFocusRouter
 import com.moto.voice.audio.BluetoothAudioRouter
 import com.moto.voice.audio.Earcon
 import com.moto.voice.audio.PhoneStateGuard
@@ -28,6 +29,7 @@ import com.moto.voice.debug.DebugEntry
 import com.moto.voice.debug.DebugLog
 import com.moto.voice.debug.FinishReason
 import com.moto.voice.nlu.ErrorSpeech
+import com.moto.voice.media.FmPlaybackState
 import com.moto.voice.media.FmPlayerService
 import com.moto.voice.network.WebhookClient
 import com.moto.voice.network.WebhookResponse
@@ -59,10 +61,16 @@ class VoiceCommandPipeline(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val btRouter = BluetoothAudioRouter(context)
+    private val focusRouter = AudioFocusRouter(context)
     private val tts = ThaiTTS(context)
     private val contactMatcher = ContactMatcher(context)
     private val memory = AppMemory(context)
     private val history = AppHistory(context)
+
+    /** True if we paused our own FM at the start of this interaction — resume unless the command was "stop". */
+    private var pausedOurFm: Boolean = false
+    /** True if any webhook action explicitly stopped media — suppresses FM auto-resume. */
+    private var stopAction: Boolean = false
 
     // The text the STT captured this session. Used to attach to history entries so
     // "you said X → we did Y" is visible without the debug log.
@@ -88,6 +96,16 @@ class VoiceCommandPipeline(
             entry.finishReason = FinishReason.PHONE_UNAVAILABLE
             speakAndRemember(PhoneStateGuard.reasonText(availability))
             finish(); return
+        }
+
+        // Duck / pause other media so the mic doesn't record over YT, Spotify, etc.
+        // (spec §2.1). Own-FM gets a soft pause so we can resume with metadata intact.
+        focusRouter.request()
+        if (FmPlaybackState.isPlaying) {
+            Log.d(TAG, "pausing our FM for interaction")
+            sendToFm(FmPlayerService.ACTION_PAUSE)
+            FmPlaybackState.markAssistantPaused()
+            pausedOurFm = true
         }
 
         val hasBt = hasPerm(Manifest.permission.BLUETOOTH_CONNECT)
@@ -153,6 +171,7 @@ class VoiceCommandPipeline(
         entry.finishReason = FinishReason.INTERCEPTED
         when (intercept) {
             LocalIntercept.Intercept.Stop -> {
+                stopAction = true
                 MediaStopper.stopAny(context)
                 speakAndRemember("หยุดแล้ว")
                 recordHistory(HistoryAction.Stop)
@@ -294,6 +313,7 @@ class VoiceCommandPipeline(
                 }
             }
             "stop" -> {
+                stopAction = true
                 MediaStopper.stopAny(context)
                 speakAndRemember(resp.speak.ifBlank { "หยุดแล้ว" })
                 recordHistory(HistoryAction.Stop)
@@ -508,6 +528,10 @@ class VoiceCommandPipeline(
     // ─── FM radio ────────────────────────────────────────────────────────────
 
     private fun startFm(streamUrl: String, label: String, frequency: Double?) {
+        // A fresh play command supersedes any auto-resume that would otherwise happen.
+        pausedOurFm = false
+        FmPlaybackState.clearAssistantPaused()
+
         memory.rememberStation(streamUrl, label, frequency)
         val intent = Intent(context, FmPlayerService::class.java)
             .setAction(FmPlayerService.ACTION_PLAY)
@@ -519,6 +543,12 @@ class VoiceCommandPipeline(
             context.startService(intent)
         }
         recordHistory(HistoryAction.FmPlay(streamUrl, label, frequency))
+    }
+
+    /** Best-effort control message to FmPlayerService. Idempotent; safe when service isn't running. */
+    private fun sendToFm(action: String) {
+        val intent = Intent(context, FmPlayerService::class.java).setAction(action)
+        runCatching { context.startService(intent) }
     }
 
     // ─── Audio helpers ────────────────────────────────────────────────────────
@@ -655,6 +685,18 @@ class VoiceCommandPipeline(
         runCatching { recognizer?.cancel() }
         runCatching { recognizer?.destroy() }
         recognizer = null
+
+        // Resume our FM if WE paused it AND the command wasn't a stop — spec §2.2.
+        if (pausedOurFm && !stopAction) {
+            Log.d(TAG, "resuming our FM after interaction")
+            sendToFm(FmPlayerService.ACTION_RESUME)
+        } else if (pausedOurFm && stopAction) {
+            // Stop was commanded: clear the assistant-paused flag so FM stays down.
+            FmPlaybackState.clearAssistantPaused()
+        }
+        pausedOurFm = false
+
+        runCatching { focusRouter.abandon() }
         runCatching { btRouter.disconnect() }
         runCatching { tts.stop() }
         scope.cancel()
