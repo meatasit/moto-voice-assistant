@@ -14,6 +14,7 @@ import androidx.core.content.ContextCompat
 import com.moto.voice.actions.MediaStopper
 import com.moto.voice.audio.AudioFocusRouter
 import com.moto.voice.audio.BluetoothAudioRouter
+import com.moto.voice.audio.CellularCheck
 import com.moto.voice.audio.Earcon
 import com.moto.voice.audio.PhoneStateGuard
 import com.moto.voice.contacts.ContactEntry
@@ -359,7 +360,7 @@ class VoiceCommandPipeline(
 
     private suspend fun handleCallByName(name: String, speakOverride: String?) {
         if (!hasPerm(Manifest.permission.READ_CONTACTS)) {
-            speakAndRemember("ไม่มีสิทธิ์รายชื่อ"); return
+            speakAndRemember(ErrorSpeech.PREFLIGHT_MISSING_CONTACTS); return
         }
         val matches = contactMatcher.findMatches(name)
         when {
@@ -369,7 +370,7 @@ class VoiceCommandPipeline(
             else -> {
                 val candidates = matches.take(3)
                 val choice = askDisambig(candidates)
-                if (choice < 0) speakAndRemember("ยกเลิกแล้ว")
+                if (choice < 0) speakAndRemember(ErrorSpeech.CANCELLED)
                 else confirmThenCall(candidates[choice].contact, null)
             }
         }
@@ -390,7 +391,7 @@ class VoiceCommandPipeline(
         speakAndRemember("$msg พูด ยกเลิก เพื่อยกเลิก")
         val answer = listenOnce(null)
         val explicitCancel = answer.contains("ไม่") || answer.contains("ยกเลิก") || answer.contains("cancel", ignoreCase = true)
-        if (explicitCancel) speakAndRemember("ยกเลิกแล้ว")
+        if (explicitCancel) speakAndRemember(ErrorSpeech.CANCELLED)
         else makeCall(contact)
     }
 
@@ -409,12 +410,19 @@ class VoiceCommandPipeline(
 
     private fun makeCall(contact: ContactEntry) {
         if (!hasPerm(Manifest.permission.CALL_PHONE)) {
-            scope.launch { speakAndRemember("ไม่มีสิทธิ์โทรออก") }
+            scope.launch { speakAndRemember(ErrorSpeech.PREFLIGHT_MISSING_CALL) }
             return
         }
         if (contact.phoneNumber.isBlank()) {
             Log.w(TAG, "empty phone number for ${contact.displayName}")
             scope.launch { speakAndRemember("ไม่มีเบอร์โทรของ ${contact.displayName}") }
+            return
+        }
+        // §6.7: catch the "no SIM / no telephony radio" case before firing ACTION_CALL,
+        // so the rider hears a clear message instead of silent failure.
+        if (!CellularCheck.canCall(context)) {
+            Log.w(TAG, "no cellular capability — status=${CellularCheck.status(context)}")
+            scope.launch { speakAndRemember(ErrorSpeech.NO_CELL_SIGNAL) }
             return
         }
         runCatching {
@@ -426,7 +434,7 @@ class VoiceCommandPipeline(
             recordHistory(HistoryAction.Call(contact.displayName, contact.phoneNumber))
         }.onFailure {
             Log.e(TAG, "call failed", it)
-            scope.launch { speakAndRemember("โทรไม่ได้ ลองอีกที") }
+            scope.launch { speakAndRemember(ErrorSpeech.NO_CELL_SIGNAL) }
         }
     }
 
@@ -454,9 +462,8 @@ class VoiceCommandPipeline(
         // No usable video id from the webhook.
         // Deliberately DO NOT open YouTube search — while riding you can't tap results
         // and being dumped in YouTube is worse than being told to try again. Just speak
-        // an actionable retry hint and let the rider re-trigger.
-        val hint = "หาวิดีโอไม่เจอ ลองพูดชื่อเจาะจงกว่านี้แล้วกดปุ่มลองใหม่"
-        speakAndRemember(hint)
+        // the standard retry hint (spec §6.4) and let the rider re-trigger.
+        speakAndRemember(ErrorSpeech.YOUTUBE_NOT_FOUND)
     }
 
     /**
@@ -507,7 +514,7 @@ class VoiceCommandPipeline(
             when (val choice = NumberWordParser.parse(ans, top.size)) {
                 is NumberWordParser.Choice.Index -> return top[choice.zeroBased]
                 NumberWordParser.Choice.Cancel -> {
-                    speakAndRemember("ยกเลิกแล้ว")
+                    speakAndRemember(ErrorSpeech.CANCELLED)
                     return null
                 }
                 NumberWordParser.Choice.None -> Unit  // ask again next iteration
@@ -515,7 +522,8 @@ class VoiceCommandPipeline(
         }
 
         // Default per spec: open first + tell the rider we did.
-        speakAndRemember("เปิดอันแรกให้นะครับ")
+        // Feminine voice consistency: "ค่ะ" not "ครับ".
+        speakAndRemember("เปิดอันแรกให้นะคะ")
         return top.first()
     }
 
