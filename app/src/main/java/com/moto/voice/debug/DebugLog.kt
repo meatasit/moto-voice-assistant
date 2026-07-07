@@ -27,6 +27,18 @@ data class DebugEntry(
     var sttRetryCount: Int = 0,
     /** Which mic actually recorded ("sco" = helmet, "phone" = built-in). Spec §9.1. */
     var audioRoute: String? = null,
+
+    // ─── TTS instrumentation (Sprint I §6) ───────────────────────────────────
+    /** Which engine actually delivered the audio (azure / android / android_fallback). */
+    var ttsEngine: String? = null,
+    /** Synthesise time in ms (0 when we served from cache). */
+    var ttsSynthMs: Long = 0,
+    /** Playback time in ms (from prepare start to OnCompletion). */
+    var ttsPlayMs: Long = 0,
+    /** True if the last Azure speak served from the on-disk cache instead of hitting the API. */
+    var cacheHit: Boolean = false,
+    /** Reason string when Azure failed (network, HTTP code, playback error). */
+    var azureError: String? = null,
 ) {
     fun time(): String = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date(timestamp))
 

@@ -16,6 +16,7 @@ import androidx.core.content.ContextCompat
 import com.moto.voice.data.AppSettings
 import com.moto.voice.data.NetworkState
 import com.moto.voice.network.WebhookClient
+import com.moto.voice.tts.AzureTtsState
 
 /**
  * Single-shot health check across every subsystem that could quietly break between
@@ -77,17 +78,41 @@ class SystemStatusChecker(private val context: Context) {
         }
     }
 
-    /** For now: the Android TTS engine — Azure is out of scope for v1.1. */
+    /**
+     * TTS row: reports the live Azure result if the user has configured Azure, else
+     * falls back to a plain "Android TTS engine present" check.
+     */
     fun checkTts(): StatusRow {
-        // We can't fully verify TTS synth without invoking it (which would speak aloud
-        // to the rider unexpectedly). Availability is the honest check we can do here:
-        // check that at least one TTS engine is installed.
-        val hasEngine = context.packageManager
+        val settings = AppSettings(context)
+        val hasAzureConfig = settings.azureKey.isNotBlank() && settings.azureRegion.isNotBlank()
+
+        // Base: is there an Android TTS engine at all? — the silent fallback path needs it.
+        val hasAndroidEngine = context.packageManager
             .queryIntentServices(Intent("android.intent.action.TTS_SERVICE"), 0)
             .isNotEmpty()
-        return if (hasEngine) StatusRow(
-            StatusRow.Kind.Tts, "TTS", StatusRow.State.Green,
-            detail = "พร้อมใช้งาน",
+
+        // When Azure is configured, prefer to show the live Azure result.
+        if (hasAzureConfig) {
+            return when (AzureTtsState.result()) {
+                AzureTtsState.LastResult.Ok -> StatusRow(
+                    StatusRow.Kind.Tts, "Azure TTS", StatusRow.State.Green,
+                    detail = "ล่าสุด: synth ${AzureTtsState.synthMs()}ms · play ${AzureTtsState.playMs()}ms" +
+                        if (AzureTtsState.cacheHit()) " · cache" else "",
+                )
+                AzureTtsState.LastResult.Failed -> StatusRow(
+                    StatusRow.Kind.Tts, "Azure TTS", StatusRow.State.Yellow,
+                    detail = "ล่าสุด: ${AzureTtsState.error() ?: "unknown"} — ใช้ Android แทน",
+                )
+                AzureTtsState.LastResult.Never -> StatusRow(
+                    StatusRow.Kind.Tts, "Azure TTS", StatusRow.State.Yellow,
+                    detail = "ตั้งค่าแล้ว ยังไม่ทดสอบ — กดฟังตัวอย่างในหน้าตั้งค่า",
+                )
+            }
+        }
+
+        return if (hasAndroidEngine) StatusRow(
+            StatusRow.Kind.Tts, "TTS (Android)", StatusRow.State.Green,
+            detail = "พร้อมใช้งาน — ยังไม่ได้ตั้ง Azure",
         ) else StatusRow(
             StatusRow.Kind.Tts, "TTS", StatusRow.State.Red,
             detail = "ไม่พบ TTS engine",

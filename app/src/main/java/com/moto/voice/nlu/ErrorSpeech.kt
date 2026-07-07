@@ -1,43 +1,116 @@
 package com.moto.voice.nlu
 
 /**
- * Central vocabulary of TTS lines spoken by the pipeline. Grouped by category so we can
- * grep for "everything the assistant might say" in one place and audit for tone/register
- * consistency. All lines end in ค่ะ / นะคะ (feminine polite) per the requirement doc.
+ * Central vocabulary of TTS lines spoken by the pipeline. Every line has TWO variants —
+ * feminine (ค่ะ / นะคะ) and masculine (ครับ / นะครับ) — and the getter picks the right
+ * one from the current [PersonaHolder].
  *
- * Kept as compile-time constants because they're short, immutable, and referenced from
- * many places in the pipeline. Move to strings.xml later if we ever ship an English
- * build, but until then having them here avoids the resource-lookup overhead in a hot
- * code path and makes tests trivial.
+ * Kept as an `object` with `val get()` properties (not `const val`) so existing call sites
+ * like `ErrorSpeech.THINKING` still compile unchanged and produce persona-correct output.
  */
 object ErrorSpeech {
 
     // ─── Webhook progress (§1.2, §1.3) ────────────────────────────────────────
-    const val THINKING = "กำลังคิดค่ะ รอสักครู่นะคะ"
-    const val ONE_MORE_MOMENT = "อีกนิดนะคะ"
+    val THINKING: String get() = pick("กำลังคิดค่ะ รอสักครู่นะคะ", "กำลังคิดครับ รอสักครู่นะครับ")
+    val ONE_MORE_MOMENT: String get() = pick("อีกนิดนะคะ", "อีกนิดนะครับ")
 
     // ─── Webhook failure categories (§1.4, §6) ────────────────────────────────
-    const val OFFLINE_LIMITED = "โหมดออฟไลน์ค่ะ ทำได้เฉพาะโทรกับหยุดเล่นนะคะ"
-    const val TIMEOUT_WITH_FALLBACK = "ระบบหลักช้า ทำแบบออฟไลน์ให้ค่ะ"
-    const val TIMEOUT_NO_FALLBACK = "ระบบช้ามากตอนนี้ ทำได้เฉพาะโทรกับหยุดเล่นค่ะ"
-    const val HTTP_401 = "ระบบปฏิเสธการเชื่อมต่อค่ะ ตรวจสอบโทเค็นในแอปนะคะ"
-    const val HTTP_OTHER = "เซิร์ฟเวอร์มีปัญหาชั่วคราวค่ะ ลองใหม่อีกครั้งนะคะ"
+    val OFFLINE_LIMITED: String get() = pick(
+        "โหมดออฟไลน์ค่ะ ทำได้เฉพาะโทรกับหยุดเล่นนะคะ",
+        "โหมดออฟไลน์ครับ ทำได้เฉพาะโทรกับหยุดเล่นนะครับ",
+    )
+    val TIMEOUT_WITH_FALLBACK: String get() = pick(
+        "ระบบหลักช้า ทำแบบออฟไลน์ให้ค่ะ",
+        "ระบบหลักช้า ทำแบบออฟไลน์ให้ครับ",
+    )
+    val TIMEOUT_NO_FALLBACK: String get() = pick(
+        "ระบบช้ามากตอนนี้ ทำได้เฉพาะโทรกับหยุดเล่นค่ะ",
+        "ระบบช้ามากตอนนี้ ทำได้เฉพาะโทรกับหยุดเล่นครับ",
+    )
+    val HTTP_401: String get() = pick(
+        "ระบบปฏิเสธการเชื่อมต่อค่ะ ตรวจสอบโทเค็นในแอปนะคะ",
+        "ระบบปฏิเสธการเชื่อมต่อครับ ตรวจสอบโทเค็นในแอปนะครับ",
+    )
+    val HTTP_OTHER: String get() = pick(
+        "เซิร์ฟเวอร์มีปัญหาชั่วคราวค่ะ ลองใหม่อีกครั้งนะคะ",
+        "เซิร์ฟเวอร์มีปัญหาชั่วคราวครับ ลองใหม่อีกครั้งนะครับ",
+    )
 
     // ─── Feature-specific errors (§6.4, §6.5, §6.7) ───────────────────────────
-    const val YOUTUBE_NOT_FOUND = "ค้นหาไม่ได้ชั่วคราวค่ะ ลองพูดชื่อเจาะจงกว่านี้แล้วลองอีกครั้งนะคะ"
-    const val FM_STREAM_FAILED = "เปิดสถานีไม่สำเร็จค่ะ สถานีอาจมีปัญหาชั่วคราว"
-    const val NO_CELL_SIGNAL = "ตอนนี้ไม่มีสัญญาณโทรศัพท์ค่ะ ลองใหม่อีกครั้งนะคะ"
+    val YOUTUBE_NOT_FOUND: String get() = pick(
+        "ค้นหาไม่ได้ชั่วคราวค่ะ ลองพูดชื่อเจาะจงกว่านี้แล้วลองอีกครั้งนะคะ",
+        "ค้นหาไม่ได้ชั่วคราวครับ ลองพูดชื่อเจาะจงกว่านี้แล้วลองอีกครั้งนะครับ",
+    )
+    val FM_STREAM_FAILED: String get() = pick(
+        "เปิดสถานีไม่สำเร็จค่ะ สถานีอาจมีปัญหาชั่วคราว",
+        "เปิดสถานีไม่สำเร็จครับ สถานีอาจมีปัญหาชั่วคราว",
+    )
+    val NO_CELL_SIGNAL: String get() = pick(
+        "ตอนนี้ไม่มีสัญญาณโทรศัพท์ค่ะ ลองใหม่อีกครั้งนะคะ",
+        "ตอนนี้ไม่มีสัญญาณโทรศัพท์ครับ ลองใหม่อีกครั้งนะครับ",
+    )
 
     // ─── STT input problems (§4) ──────────────────────────────────────────────
-    const val NOT_HEARD_RETRY = "ไม่ได้ยินค่ะ พูดอีกครั้งนะคะ"
-    const val NOT_HEARD_GIVING_UP = "ยังไม่ได้ยินค่ะ ลองใหม่อีกครั้งนะคะ"
+    val NOT_HEARD_RETRY: String get() = pick("ไม่ได้ยินค่ะ พูดอีกครั้งนะคะ", "ไม่ได้ยินครับ พูดอีกครั้งนะครับ")
+    val NOT_HEARD_GIVING_UP: String get() = pick(
+        "ยังไม่ได้ยินค่ะ ลองใหม่อีกครั้งนะคะ",
+        "ยังไม่ได้ยินครับ ลองใหม่อีกครั้งนะครับ",
+    )
 
     // ─── Barge-in (§3) ────────────────────────────────────────────────────────
-    const val CANCELLED = "ยกเลิกแล้วค่ะ"
+    val CANCELLED: String get() = pick("ยกเลิกแล้วค่ะ", "ยกเลิกแล้วครับ")
 
     // ─── Preflight / self-check (§5.1) — spoken from VoiceCommandService ─────
-    const val PREFLIGHT_NOT_DEFAULT = "แอปนี้ยังไม่ได้เป็น Default Assistant ค่ะ เปิดแอปเพื่อแก้ไขนะคะ"
-    const val PREFLIGHT_MISSING_MIC = "สิทธิ์ไมโครโฟนหายไปค่ะ เปิดแอปเพื่อแก้ไขนะคะ"
-    const val PREFLIGHT_MISSING_CONTACTS = "สิทธิ์รายชื่อหายไปค่ะ เปิดแอปเพื่อแก้ไขนะคะ"
-    const val PREFLIGHT_MISSING_CALL = "สิทธิ์โทรออกหายไปค่ะ เปิดแอปเพื่อแก้ไขนะคะ"
+    val PREFLIGHT_NOT_DEFAULT: String get() = pick(
+        "แอปนี้ยังไม่ได้เป็น Default Assistant ค่ะ เปิดแอปเพื่อแก้ไขนะคะ",
+        "แอปนี้ยังไม่ได้เป็น Default Assistant ครับ เปิดแอปเพื่อแก้ไขนะครับ",
+    )
+    val PREFLIGHT_MISSING_MIC: String get() = pick(
+        "สิทธิ์ไมโครโฟนหายไปค่ะ เปิดแอปเพื่อแก้ไขนะคะ",
+        "สิทธิ์ไมโครโฟนหายไปครับ เปิดแอปเพื่อแก้ไขนะครับ",
+    )
+    val PREFLIGHT_MISSING_CONTACTS: String get() = pick(
+        "สิทธิ์รายชื่อหายไปค่ะ เปิดแอปเพื่อแก้ไขนะคะ",
+        "สิทธิ์รายชื่อหายไปครับ เปิดแอปเพื่อแก้ไขนะครับ",
+    )
+    val PREFLIGHT_MISSING_CALL: String get() = pick(
+        "สิทธิ์โทรออกหายไปค่ะ เปิดแอปเพื่อแก้ไขนะคะ",
+        "สิทธิ์โทรออกหายไปครับ เปิดแอปเพื่อแก้ไขนะครับ",
+    )
+
+    // ─── Interaction utility lines (previously hardcoded) ────────────────────
+    /** HelmetGreeter says this the moment the helmet connects. */
+    val HELMET_READY: String get() = pick("พร้อมใช้งานค่ะ", "พร้อมใช้งานครับ")
+
+    /** YouTube picker fallback when the rider doesn't pick after 2 rounds — spec §4.1. */
+    val YT_PICKER_DEFAULT_FIRST: String get() = pick("เปิดอันแรกให้นะคะ", "เปิดอันแรกให้นะครับ")
+
+    /** YouTube picker second-round retry lead-in. */
+    val YT_PICKER_UNCLEAR_PREFIX: String get() = pick("ไม่ชัดค่ะ ลองอีกที ", "ไม่ชัดครับ ลองอีกที ")
+
+    /** Settings "ทดลองฟัง" preview line — synthesized on demand, so intentionally short. */
+    val PREVIEW_SAMPLE: String get() = pick(
+        "สวัสดีค่ะ ทดสอบความเร็วเสียงพูด",
+        "สวัสดีครับ ทดสอบความเร็วเสียงพูด",
+    )
+
+    /** All 21 lines, in a stable order — used by the pre-synthesize cache warmer. */
+    fun allSystemLines(): List<String> = listOf(
+        THINKING, ONE_MORE_MOMENT,
+        OFFLINE_LIMITED, TIMEOUT_WITH_FALLBACK, TIMEOUT_NO_FALLBACK,
+        HTTP_401, HTTP_OTHER,
+        YOUTUBE_NOT_FOUND, FM_STREAM_FAILED, NO_CELL_SIGNAL,
+        NOT_HEARD_RETRY, NOT_HEARD_GIVING_UP,
+        CANCELLED,
+        PREFLIGHT_NOT_DEFAULT, PREFLIGHT_MISSING_MIC,
+        PREFLIGHT_MISSING_CONTACTS, PREFLIGHT_MISSING_CALL,
+        HELMET_READY, YT_PICKER_DEFAULT_FIRST, YT_PICKER_UNCLEAR_PREFIX,
+        PREVIEW_SAMPLE,
+    )
+
+    private fun pick(feminine: String, masculine: String): String =
+        when (PersonaHolder.get()) {
+            Persona.Feminine -> feminine
+            Persona.Masculine -> masculine
+        }
 }
