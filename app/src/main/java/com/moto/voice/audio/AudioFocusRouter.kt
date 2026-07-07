@@ -64,5 +64,43 @@ class AudioFocusRouter(private val context: Context) {
         Log.d(TAG, "focus abandoned")
     }
 
+    /**
+     * Convert whatever focus we're holding to AUDIOFOCUS_GAIN (permanent). Used by
+     * the pipeline right before executing a "stop" command so that other apps
+     * (YouTube, Spotify, etc.) receive AUDIOFOCUS_LOSS instead of
+     * AUDIOFOCUS_LOSS_TRANSIENT. The permanent variant tells them "don't auto-resume
+     * when the assistant releases focus" — otherwise our final [abandon] hands
+     * focus back and they immediately unpause the video we just told the rider we
+     * had stopped. Field-test bug: log showed action=stop, finishReason=ok but
+     * YouTube kept playing.
+     *
+     * @return true if we now hold permanent focus.
+     */
+    fun upgradeToPermanent(): Boolean {
+        val am = audioManager ?: return false
+        // Drop any transient focus we're holding first so the OS treats the new
+        // request as a fresh grant.
+        val existing = request
+        if (existing != null) {
+            runCatching { am.abandonAudioFocusRequest(existing) }
+            request = null
+        }
+
+        val attrs = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ASSISTANT)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build()
+        val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(attrs)
+            .setOnAudioFocusChangeListener(listener)
+            .build()
+        request = req
+        val result = runCatching { am.requestAudioFocus(req) }.getOrNull()
+        val granted = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        Log.d(TAG, "focus upgraded to permanent granted=$granted")
+        if (!granted) request = null
+        return granted
+    }
+
     private companion object { const val TAG = "AudioFocusRouter" }
 }

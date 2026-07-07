@@ -60,6 +60,10 @@ private const val HIGH_CONF = 0.75f
 private const val MIN_MEANINGFUL_LEN = 2
 /** Extract 11-char YouTube video id from anywhere in the string (bare id, URL, whatever). */
 private val YOUTUBE_ID_EXTRACT = Regex("([A-Za-z0-9_-]{11})")
+/** Default STT minimum-listen window (spec §4.2). */
+private const val DEFAULT_MIN_LISTEN_MS = 3_000L
+/** Disambiguation (contact / YouTube picker) needs longer for the rider to hear + reply. */
+private const val DISAMBIG_MIN_LISTEN_MS = 6_000L
 
 class VoiceCommandPipeline(
     private val context: Context,
@@ -197,7 +201,7 @@ class VoiceCommandPipeline(
         when (intercept) {
             LocalIntercept.Intercept.Stop -> {
                 stopAction = true
-                MediaStopper.stopAny(context)
+                executeStopSequence()
                 speakAndRemember("หยุดแล้ว")
                 recordHistory(HistoryAction.Stop)
             }
@@ -339,7 +343,7 @@ class VoiceCommandPipeline(
             }
             "stop" -> {
                 stopAction = true
-                MediaStopper.stopAny(context)
+                executeStopSequence()
                 speakAndRemember(resp.speak.ifBlank { "หยุดแล้ว" })
                 recordHistory(HistoryAction.Stop)
             }
@@ -400,16 +404,39 @@ class VoiceCommandPipeline(
         else makeCall(contact)
     }
 
+    /**
+     * Field-test rewrite (spec §2.2 – §2.4): read ALL matched candidates, include
+     * every valid answer-word in the instruction, re-prompt once on miss before
+     * cancelling, and give the rider 6s of listening (up from the default 3s) to
+     * think + speak.
+     */
     private suspend fun askDisambig(candidates: List<MatchResult>): Int {
-        val labels = listOf("คนแรก", "คนที่สอง", "คนที่สาม")
+        val labels = listOf("หนึ่ง", "สอง", "สาม")
         val list = candidates.mapIndexed { i, m ->
-            "${labels.getOrElse(i) { "คนที่ ${i + 1}" }} ${m.contact.displayName}"
-        }.joinToString(", ")
-        val ans = promptAndListen("พบหลายคน ได้แก่ $list พูด คนแรก คนที่สอง หรือ ยกเลิก", null)
-        return when (val c = NumberWordParser.parse(ans, candidates.size)) {
-            is NumberWordParser.Choice.Index -> c.zeroBased
-            else -> -1
-        }
+            "${labels.getOrElse(i) { "อันดับ${i + 1}" }} ${m.contact.displayName}"
+        }.joinToString(" ")
+        val answerHint = disambigAnswerHint(candidates.size)
+        val fullPrompt = "มี ${candidates.size} รายชื่อค่ะ $list เลือก $answerHint หรือ ยกเลิก"
+
+        val firstAns = promptAndListen(fullPrompt, null, DISAMBIG_MIN_LISTEN_MS)
+        val firstChoice = NumberWordParser.parse(firstAns, candidates.size)
+        if (firstChoice is NumberWordParser.Choice.Index) return firstChoice.zeroBased
+        if (firstChoice is NumberWordParser.Choice.Cancel) return -1
+
+        // Miss: re-prompt with a short one so the rider isn't left hanging.
+        val shortPrompt = "เลือก $answerHint คะ"
+        val retryAns = promptAndListen(shortPrompt, null, DISAMBIG_MIN_LISTEN_MS)
+        val retryChoice = NumberWordParser.parse(retryAns, candidates.size)
+        if (retryChoice is NumberWordParser.Choice.Index) return retryChoice.zeroBased
+        return -1  // Cancel / None → announce cancelled in caller.
+    }
+
+    /** "หนึ่ง สอง หรือ สาม" for 3 candidates, "หนึ่ง หรือ สอง" for 2, "หนึ่ง" for 1. */
+    private fun disambigAnswerHint(count: Int): String = when (count) {
+        1 -> "หนึ่ง"
+        2 -> "หนึ่ง หรือ สอง"
+        3 -> "หนึ่ง สอง หรือ สาม"
+        else -> (1..count).joinToString(" ") { "$it" }
     }
 
     private fun makeCall(contact: ContactEntry) {
@@ -580,6 +607,39 @@ class VoiceCommandPipeline(
         runCatching { context.startService(intent) }
     }
 
+    /**
+     * Ordered sequence for the "stop" command — replaces the fire-and-forget
+     * MediaStopper.stopAny that field-testing proved unreliable (YouTube kept
+     * playing / restarted after our transient focus was released).
+     *
+     *   1. **Upgrade our audio focus to AUDIOFOCUS_GAIN (permanent)** so other apps
+     *      receive AUDIOFOCUS_LOSS instead of AUDIOFOCUS_LOSS_TRANSIENT. Permanent
+     *      loss = "don't auto-resume", which is exactly the semantics of a user-
+     *      commanded stop.
+     *   2. **Send ACTION_STOP to our own FmPlayerService.** Its MediaSession will
+     *      be released in onDestroy; until then it can intercept dispatched media
+     *      buttons.
+     *   3. **300ms delay** so the FmPlayerService destruction reaches the point
+     *      where MediaSessionManager no longer routes media buttons to us.
+     *   4. **Dispatch KEYCODE_MEDIA_PAUSE.** Now targets whichever session is
+     *      actually playing (YouTube, Spotify, etc.).
+     *   5. **200ms delay** to give the target session a beat to process the pause.
+     *
+     * cleanup() will [AudioFocusRouter.abandon] afterwards; that's fine because
+     * we already handed the target app a permanent loss in step 1 — it won't
+     * unpause when we release.
+     */
+    private suspend fun executeStopSequence() {
+        Log.d(TAG, "stop: upgrading focus to permanent")
+        focusRouter.upgradeToPermanent()
+        Log.d(TAG, "stop: sending ACTION_STOP to our FM service")
+        sendToFm(FmPlayerService.ACTION_STOP)
+        delay(300)  // let our MediaSession release
+        Log.d(TAG, "stop: dispatching KEYCODE_MEDIA_PAUSE to external app")
+        MediaStopper.dispatchExternalPauseOnly(context)
+        delay(200)  // let the target session process
+    }
+
     // ─── Audio helpers ────────────────────────────────────────────────────────
 
     private suspend fun connectSco(timeoutMs: Long): Boolean =
@@ -596,19 +656,20 @@ class VoiceCommandPipeline(
      * transient recognizer errors. Does NOT retry on real silence — for that use
      * [listenMainWithMissRetry] which speaks a prompt between attempts.
      */
-    private suspend fun listenOnce(entry: DebugEntry?): String = listenOnceDetailed(entry).text
+    private suspend fun listenOnce(entry: DebugEntry?, minListenMs: Long = DEFAULT_MIN_LISTEN_MS): String =
+        listenOnceDetailed(entry, minListenMs).text
 
     /** Exposes the outcome so the main-flow retry logic can decide what to do next. */
-    private suspend fun listenOnceDetailed(entry: DebugEntry?): SttOutcome {
+    private suspend fun listenOnceDetailed(entry: DebugEntry?, minListenMs: Long = DEFAULT_MIN_LISTEN_MS): SttOutcome {
         // Settle delay so TTS audio finishes draining and the recognizer isn't still
         // holding the mic from a previous session. See bug report §1.
         delay(350)
-        val first = listenOnceRaw(entry, isRetry = false)
+        val first = listenOnceRaw(entry, isRetry = false, minListenMs = minListenMs)
         if (first.text.isNotBlank()) return first
         if (first.wasTransientError) {
             Log.d(TAG, "STT transient error — retrying once")
             delay(400)
-            return listenOnceRaw(entry, isRetry = true)
+            return listenOnceRaw(entry, isRetry = true, minListenMs = minListenMs)
         }
         return first
     }
@@ -647,7 +708,7 @@ class VoiceCommandPipeline(
         val confidence: Float = -1f,
     )
 
-    private suspend fun listenOnceRaw(entry: DebugEntry?, isRetry: Boolean): SttOutcome =
+    private suspend fun listenOnceRaw(entry: DebugEntry?, isRetry: Boolean, minListenMs: Long = DEFAULT_MIN_LISTEN_MS): SttOutcome =
         suspendCancellableCoroutine { cont ->
             recognizer?.destroy()
             val rec = SpeechRecognizer.createSpeechRecognizer(context)
@@ -713,8 +774,8 @@ class VoiceCommandPipeline(
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
                 putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
                 // §4.2: shorter complete-silence so the rider isn't left hanging in wind
-                // noise; minimum-length still 3s so slow speakers get a fair chance.
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 3_000L)
+                // noise; minimum-length caller-overridable so disambig gets more time.
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, minListenMs)
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_200L)
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 800L)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
@@ -752,10 +813,10 @@ class VoiceCommandPipeline(
      * ≥75% similar to the prompt we just spoke, as an extra guard for phone-mic
      * mode where speaker/mic isolation is zero.
      */
-    private suspend fun promptAndListen(prompt: String, entry: DebugEntry?): String {
+    private suspend fun promptAndListen(prompt: String, entry: DebugEntry?, minListenMs: Long = DEFAULT_MIN_LISTEN_MS): String {
         speakAndRemember(prompt)
         Earcon.ready()
-        val result = listenOnce(entry)
+        val result = listenOnce(entry, minListenMs)
         if (TtsEchoFilter.isEcho(result, memory.lastSpoken)) {
             Log.w(TAG, "echo detected — treating as no-speech: '$result'")
             entry?.error = ((entry?.error ?: "") + " tts_echo_filtered").trim()

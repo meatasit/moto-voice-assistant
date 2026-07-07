@@ -106,7 +106,7 @@ class HistoryActivity : AppCompatActivity() {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
                 else startService(intent)
             }
-            HistoryAction.Stop -> MediaStopper.stopAny(this)
+            HistoryAction.Stop -> MediaStopper.stopAnySimple(this)
             is HistoryAction.Speak -> Unit  // no-op: nothing to repeat for a speak-only entry
         }
     }
