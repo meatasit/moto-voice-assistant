@@ -26,10 +26,13 @@ import com.moto.voice.data.AppSettings
 import com.moto.voice.data.HistoryAction
 import com.moto.voice.data.HistoryEntry
 import com.moto.voice.data.OfflineNotifier
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import com.moto.voice.debug.AudioRoute
 import com.moto.voice.debug.DebugEntry
 import com.moto.voice.debug.DebugLog
 import com.moto.voice.debug.FinishReason
+import com.moto.voice.debug.ScoState
 import com.moto.voice.nlu.ErrorSpeech
 import com.moto.voice.media.FmPlaybackState
 import com.moto.voice.media.FmPlayerService
@@ -136,6 +139,7 @@ class VoiceCommandPipeline(
             }
         } else false
         entry.audioRoute = if (scoOk) AudioRoute.SCO else AudioRoute.PHONE
+        entry.scoState = resolveScoState(hasBt, scoOk)
 
         // Tell the rider we're falling back to the phone mic — but only when we tried and
         // failed. Skip the announcement entirely when there's no BT permission (no helmet expected).
@@ -390,8 +394,7 @@ class VoiceCommandPipeline(
         // clearly says "ไม่/ยกเลิก" we cancel; otherwise (positive keyword OR unusable
         // response OR silence) we CALL — riders don't have time to re-do this on a bike
         // and they can always cancel the outgoing call from the phone dialer.
-        speakAndRemember("$msg พูด ยกเลิก เพื่อยกเลิก")
-        val answer = listenOnce(null)
+        val answer = promptAndListen("$msg พูด ยกเลิก เพื่อยกเลิก", null)
         val explicitCancel = answer.contains("ไม่") || answer.contains("ยกเลิก") || answer.contains("cancel", ignoreCase = true)
         if (explicitCancel) speakAndRemember(ErrorSpeech.CANCELLED)
         else makeCall(contact)
@@ -402,8 +405,7 @@ class VoiceCommandPipeline(
         val list = candidates.mapIndexed { i, m ->
             "${labels.getOrElse(i) { "คนที่ ${i + 1}" }} ${m.contact.displayName}"
         }.joinToString(", ")
-        speakAndRemember("พบหลายคน ได้แก่ $list พูด คนแรก คนที่สอง หรือ ยกเลิก")
-        val ans = listenOnce(null)
+        val ans = promptAndListen("พบหลายคน ได้แก่ $list พูด คนแรก คนที่สอง หรือ ยกเลิก", null)
         return when (val c = NumberWordParser.parse(ans, candidates.size)) {
             is NumberWordParser.Choice.Index -> c.zeroBased
             else -> -1
@@ -511,8 +513,8 @@ class VoiceCommandPipeline(
         }.joinToString(" ") + " เอาอันไหนดี"
 
         repeat(2) { attempt ->
-            speakAndRemember(if (attempt == 0) menuText else ErrorSpeech.YT_PICKER_UNCLEAR_PREFIX + menuText)
-            val ans = listenOnce(entry)
+            val prompt = if (attempt == 0) menuText else ErrorSpeech.YT_PICKER_UNCLEAR_PREFIX + menuText
+            val ans = promptAndListen(prompt, entry)
             when (val choice = NumberWordParser.parse(ans, top.size)) {
                 is NumberWordParser.Choice.Index -> return top[choice.zeroBased]
                 NumberWordParser.Choice.Cancel -> {
@@ -632,8 +634,8 @@ class VoiceCommandPipeline(
         if (!shouldPrompt) return ""
 
         entry.sttRetryCount = 1
-        speakAndRemember(ErrorSpeech.NOT_HEARD_RETRY)
-        val second = listenOnceDetailed(entry)
+        // Use the detailed variant so we go through Earcon.ready + echo filter.
+        val second = promptAndListenDetailed(ErrorSpeech.NOT_HEARD_RETRY, entry)
         val secondText = second.text.trim()
         return if (secondText.length < MIN_MEANINGFUL_LEN) "" else secondText
     }
@@ -739,6 +741,42 @@ class VoiceCommandPipeline(
         tts.speakAwait(text)
     }
 
+    /**
+     * Every place that asks the rider a question uses this helper. It enforces the
+     * flow contract from field-test bug §2: speakAwait must complete (audio done,
+     * not just synth done) → Earcon.ready gives an audible gap → then listen. This
+     * is what stops the mic from picking up the tail of the assistant's own TTS —
+     * the exact echo captured in log 1783432847869.
+     *
+     * On top of the audible gap, [TtsEchoFilter] rejects any STT result that is
+     * ≥75% similar to the prompt we just spoke, as an extra guard for phone-mic
+     * mode where speaker/mic isolation is zero.
+     */
+    private suspend fun promptAndListen(prompt: String, entry: DebugEntry?): String {
+        speakAndRemember(prompt)
+        Earcon.ready()
+        val result = listenOnce(entry)
+        if (TtsEchoFilter.isEcho(result, memory.lastSpoken)) {
+            Log.w(TAG, "echo detected — treating as no-speech: '$result'")
+            entry?.error = ((entry?.error ?: "") + " tts_echo_filtered").trim()
+            return ""
+        }
+        return result
+    }
+
+    /** Detailed variant used by [listenMainWithMissRetry] where we need the SttOutcome. */
+    private suspend fun promptAndListenDetailed(prompt: String, entry: DebugEntry): SttOutcome {
+        speakAndRemember(prompt)
+        Earcon.ready()
+        val outcome = listenOnceDetailed(entry)
+        if (TtsEchoFilter.isEcho(outcome.text, memory.lastSpoken)) {
+            Log.w(TAG, "echo detected — treating as no-speech: '${outcome.text}'")
+            entry.error = ((entry.error ?: "") + " tts_echo_filtered").trim()
+            return SttOutcome(text = "", wasTransientError = false, wasNoSpeech = true, confidence = -1f)
+        }
+        return outcome
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private fun finish() {
@@ -776,4 +814,23 @@ class VoiceCommandPipeline(
 
     private fun hasPerm(p: String) =
         ContextCompat.checkSelfPermission(context, p) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * Explain to the debug log WHY audioRoute ended up sco/phone. Just knowing
+     * "phone" isn't enough for field diagnosis — is it "no helmet paired" (normal
+     * for testing / no-helmet mode) or "helmet paired but SCO handshake failed"
+     * (a real problem)?
+     */
+    private fun resolveScoState(hasBtPermission: Boolean, scoOk: Boolean): String {
+        if (scoOk) return ScoState.CONNECTED
+        if (!hasBtPermission) return ScoState.NO_PERMISSION
+        // scoOk == false + we have permission — probe the adapter to see if there
+        // even IS a headset connected. If yes → SCO failed. If no → no headset.
+        val bm = context.getSystemService(BluetoothManager::class.java) ?: return ScoState.NO_HEADSET
+        val adapter = bm.adapter ?: return ScoState.NO_HEADSET
+        val connected = runCatching {
+            adapter.getProfileConnectionState(BluetoothProfile.HEADSET) == BluetoothProfile.STATE_CONNECTED
+        }.getOrDefault(false)
+        return if (connected) ScoState.FAILED else ScoState.NO_HEADSET
+    }
 }
