@@ -18,7 +18,7 @@ class TtsCacheKeyTest {
 
     /** Same shape as TtsCache.keyFor. */
     private fun keyFor(text: String, voice: String, rate: Float): String {
-        val bytes = "$text$voice${"%.2f".format(rate)}".toByteArray(Charsets.UTF_8)
+        val bytes = "$text|$voice|${"%.2f".format(rate)}".toByteArray(Charsets.UTF_8)
         return MessageDigest.getInstance("SHA-256").digest(bytes)
             .joinToString("") { "%02x".format(it) }
     }
