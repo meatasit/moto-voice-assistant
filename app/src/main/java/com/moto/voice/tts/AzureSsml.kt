@@ -1,5 +1,7 @@
 package com.moto.voice.tts
 
+import kotlin.math.roundToInt
+
 /**
  * Small helpers for building Azure Speech SSML documents. Kept separate from
  * [AzureTtsEngine] so the escaping + rate-mapping logic is trivial to unit-test.
@@ -26,9 +28,13 @@ object AzureSsml {
      * Azure SSML `prosody rate` accepts either a percentage like "+15%" / "-20%" OR
      * a named speed. We use the percentage form so it maps linearly from our slider.
      * Slider 1.0f → 0% (default), 1.5f → +50%, 0.8f → -20%. Clamped at [-50, +100].
+     *
+     * Uses [roundToInt] rather than [toInt] because float subtraction turns 0.8f - 1f
+     * into -0.19999999f — truncating would yield -19% instead of the -20% the rider
+     * expects when they set the slider to 0.8.
      */
     fun rateAttr(sliderValue: Float): String {
-        val percent = ((sliderValue - 1f) * 100f).toInt().coerceIn(-50, 100)
+        val percent = ((sliderValue - 1f) * 100f).roundToInt().coerceIn(-50, 100)
         return if (percent >= 0) "+${percent}%" else "${percent}%"
     }
 
