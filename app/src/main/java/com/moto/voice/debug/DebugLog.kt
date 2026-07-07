@@ -27,6 +27,12 @@ data class DebugEntry(
     var sttRetryCount: Int = 0,
     /** Which mic actually recorded ("sco" = helmet, "phone" = built-in). Spec §9.1. */
     var audioRoute: String? = null,
+    /**
+     * Distinguishes "SCO didn't come up because no headset was paired" from
+     * "SCO tried and failed" — audioRoute=phone alone can't tell them apart.
+     * Values: [ScoState].
+     */
+    var scoState: String? = null,
 
     // ─── TTS instrumentation (Sprint I §6) ───────────────────────────────────
     /** Which engine actually delivered the audio (azure / android / android_fallback). */
@@ -46,6 +52,7 @@ data class DebugEntry(
         append("[${time()}]")
         if (sttFinal.isNotBlank()) append("  STT: \"$sttFinal\"")
         if (audioRoute != null) append("  route:${audioRoute}")
+        if (scoState != null) append("  sco:${scoState}")
         if (scoTimeMs > 0) append("  SCO:${scoTimeMs}ms")
         if (sttTimeMs > 0) append("  STT:${sttTimeMs}ms")
         if (webhookTimeMs > 0) append("  WH:${webhookTimeMs}ms")
@@ -61,6 +68,21 @@ object AudioRoute {
     const val SCO = "sco"
     /** Falling back to the built-in phone microphone. */
     const val PHONE = "phone"
+}
+
+/**
+ * Constants for [DebugEntry.scoState] — granular explanation of why audioRoute
+ * ended up SCO or PHONE. Populated by the pipeline right after connectSco returns.
+ */
+object ScoState {
+    /** SCO link established successfully; mic + speaker on the helmet. */
+    const val CONNECTED = "connected"
+    /** A Bluetooth HFP headset IS connected but the SCO handshake failed within timeout. */
+    const val FAILED = "failed"
+    /** No paired/connected HFP device — normal for testing without a helmet. */
+    const val NO_HEADSET = "no_headset"
+    /** BLUETOOTH_CONNECT permission missing — we can't probe. */
+    const val NO_PERMISSION = "no_permission"
 }
 
 /**
