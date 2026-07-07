@@ -5,6 +5,9 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
 import com.moto.voice.bt.HelmetGreeter
+import com.moto.voice.data.AppSettings
+import com.moto.voice.nlu.Persona
+import com.moto.voice.nlu.PersonaHolder
 
 class MotoVoiceApplication : Application() {
 
@@ -18,7 +21,16 @@ class MotoVoiceApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         createChannels()
+        applyPersonaFromSettings()
         greeter = HelmetGreeter(this).also { it.start() }
+    }
+
+    /** Bootstrap [PersonaHolder] from the persisted setting so every ErrorSpeech line reads correctly from the first frame. */
+    private fun applyPersonaFromSettings() {
+        val stored = runCatching { AppSettings(this).persona }.getOrDefault(AppSettings.PERSONA_FEMININE)
+        PersonaHolder.set(
+            if (stored == AppSettings.PERSONA_MASCULINE) Persona.Masculine else Persona.Feminine
+        )
     }
 
     override fun onTerminate() {

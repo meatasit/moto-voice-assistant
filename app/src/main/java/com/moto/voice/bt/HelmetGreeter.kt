@@ -19,6 +19,7 @@ import com.moto.voice.MainActivity
 import com.moto.voice.MotoVoiceApplication.Companion.CH_LISTENING
 import com.moto.voice.VoiceAssistActivity
 import com.moto.voice.data.AppSettings
+import com.moto.voice.nlu.ErrorSpeech
 import com.moto.voice.tts.ThaiTTS
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -89,7 +90,7 @@ class HelmetGreeter(private val app: Context) {
         ttsJob = scope.launch {
             withTimeoutOrNull(4_000L) {
                 val tts = ThaiTTS(app)
-                tts.speakAwait("พร้อมใช้งานครับ")
+                tts.speakAwait(ErrorSpeech.HELMET_READY)
                 tts.stop()
             }
         }

@@ -6,7 +6,8 @@ package com.moto.voice.nlu
  * (contact picker, YouTube picker) — max 3 items today, so we only care about 1..3.
  *
  * Returns [Choice.None] when we can't tell — the caller then decides whether to ask
- * again or default (per spec: default to the first option and speak "เปิดอันแรกให้นะครับ").
+ * again or default (per spec: default to the first option and speak the persona-appropriate
+ * ErrorSpeech.YT_PICKER_DEFAULT_FIRST line).
  */
 object NumberWordParser {
 

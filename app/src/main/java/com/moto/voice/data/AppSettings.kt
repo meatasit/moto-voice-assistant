@@ -26,6 +26,17 @@ class AppSettings(context: Context) {
         const val MIN_ASSIST_VOLUME = 0.5f
         const val MAX_ASSIST_VOLUME = 1.5f
         const val DEFAULT_ASSIST_VOLUME = 1.0f
+        const val PERSONA_FEMININE = "feminine"
+        const val PERSONA_MASCULINE = "masculine"
+
+        // Azure defaults (spec §4.1, §4.3).
+        const val DEFAULT_AZURE_REGION = "southeastasia"
+        const val AZURE_VOICE_PREMWADEE = "th-TH-PremwadeeNeural"  // feminine
+        const val AZURE_VOICE_NIWAT = "th-TH-NiwatNeural"          // masculine
+        const val AZURE_VOICE_ACHARA = "th-TH-AcharaNeural"        // feminine
+        const val DEFAULT_AZURE_VOICE = AZURE_VOICE_PREMWADEE
+
+        val AZURE_VOICES = listOf(AZURE_VOICE_PREMWADEE, AZURE_VOICE_NIWAT, AZURE_VOICE_ACHARA)
     }
 
     /** true if the auth token store is hardware-backed encrypted, false if using plaintext fallback. */
@@ -99,7 +110,7 @@ class AppSettings(context: Context) {
         get() = prefs.getBoolean("ask_youtube", false)
         set(v) { prefs.edit().putBoolean("ask_youtube", v).apply() }
 
-    /** Spec §7/§8: default ON — TTS says "พร้อมใช้งานครับ" through the helmet on connect. */
+    /** Spec §7/§8: default ON — TTS says a short greeting through the helmet on connect. */
     var greetOnConnect: Boolean
         get() = prefs.getBoolean("greet_on_connect", true)
         set(v) { prefs.edit().putBoolean("greet_on_connect", v).apply() }
@@ -123,4 +134,26 @@ class AppSettings(context: Context) {
     var onboardingComplete: Boolean
         get() = prefs.getBoolean("onboarding_done", false)
         set(v) { prefs.edit().putBoolean("onboarding_done", v).apply() }
+
+    /**
+     * Which polite-particle set the assistant uses. Serialized as "feminine" / "masculine"
+     * to keep exported backup JSON stable. Default feminine to match v1.x baseline behaviour.
+     */
+    var persona: String
+        get() = prefs.getString("persona", PERSONA_FEMININE) ?: PERSONA_FEMININE
+        set(v) { prefs.edit().putString("persona", v).apply() }
+
+    // ─── Azure Neural TTS (Sprint I) ─────────────────────────────────────────
+    var azureRegion: String
+        get() = prefs.getString("azure_region", DEFAULT_AZURE_REGION) ?: DEFAULT_AZURE_REGION
+        set(v) { prefs.edit().putString("azure_region", v).apply() }
+
+    /** Stored in EncryptedSharedPreferences (same slot as auth token). Blank = Azure disabled. */
+    var azureKey: String
+        get() = secure.getString("azure_key", "") ?: ""
+        set(v) { secure.edit().putString("azure_key", v).apply() }
+
+    var azureVoice: String
+        get() = prefs.getString("azure_voice", DEFAULT_AZURE_VOICE) ?: DEFAULT_AZURE_VOICE
+        set(v) { prefs.edit().putString("azure_voice", v).apply() }
 }

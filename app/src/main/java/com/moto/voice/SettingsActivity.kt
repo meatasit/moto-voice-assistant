@@ -8,13 +8,18 @@ import android.text.method.PasswordTransformationMethod
 import android.view.MenuItem
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import com.moto.voice.data.AppSettings
 import com.moto.voice.data.SettingsBackup
 import com.moto.voice.databinding.ActivitySettingsBinding
 import com.moto.voice.network.WebhookClient
+import com.moto.voice.nlu.ErrorSpeech
+import com.moto.voice.nlu.PersonaHolder
+import com.moto.voice.tts.AzureTtsState
 import com.moto.voice.tts.ThaiTTS
+import com.moto.voice.tts.TtsRouter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -25,6 +30,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var binding: ActivitySettingsBinding
     private lateinit var settings: AppSettings
     private var tokenVisible = false
+    private var azureKeyVisible = false
     private var testJob: Job? = null
     private var previewTts: ThaiTTS? = null
 
@@ -66,6 +72,19 @@ class SettingsActivity : AppCompatActivity() {
         binding.switchResumeAfterCall.isChecked = settings.resumeAfterCall
         binding.sliderAssistantVolume.value = settings.assistantVolume
         binding.tvAssistantVolumeValue.text = formatRate(settings.assistantVolume)
+
+        // Azure section
+        binding.etAzureRegion.setText(settings.azureRegion)
+        binding.etAzureKey.setText(settings.azureKey)
+        binding.etAzureKey.transformationMethod = PasswordTransformationMethod.getInstance()
+        loadVoiceDropdown()
+    }
+
+    private fun loadVoiceDropdown() {
+        val voices = AppSettings.AZURE_VOICES
+        val adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, voices)
+        binding.ddAzureVoice.setAdapter(adapter)
+        binding.ddAzureVoice.setText(settings.azureVoice, false)
     }
 
     private fun formatRate(rate: Float): String = "%.1fx".format(rate)
@@ -122,6 +141,69 @@ class SettingsActivity : AppCompatActivity() {
         }
         binding.btnImportSettings.setOnClickListener {
             openBackupFile.launch(arrayOf("application/json"))
+        }
+
+        // ─── Azure Neural TTS ────────────────────────────────────────────────
+        binding.btnShowAzureKey.setOnClickListener {
+            azureKeyVisible = !azureKeyVisible
+            binding.etAzureKey.transformationMethod =
+                if (azureKeyVisible) null else PasswordTransformationMethod.getInstance()
+            binding.etAzureKey.setSelection(binding.etAzureKey.text?.length ?: 0)
+            binding.btnShowAzureKey.text = if (azureKeyVisible) getString(R.string.token_hide) else getString(R.string.token_show)
+        }
+        binding.ddAzureVoice.setOnItemClickListener { _, _, position, _ ->
+            val voice = AppSettings.AZURE_VOICES[position]
+            settings.azureVoice = voice
+            // Auto-update persona per §5.2 so ค่ะ/ครับ flips whenever voice does.
+            val newPersona = com.moto.voice.nlu.PersonaHolder.personaForVoice(voice)
+            PersonaHolder.set(newPersona)
+            settings.persona = if (newPersona == com.moto.voice.nlu.Persona.Feminine)
+                AppSettings.PERSONA_FEMININE else AppSettings.PERSONA_MASCULINE
+            // Rebuild the Azure engine so it uses the new voice; warm cache in bg.
+            val router = TtsRouter.getOrCreate(this@SettingsActivity)
+            router.reloadAzureConfig()
+            router.warmCache()
+        }
+        binding.btnAzurePreview.setOnClickListener { previewAzure() }
+    }
+
+    /** Save Azure region/key + fire a preview through TtsRouter to validate the key. */
+    private fun previewAzure() {
+        // Persist inputs before we spin up the engine.
+        settings.azureRegion = binding.etAzureRegion.text.toString().trim()
+            .ifBlank { AppSettings.DEFAULT_AZURE_REGION }
+        settings.azureKey = binding.etAzureKey.text.toString().trim()
+        settings.azureVoice = binding.ddAzureVoice.text.toString()
+            .ifBlank { AppSettings.DEFAULT_AZURE_VOICE }
+
+        if (settings.azureKey.isBlank()) {
+            binding.tvAzureResult.text = "❌ ยังไม่ได้กรอก key"
+            return
+        }
+        binding.tvAzureResult.text = "กำลังสังเคราะห์..."
+        binding.btnAzurePreview.isEnabled = false
+
+        // Force router to pick up the new config immediately.
+        val router = TtsRouter.getOrCreate(this)
+        router.reloadAzureConfig()
+
+        val start = System.currentTimeMillis()
+        previewTts?.stop()
+        previewTts = ThaiTTS(this).apply {
+            speak(ErrorSpeech.PREVIEW_SAMPLE) {
+                runOnUiThread {
+                    binding.btnAzurePreview.isEnabled = true
+                    binding.tvAzureResult.text = when (AzureTtsState.result()) {
+                        AzureTtsState.LastResult.Ok ->
+                            "✅ synth ${AzureTtsState.synthMs()}ms · play ${AzureTtsState.playMs()}ms" +
+                                if (AzureTtsState.cacheHit()) " · cache" else ""
+                        AzureTtsState.LastResult.Failed ->
+                            "❌ ${AzureTtsState.error() ?: "unknown"} — ใช้ Android แทน (${System.currentTimeMillis() - start}ms)"
+                        AzureTtsState.LastResult.Never ->
+                            "⚠️ ไม่ได้เรียก Azure — key ว่างหรือออฟไลน์ (${System.currentTimeMillis() - start}ms)"
+                    }
+                }
+            }
         }
     }
 
@@ -199,7 +281,7 @@ class SettingsActivity : AppCompatActivity() {
         settings.ttsSpeechRate = binding.sliderTtsRate.value
         previewTts?.stop()
         previewTts = ThaiTTS(this).apply {
-            speak("สวัสดีครับ ทดสอบความเร็วเสียงพูด")
+            speak(ErrorSpeech.PREVIEW_SAMPLE)
         }
     }
 

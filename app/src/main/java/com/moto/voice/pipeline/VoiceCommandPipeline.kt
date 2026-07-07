@@ -511,7 +511,7 @@ class VoiceCommandPipeline(
         }.joinToString(" ") + " เอาอันไหนดี"
 
         repeat(2) { attempt ->
-            speakAndRemember(if (attempt == 0) menuText else "ไม่ชัดครับ ลองอีกที $menuText")
+            speakAndRemember(if (attempt == 0) menuText else ErrorSpeech.YT_PICKER_UNCLEAR_PREFIX + menuText)
             val ans = listenOnce(entry)
             when (val choice = NumberWordParser.parse(ans, top.size)) {
                 is NumberWordParser.Choice.Index -> return top[choice.zeroBased]
@@ -524,8 +524,7 @@ class VoiceCommandPipeline(
         }
 
         // Default per spec: open first + tell the rider we did.
-        // Feminine voice consistency: "ค่ะ" not "ครับ".
-        speakAndRemember("เปิดอันแรกให้นะคะ")
+        speakAndRemember(ErrorSpeech.YT_PICKER_DEFAULT_FIRST)
         return top.first()
     }
 
