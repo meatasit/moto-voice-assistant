@@ -112,6 +112,23 @@ class BluetoothAudioRouter(private val context: Context) {
         }
     }
 
+    /**
+     * Release SCO and reset audio routing so A2DP can take over as the primary output.
+     *
+     * Field-test log 1783477052378 showed every interaction leaving `scoState=connected`
+     * behind — the rider heard the TTS confirmation clearly but every subsequent media
+     * (YouTube / FM) was silent. Root cause was two-fold:
+     *
+     *   1. On API 31+, [AudioManager.clearCommunicationDevice] cancels the request but
+     *      does NOT reset the audio mode. If any layer (TTS, SpeechRecognizer) had
+     *      nudged the platform into MODE_IN_COMMUNICATION, STREAM_MUSIC kept routing
+     *      through the mono SCO channel and A2DP stayed suppressed. Explicitly setting
+     *      MODE_NORMAL after the clear guarantees music routing.
+     *   2. On <31, `stopBluetoothSco()` needs the mode flipped too; some vendor stacks
+     *      leave STREAM_MUSIC pinned to SCO until mode changes.
+     *
+     * Idempotent — safe to call from cleanup even if we never connected.
+     */
     @Suppress("DEPRECATION")
     fun disconnect() {
         timeoutTask?.let { handler.removeCallbacks(it) }
@@ -126,7 +143,16 @@ class BluetoothAudioRouter(private val context: Context) {
                 am.isBluetoothScoOn = false
             }
         }
+        // Belt-and-braces: force MODE_NORMAL so A2DP can carry STREAM_MUSIC (see kdoc).
+        runCatching { am.mode = AudioManager.MODE_NORMAL }
     }
+
+    /**
+     * Current audio mode as read from [AudioManager]. Used by the pipeline to log
+     * `audioMode` on media actions so we can prove in the field log that MODE_NORMAL
+     * was reached before ExoPlayer / the YouTube intent kicked off.
+     */
+    fun currentAudioMode(): Int = audioManager?.mode ?: AudioManager.MODE_INVALID
 
     private fun fireOnce(connected: Boolean) {
         if (callbackFired) return

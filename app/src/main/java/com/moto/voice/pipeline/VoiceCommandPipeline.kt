@@ -28,6 +28,7 @@ import com.moto.voice.data.HistoryEntry
 import com.moto.voice.data.OfflineNotifier
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import com.moto.voice.debug.AudioModeName
 import com.moto.voice.debug.AudioRoute
 import com.moto.voice.debug.DebugEntry
 import com.moto.voice.debug.DebugLog
@@ -117,6 +118,24 @@ class VoiceCommandPipeline(
     private suspend fun runPipeline() {
         val entry = DebugLog.new()
         currentEntry = entry
+        try {
+            runPipelineBody(entry)
+        } catch (t: Throwable) {
+            // Spec §1.1 — unexpected throw must NOT leave SCO holding the audio route.
+            // Log the reason so the field can tell that finally saved us and it wasn't
+            // a normal exit. finally block below runs cleanup unconditionally.
+            Log.e(TAG, "runPipeline threw — running finally cleanup", t)
+            entry.error = ((entry.error ?: "") + " runPipeline_threw:${t.javaClass.simpleName}").trim()
+            throw t
+        } finally {
+            // finish() no-ops if already called by one of the explicit branches, so
+            // callers still get a single onFinished() event but cleanup() is guaranteed
+            // to run — SCO teardown, MODE_NORMAL, focus abandon, TTS stop.
+            finish()
+        }
+    }
+
+    private suspend fun runPipelineBody(entry: DebugEntry) {
         val t0 = System.currentTimeMillis()
 
         val availability = PhoneStateGuard.availability(context)
@@ -124,7 +143,7 @@ class VoiceCommandPipeline(
             entry.error = "phone unavailable: $availability"
             entry.finishReason = FinishReason.PHONE_UNAVAILABLE
             speakAndRemember(PhoneStateGuard.reasonText(availability))
-            finish(); return
+            return
         }
 
         // Duck / pause other media so the mic doesn't record over YT, Spotify, etc.
@@ -157,7 +176,7 @@ class VoiceCommandPipeline(
             entry.error = "no speech recognition service"
             Earcon.error()
             speakAndRemember("อุปกรณ์ไม่รองรับการรับเสียง")
-            finish(); return
+            return
         }
 
         Earcon.ready()
@@ -171,7 +190,7 @@ class VoiceCommandPipeline(
             Earcon.error()
             entry.finishReason = FinishReason.NO_SPEECH
             speakAndRemember(ErrorSpeech.NOT_HEARD_GIVING_UP)
-            finish(); return
+            return
         }
 
         // Global self-echo guard (spec bug-2 round-2): if the main STT captured
@@ -184,7 +203,7 @@ class VoiceCommandPipeline(
             entry.finishReason = FinishReason.SELF_ECHO
             Earcon.error()
             speakAndRemember(ErrorSpeech.NOT_HEARD_GIVING_UP)
-            finish(); return
+            return
         }
 
         heardText = text
@@ -233,6 +252,7 @@ class VoiceCommandPipeline(
                 if (url.isNullOrBlank()) speakAndRemember("ยังไม่เคยเปิดวิทยุ พูดชื่อคลื่นได้เลย")
                 else {
                     speakAndRemember("เปิด $name")
+                    releaseScoBeforeMedia(entry)
                     startFm(url, name, memory.lastStationFrequency)
                 }
             }
@@ -379,6 +399,7 @@ class VoiceCommandPipeline(
                 if (!resp.streamUrl.isNullOrBlank()) {
                     val name = resp.stationName ?: resp.frequency?.let { "FM $it" } ?: "วิทยุ"
                     speakAndRemember(resp.speak.ifBlank { "กำลังเปิด $name" })
+                    releaseScoBeforeMedia(entry)
                     startFm(resp.streamUrl, name, resp.frequency)
                 } else {
                     speakAndRemember(resp.speak.ifBlank { "ไม่มี stream URL" })
@@ -528,6 +549,7 @@ class VoiceCommandPipeline(
                 else -> "กำลังเปิด YouTube"
             }
             speakAndRemember(spoken)
+            releaseScoBeforeMedia(entry)
             openYoutube(chosen.id, resp.query, entry)
             recordHistory(HistoryAction.YoutubeOpen(chosen.id, chosen.title))
             return
@@ -684,6 +706,36 @@ class VoiceCommandPipeline(
     }
 
     // ─── Audio helpers ────────────────────────────────────────────────────────
+
+    /**
+     * Field-test bug from log 1783477052378: with the helmet paired, TTS confirmations
+     * were heard clearly (SCO up) but the media that came next was silent every time.
+     * Root cause — the youtube/fm intent fired while SCO was still up + we still held
+     * audio focus, so YouTube couldn't grab music focus / A2DP routing wasn't primary.
+     *
+     * Spec §1.2 fix sequence, called AFTER the confirmation TTS finishes and BEFORE the
+     * media intent / FmPlayerService start:
+     *
+     *   1. Abandon our audio focus so the media app can gain STREAM_MUSIC focus.
+     *   2. Disconnect SCO — [BluetoothAudioRouter.disconnect] now also flips
+     *      audio mode back to MODE_NORMAL as of this fix.
+     *   3. Sleep 800ms for A2DP to become the active output (per spec §1.2 — either
+     *      listen for AudioDeviceCallback, OR 800ms delay minimum; the delay is
+     *      simpler and works uniformly across vendor stacks).
+     *   4. Log `scoTeardownMs` + `audioMode` to the debug entry so the next field log
+     *      can confirm MODE_NORMAL was reached before the intent fired.
+     *
+     * cleanup() will call [BluetoothAudioRouter.disconnect] + [AudioFocusRouter.abandon]
+     * again at pipeline end — both are idempotent so this pre-release is safe.
+     */
+    private suspend fun releaseScoBeforeMedia(entry: DebugEntry) {
+        val t0 = System.currentTimeMillis()
+        runCatching { focusRouter.abandon() }
+        runCatching { btRouter.disconnect() }
+        delay(800L)
+        entry.scoTeardownMs = System.currentTimeMillis() - t0
+        entry.audioMode = AudioModeName.of(btRouter.currentAudioMode())
+    }
 
     private suspend fun connectSco(timeoutMs: Long): Boolean =
         suspendCancellableCoroutine { cont ->

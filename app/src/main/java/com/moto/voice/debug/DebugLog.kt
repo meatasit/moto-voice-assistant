@@ -45,6 +45,28 @@ data class DebugEntry(
     var cacheHit: Boolean = false,
     /** Reason string when Azure failed (network, HTTP code, playback error). */
     var azureError: String? = null,
+    /**
+     * Why the TTS router picked the engine it did. See [EngineChoiceReason].
+     * Field-test 1783477052378 showed every entry as ttsEngine=android with no way to tell
+     * whether the key was missing, the region was blank, or we were offline — this makes it explicit.
+     */
+    var engineChoiceReason: String? = null,
+
+    // ─── SCO lifecycle (bug from log 1783477052378) ──────────────────────────
+    /**
+     * Milliseconds the pipeline spent releasing SCO + waiting for A2DP to become the
+     * primary output before starting media (YouTube / FM). Populated by
+     * [com.moto.voice.pipeline.VoiceCommandPipeline.releaseScoBeforeMedia]. 0 for
+     * non-media actions (call / stop / help / repeat / none) where the release happens
+     * in cleanup() instead.
+     */
+    var scoTeardownMs: Long = 0,
+    /**
+     * `audioManager.mode` value at the moment media was about to start, converted to
+     * a human name (normal / in_call / in_comm / ringtone). Verifies the SCO teardown
+     * left the platform in MODE_NORMAL so A2DP can carry STREAM_MUSIC.
+     */
+    var audioMode: String? = null,
 ) {
     fun time(): String = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date(timestamp))
 
@@ -54,9 +76,12 @@ data class DebugEntry(
         if (audioRoute != null) append("  route:${audioRoute}")
         if (scoState != null) append("  sco:${scoState}")
         if (scoTimeMs > 0) append("  SCO:${scoTimeMs}ms")
+        if (scoTeardownMs > 0) append("  SCO⇩:${scoTeardownMs}ms")
+        if (audioMode != null) append("  mode:${audioMode}")
         if (sttTimeMs > 0) append("  STT:${sttTimeMs}ms")
         if (webhookTimeMs > 0) append("  WH:${webhookTimeMs}ms")
         if (actionTimeMs > 0) append("  ACT:${actionTimeMs}ms")
+        if (engineChoiceReason != null) append("  tts:${engineChoiceReason}")
         if (finishReason != null) append("  end:${finishReason}")
         if (error != null) append("  ⚠️ $error")
     }
@@ -83,6 +108,42 @@ object ScoState {
     const val NO_HEADSET = "no_headset"
     /** BLUETOOTH_CONNECT permission missing — we can't probe. */
     const val NO_PERMISSION = "no_permission"
+}
+
+/**
+ * Constants for [DebugEntry.engineChoiceReason]. The router's decision path is
+ * `key.isNotBlank() && region.isNotBlank() && online → Azure`, else Android; the
+ * reason string tells us which of those gates failed. `azure_used` means Azure
+ * synthesised the audio; `azure_failed_fallback` means Azure was attempted but
+ * threw and we fell through to Android silently (spec §1.3).
+ */
+object EngineChoiceReason {
+    const val AZURE_USED = "azure_used"
+    const val AZURE_FAILED_FALLBACK = "azure_failed_fallback"
+    const val ANDROID_NO_KEY = "android_no_key"
+    const val ANDROID_NO_REGION = "android_no_region"
+    const val ANDROID_OFFLINE = "android_offline"
+}
+
+/**
+ * Constants for [DebugEntry.audioMode]. Values map directly from AudioManager.getMode()
+ * ints so we don't have to grep for magic numbers in the exported JSON.
+ */
+object AudioModeName {
+    const val NORMAL = "normal"
+    const val RINGTONE = "ringtone"
+    const val IN_CALL = "in_call"
+    const val IN_COMMUNICATION = "in_communication"
+    const val UNKNOWN = "unknown"
+
+    /** Convert an AudioManager.MODE_* int to the corresponding constant above. */
+    fun of(mode: Int): String = when (mode) {
+        android.media.AudioManager.MODE_NORMAL -> NORMAL
+        android.media.AudioManager.MODE_RINGTONE -> RINGTONE
+        android.media.AudioManager.MODE_IN_CALL -> IN_CALL
+        android.media.AudioManager.MODE_IN_COMMUNICATION -> IN_COMMUNICATION
+        else -> UNKNOWN
+    }
 }
 
 /**
