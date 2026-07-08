@@ -11,20 +11,32 @@ import kotlin.coroutines.resume
  * VoiceCommandService).
  *
  * Zero call-site changes from the original Android-only implementation. Internally
- * this now delegates to [TtsRouter], which picks Azure Neural TTS when configured
- * and available, and silently falls back to Android TTS otherwise.
+ * this delegates to [TtsRouter], which picks Azure Neural TTS when configured and
+ * available, and silently falls back to Android TTS otherwise.
  *
  * ─── Contract invariant ─────────────────────────────────────────────────────────
  * [speakAwait] suspends until the audio has FINISHED PLAYING (via engine onDone),
- * not just when synthesis completed. Any change here must preserve that timing so
- * the pipeline's speak → earcon → listenOnce sequencing stays correct.
+ * not just when synthesis completed.
+ *
+ * ─── Global echo tracking ───────────────────────────────────────────────────────
+ * Every call updates [TtsRecentSpeech] so the pipeline's echo filter can catch
+ * TTS produced by ANY source — not just the pipeline itself. Fixes the field-test
+ * bug where FmPlayerService's "เปิดสถานีไม่สำเร็จ" line was picked up as a user
+ * command by the next interaction.
  */
 class ThaiTTS(context: Context) {
 
     private val router = TtsRouter.getOrCreate(context)
 
     fun speak(text: String, onDone: (() -> Unit)? = null) {
-        router.speak(text, onStart = null, onDone = onDone, onError = { onDone?.invoke() })
+        TtsRecentSpeech.markSpeaking(text)
+        router.speak(text, onStart = null, onDone = {
+            TtsRecentSpeech.markEnded()
+            onDone?.invoke()
+        }, onError = {
+            TtsRecentSpeech.markEnded()
+            onDone?.invoke()
+        })
     }
 
     /** Suspend until playback (not just synthesis) has finished. */
@@ -34,12 +46,23 @@ class ThaiTTS(context: Context) {
             val resume = {
                 if (resumed.compareAndSet(false, true) && cont.isActive) cont.resume(Unit)
             }
-            router.speak(text, onStart = null, onDone = { resume() }, onError = { resume() })
-            cont.invokeOnCancellation { runCatching { router.stop() } }
+            TtsRecentSpeech.markSpeaking(text)
+            router.speak(text, onStart = null, onDone = {
+                TtsRecentSpeech.markEnded()
+                resume()
+            }, onError = {
+                TtsRecentSpeech.markEnded()
+                resume()
+            })
+            cont.invokeOnCancellation {
+                TtsRecentSpeech.markEnded()
+                runCatching { router.stop() }
+            }
         }
     }
 
     fun stop() {
+        TtsRecentSpeech.markEnded()
         router.stop()
     }
 }

@@ -55,8 +55,9 @@ class FavoritesActivity : AppCompatActivity() {
                 setPadding(8, 8, 8, 8)
             })
         }
-        items.forEach { fav ->
+        items.forEachIndexed { index, fav ->
             val row = layoutInflater.inflate(R.layout.item_favorite, binding.favoritesContainer, false)
+            row.findViewById<TextView>(R.id.tvFavSlot).text = (index + 1).toString()
             row.findViewById<TextView>(R.id.tvFavName).text = fav.displayName
             row.findViewById<MaterialButton>(R.id.btnRemoveFav).setOnClickListener {
                 store.remove(fav.contactId); render()

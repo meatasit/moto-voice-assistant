@@ -26,11 +26,18 @@ object LocalIntercept {
 
         /** Repeat the last TTS utterance. */
         object RepeatLast : Intercept()
+
+        /** Call favorite by slot number (1-5). Zero-based [zeroBasedSlot] for lookup. */
+        data class CallFavorite(val zeroBasedSlot: Int) : Intercept()
     }
 
     fun match(text: String): Intercept {
         val t = normalize(text)
         if (t.isEmpty()) return Intercept.None
+
+        // Favorites regex tried first — it's a specific two-token pattern that
+        // shouldn't collide with anything below.
+        favoriteSlotOrNull(t)?.let { return Intercept.CallFavorite(it) }
 
         // Exact resume-radio wins over Stop's substring "ปิดวิทยุ" collision with "เปิดวิทยุ".
         if (RESUME_RADIO_PATTERNS.any { it == t }) return Intercept.ResumeLastRadio
@@ -41,6 +48,31 @@ object LocalIntercept {
 
         return Intercept.None
     }
+
+    /**
+     * @return zero-based slot (0..4) if [normalizedText] matches the favorite-call
+     *   pattern, else null. Handles Thai + Arabic numerals and both English/Thai
+     *   spellings of "favorite" per spec §2.1.
+     */
+    internal fun favoriteSlotOrNull(normalizedText: String): Int? {
+        val m = FAVORITE_CALL_REGEX.find(normalizedText) ?: return null
+        val number = m.groupValues.getOrNull(2)?.trim() ?: return null
+        return NUMBER_TO_SLOT[number]?.let { it - 1 }
+    }
+
+    // "โทร" prefix (optionally "หา"), optional whitespace, one of the favorite words,
+    // whitespace, then the number word (Thai 1-5 or Arabic 1-5).
+    private val FAVORITE_CALL_REGEX = Regex(
+        "โทร(?:หา)?\\s*(รายการโปรด|เบอร์โปรด|favorite|เฟเวอริท)\\s*(หนึ่ง|สอง|สาม|สี่|ห้า|1|2|3|4|5)"
+    )
+
+    private val NUMBER_TO_SLOT = mapOf(
+        "หนึ่ง" to 1, "1" to 1,
+        "สอง" to 2, "2" to 2,
+        "สาม" to 3, "3" to 3,
+        "สี่" to 4, "4" to 4,
+        "ห้า" to 5, "5" to 5,
+    )
 
     /** Collapse whitespace and lowercase; keeps Thai intact. */
     internal fun normalize(text: String): String =
