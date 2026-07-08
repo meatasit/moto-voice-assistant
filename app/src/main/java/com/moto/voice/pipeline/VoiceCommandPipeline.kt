@@ -258,7 +258,7 @@ class VoiceCommandPipeline(
         val slotNumber = zeroBasedSlot + 1
         val slotWord = FAVORITE_SLOT_WORDS.getOrElse(zeroBasedSlot) { "$slotNumber" }
         if (zeroBasedSlot !in favs.indices) {
-            speakAndRemember("ยังไม่ได้ตั้งรายการโปรดหมายเลข$slotWordค่ะ ตั้งได้ในแอปนะคะ")
+            speakAndRemember("ยังไม่ได้ตั้งรายการโปรดหมายเลข${slotWord}ค่ะ ตั้งได้ในแอปนะคะ")
             return
         }
         val fav = favs[zeroBasedSlot]
