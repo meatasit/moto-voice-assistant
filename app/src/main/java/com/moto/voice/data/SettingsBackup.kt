@@ -29,9 +29,15 @@ data class SettingsBackup(
     val favorites: List<Favorite>,
     @SerializedName("last_station") val lastStation: LastStation?,
 ) {
+    /**
+     * @param phoneNumber Added in schema v2 (v1.3.5). Nullable so v1 backups still
+     *   parse cleanly — an old backup without phone numbers restores fine, the user
+     *   just loses the phone fallback until they re-add each favorite.
+     */
     data class Favorite(
         @SerializedName("contact_id") val contactId: String,
         @SerializedName("display_name") val displayName: String,
+        @SerializedName("phone_number") val phoneNumber: String? = null,
     )
 
     data class LastStation(
@@ -41,13 +47,19 @@ data class SettingsBackup(
     )
 
     companion object {
-        const val CURRENT_VERSION = 1
+        /**
+         * v1 (v1.3.3 → v1.3.4) — favorites stored contact_id + display_name only.
+         * v2 (v1.3.5+) — added phone_number so the pipeline can dial via the stored
+         * number when contact-ID resolution fails post-sync. v1 backups still parse:
+         * phone_number defaults to null and the favorite works without the fallback.
+         */
+        const val CURRENT_VERSION = 2
         private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
 
         fun snapshot(context: Context): SettingsBackup {
             val s = AppSettings(context)
             val fav = FavoritesStore(context).list()
-                .map { Favorite(it.contactId, it.displayName) }
+                .map { Favorite(it.contactId, it.displayName, it.phoneNumber) }
             val memory = AppMemory(context)
             val station = memory.lastStationUrl?.let { url ->
                 LastStation(url, memory.lastStationName, memory.lastStationFrequency)
@@ -106,7 +118,7 @@ data class SettingsBackup(
             val favStore = FavoritesStore(context)
             favStore.clear()
             backup.favorites.forEach { fav ->
-                favStore.add(FavoritesStore.Favorite(fav.contactId, fav.displayName))
+                favStore.add(FavoritesStore.Favorite(fav.contactId, fav.displayName, fav.phoneNumber))
             }
 
             backup.lastStation?.let { st ->

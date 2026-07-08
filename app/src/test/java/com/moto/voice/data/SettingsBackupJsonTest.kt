@@ -27,8 +27,8 @@ class SettingsBackupJsonTest {
         resumeAfterCall = true,
         onboardingComplete = true,
         favorites = listOf(
-            SettingsBackup.Favorite("42", "แม่"),
-            SettingsBackup.Favorite("43", "พ่อ"),
+            SettingsBackup.Favorite("42", "แม่", "0812345678"),
+            SettingsBackup.Favorite("43", "พ่อ", "0898765432"),
         ),
         lastStation = SettingsBackup.LastStation("https://s/live", "Cool FM", 91.5),
     )
@@ -104,5 +104,47 @@ class SettingsBackupJsonTest {
         assertTrue(json.contains("webhook_url"))
         assertTrue(json.contains("timeout_seconds"))
         assertTrue(json.contains("tts_speech_rate"))
+    }
+
+    // ─── v2 schema — phoneNumber added; v1 backups must still parse ─────────
+
+    @Test fun favoritePhoneNumberRoundTrips() {
+        val json = SettingsBackup.toJson(sample)
+        val back = SettingsBackup.fromJson(json)
+        assertEquals("0812345678", back.favorites[0].phoneNumber)
+    }
+
+    @Test fun v1BackupWithoutPhoneStillParses() {
+        // Exactly the JSON shape v1.3.3 / v1.3.4 would have written: version=1,
+        // Favorite object has no phone_number key. Gson defaults it to null on the
+        // v2 data class. Restore path must not blow up.
+        val v1Json = """
+            {
+              "version": 1,
+              "webhook_url": "https://x/y",
+              "timeout_seconds": 15,
+              "llm_mode": true,
+              "confirm_before_call": false,
+              "ask_before_youtube": true,
+              "greet_on_connect": false,
+              "tts_speech_rate": 1.0,
+              "assistant_volume": 0.8,
+              "resume_after_call": true,
+              "onboarding_complete": true,
+              "favorites": [ { "contact_id": "42", "display_name": "แม่" } ],
+              "last_station": null
+            }
+        """.trimIndent()
+        val back = SettingsBackup.fromJson(v1Json)
+        assertEquals(1, back.favorites.size)
+        assertEquals("42", back.favorites[0].contactId)
+        assertEquals("แม่", back.favorites[0].displayName)
+        assertNull("v1 backups have no phone", back.favorites[0].phoneNumber)
+    }
+
+    @Test fun currentVersionIsTwo() {
+        // Locks the schema version — a bump to 3 requires adding another migration
+        // test below and updating fromJson's guard.
+        assertEquals(2, SettingsBackup.CURRENT_VERSION)
     }
 }
