@@ -6,6 +6,7 @@ import android.net.NetworkCapabilities
 import android.util.Log
 import com.moto.voice.data.AppSettings
 import com.moto.voice.debug.DebugLog
+import com.moto.voice.debug.EngineChoiceReason
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -38,10 +39,18 @@ class TtsRouter private constructor(private val app: Context) {
         val online = isOnline()
 
         // Route decision: Azure only when configured AND online. Everything else → Android.
-        val useAzure = cfg.key.isNotBlank() && cfg.region.isNotBlank() && online
-        if (!useAzure) {
+        // Field log 1783477052378 showed every entry `ttsEngine=android` — we couldn't
+        // tell whether the key was lost, the region was blank, or connectivity failed.
+        // Compute the exact reason so the next field log makes the answer legible.
+        val androidReason = when {
+            cfg.key.isBlank() -> EngineChoiceReason.ANDROID_NO_KEY
+            cfg.region.isBlank() -> EngineChoiceReason.ANDROID_NO_REGION
+            !online -> EngineChoiceReason.ANDROID_OFFLINE
+            else -> null
+        }
+        if (androidReason != null) {
             android.speak(text, onStart, onDone, onError)
-            markDebug("android", error = null)
+            markDebug("android", reason = androidReason, error = null)
             return
         }
 
@@ -50,23 +59,26 @@ class TtsRouter private constructor(private val app: Context) {
             text,
             onStart = onStart,
             onDone = {
-                markDebug("azure", error = null)
+                markDebug("azure", reason = EngineChoiceReason.AZURE_USED, error = null)
                 onDone?.invoke()
             },
             onError = { reason ->
                 Log.w(TAG, "azure failed: $reason — falling back to Android silently")
-                markDebug("azure_failed", error = reason)
+                markDebug("azure_failed", reason = EngineChoiceReason.AZURE_FAILED_FALLBACK, error = reason)
                 // Silent fallback per spec §1.3 — no user-facing announcement.
                 android.speak(
                     text,
                     onStart = null,  // don't fire onStart twice
                     onDone = {
-                        markDebug("android_fallback", error = null)
+                        // Keep engineChoiceReason = azure_failed_fallback so the field
+                        // log records that Azure was TRIED — don't overwrite with an
+                        // Android success reason. Just refresh the timings.
+                        markDebug("android_fallback", reason = EngineChoiceReason.AZURE_FAILED_FALLBACK, error = null)
                         onDone?.invoke()
                     },
-                    onError = { androidReason ->
-                        markDebug("android_fallback_failed", error = androidReason)
-                        onError?.invoke(androidReason)
+                    onError = { androidReason2 ->
+                        markDebug("android_fallback_failed", reason = EngineChoiceReason.AZURE_FAILED_FALLBACK, error = androidReason2)
+                        onError?.invoke(androidReason2)
                     },
                 )
             },
@@ -83,10 +95,15 @@ class TtsRouter private constructor(private val app: Context) {
      * Timings are pulled from [AzureTtsState] so we can distinguish synth vs playback
      * ms and know whether the cache served it. For pure-Android calls the timings
      * remain zero — they were never synthesised via Azure.
+     *
+     * [reason] is the [EngineChoiceReason] constant explaining why THIS engine was
+     * chosen — populates `engineChoiceReason` so field logs make the fallback path
+     * legible (spec-round-3 bug 3, log 1783477052378).
      */
-    private fun markDebug(engine: String, error: String?) {
+    private fun markDebug(engine: String, reason: String, error: String?) {
         val head = DebugLog.entries().firstOrNull() ?: return
         head.ttsEngine = engine
+        head.engineChoiceReason = reason
         head.ttsSynthMs = AzureTtsState.synthMs().coerceAtLeast(0)
         head.ttsPlayMs = AzureTtsState.playMs().coerceAtLeast(0)
         head.cacheHit = AzureTtsState.cacheHit()
