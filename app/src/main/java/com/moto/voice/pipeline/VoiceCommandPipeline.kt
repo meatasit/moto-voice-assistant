@@ -272,6 +272,19 @@ class VoiceCommandPipeline(
      * Voice-triggered Favorites (spec §2). Slot list is 0-based (0..4). Empty slot →
      * dedicated TTS explaining how to fill it. Populated slot → confirm-flow, TTS
      * announces the real name so the rider can hear which contact will be dialled.
+     *
+     * Resolution order (spec §2.3 — added after v1.3.4 field report of ID drift after
+     * account sync):
+     *   1. **Contact-ID exact match.** Look up the fav.displayName in the phone book,
+     *      keep only the match whose contact.id == fav.contactId. Best because the
+     *      number is guaranteed current.
+     *   2. **Name-only match.** Any high-scoring match on the display name — the ID
+     *      moved but the name is unchanged, common after a Google sync merge.
+     *   3. **Stored phone-number fallback.** Even if the contact was DELETED from the
+     *      phone book, we can still dial the number we captured at pick time. This is
+     *      the "reboot then favorite gone" symptom the rider reported — the favorite
+     *      IS still there, we just refuse to call because Contacts had drifted.
+     *   4. Only after all three fail do we speak the "ไม่พบเบอร์" line.
      */
     private suspend fun handleFavoriteCall(zeroBasedSlot: Int) {
         val favs = com.moto.voice.data.FavoritesStore(context).list()
@@ -282,17 +295,25 @@ class VoiceCommandPipeline(
             return
         }
         val fav = favs[zeroBasedSlot]
-        val entry = ContactEntry(id = fav.contactId, displayName = fav.displayName, phoneNumber = "")
-        // FavoritesStore holds only the ID + display name — resolve the phone number
-        // via ContactMatcher against the real name so we get the current number.
-        val matches = contactMatcher.findMatches(fav.displayName)
-        val target = matches.firstOrNull { it.contact.id == fav.contactId }?.contact
-            ?: matches.firstOrNull()?.contact
-        if (target == null) {
+
+        val target = if (hasPerm(Manifest.permission.READ_CONTACTS)) {
+            val matches = contactMatcher.findMatches(fav.displayName)
+            matches.firstOrNull { it.contact.id == fav.contactId }?.contact
+                ?: matches.firstOrNull()?.contact
+        } else null
+
+        val resolved = target
+            ?: fav.phoneNumber?.takeIf { it.isNotBlank() }?.let {
+                // Fallback: dial the number we stored at pick time. Use fav.displayName
+                // so the confirmation TTS still names the right person.
+                ContactEntry(id = fav.contactId, displayName = fav.displayName, phoneNumber = it)
+            }
+
+        if (resolved == null) {
             speakAndRemember("ไม่พบเบอร์ของ ${fav.displayName} ในเครื่อง")
             return
         }
-        confirmThenCall(target, "จะโทรหา${target.displayName} รายการโปรดหมายเลข$slotWord ใช่ไหมคะ")
+        confirmThenCall(resolved, "จะโทรหา${resolved.displayName} รายการโปรดหมายเลข$slotWord ใช่ไหมคะ")
     }
 
     // ─── Command processing ───────────────────────────────────────────────────
