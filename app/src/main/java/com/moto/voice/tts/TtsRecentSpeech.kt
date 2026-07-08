@@ -1,7 +1,5 @@
 package com.moto.voice.tts
 
-import android.os.SystemClock
-
 /**
  * Process-wide record of the most recent TTS utterance the assistant produced.
  *
@@ -37,7 +35,7 @@ object TtsRecentSpeech {
         speaking = null
         if (t != null) {
             lastEndedText = t
-            lastEndedAt = SystemClock.elapsedRealtime()
+            lastEndedAt = System.currentTimeMillis()
         }
     }
 
@@ -49,7 +47,7 @@ object TtsRecentSpeech {
         val now = speaking
         if (now != null) return now
         val last = lastEndedText ?: return null
-        val ago = SystemClock.elapsedRealtime() - lastEndedAt
+        val ago = System.currentTimeMillis() - lastEndedAt
         return if (ago in 0..LINGER_AFTER_END_MS) last else null
     }
 
