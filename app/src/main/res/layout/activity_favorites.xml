@@ -21,6 +21,14 @@
         android:text="คนในรายการนี้จะถูกจับคู่ได้แม่นกว่า เวลาพูดชื่อ"
         android:textColor="#88FFFFFF"
         android:textSize="12sp"
+        android:layout_marginBottom="4dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="เรียกด้วยเสียง: พูดว่า &quot;โทรหารายการโปรดหนึ่ง&quot; (หรือหมายเลข 1-5)"
+        android:textColor="#88FFFFFF"
+        android:textSize="12sp"
         android:layout_marginBottom="16dp" />
 
     <LinearLayout

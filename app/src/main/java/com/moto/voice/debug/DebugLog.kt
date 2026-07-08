@@ -103,6 +103,8 @@ object FinishReason {
     const val PARSE_ERROR = "parse_error"
     /** Rider double-tapped BVRA during an active interaction (spec §3.1). */
     const val BARGE_IN = "barge_in_cancel"
+    /** STT captured the assistant's own TTS (via [com.moto.voice.tts.TtsRecentSpeech]). */
+    const val SELF_ECHO = "self_echo"
 }
 
 object DebugLog {
@@ -121,10 +123,29 @@ object DebugLog {
 
     fun clear() = list.clear()
 
+    /**
+     * Field-test bug 3: the exported file was reported to contain "garbage bytes"
+     * before the JSON in one session. The current file this reviewer inspected is
+     * clean (`0x5B 0x0A 0x20 ...` — `[\n  {`), but we harden the write path anyway:
+     *
+     *   - **Explicit UTF-8** (default, but explicit for review clarity).
+     *   - **Delete-if-exists** so we can never append onto a stale file with the
+     *     same timestamped name (paranoia — the timestamp is unique per session).
+     *   - **Buffered write via FileOutputStream** — single atomic write, no
+     *     intermediate reader that could leave the file partially flushed.
+     *   - **No BOM** (Kotlin's Charsets.UTF_8 never emits one; documented so future
+     *     maintainers don't add one thinking it "helps" some viewer).
+     */
     fun exportToFile(context: Context): File {
         val dir = context.getExternalFilesDir(null) ?: context.filesDir
         val file = File(dir, "moto_voice_debug_${System.currentTimeMillis()}.json")
-        file.writeText(gson.toJson(list.toList()))
+        if (file.exists()) file.delete()
+
+        val json = gson.toJson(list.toList())
+        file.outputStream().buffered().use { out ->
+            out.write(json.toByteArray(Charsets.UTF_8))
+            out.flush()
+        }
         return file
     }
 }

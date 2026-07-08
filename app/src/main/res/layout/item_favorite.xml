@@ -16,6 +16,18 @@
         android:gravity="center_vertical">
 
         <TextView
+            android:id="@+id/tvFavSlot"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@color/purple_200"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:fontFamily="monospace"
+            android:layout_marginEnd="16dp"
+            android:minWidth="28dp"
+            android:gravity="center" />
+
+        <TextView
             android:id="@+id/tvFavName"
             android:layout_width="0dp"
             android:layout_height="wrap_content"

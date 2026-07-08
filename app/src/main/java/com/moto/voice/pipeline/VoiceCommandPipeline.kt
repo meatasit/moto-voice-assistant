@@ -64,6 +64,8 @@ private val YOUTUBE_ID_EXTRACT = Regex("([A-Za-z0-9_-]{11})")
 private const val DEFAULT_MIN_LISTEN_MS = 3_000L
 /** Disambiguation (contact / YouTube picker) needs longer for the rider to hear + reply. */
 private const val DISAMBIG_MIN_LISTEN_MS = 6_000L
+/** Spoken slot number for voice-call favorites — matches order of FavoritesStore slots 0..4. */
+private val FAVORITE_SLOT_WORDS = listOf("หนึ่ง", "สอง", "สาม", "สี่", "ห้า")
 
 class VoiceCommandPipeline(
     private val context: Context,
@@ -172,6 +174,19 @@ class VoiceCommandPipeline(
             finish(); return
         }
 
+        // Global self-echo guard (spec bug-2 round-2): if the main STT captured
+        // something that closely matches TTS the app just spoke — from FmPlayerService,
+        // HelmetGreeter, preflight, etc. — drop it. This catches cross-component echoes
+        // that the per-prompt filter can't see because they didn't originate here.
+        if (TtsEchoFilter.isSelfEcho(text)) {
+            Log.w(TAG, "self-echo detected on main STT — dropping '$text'")
+            entry.error = ((entry.error ?: "") + " self_echo").trim()
+            entry.finishReason = FinishReason.SELF_ECHO
+            Earcon.error()
+            speakAndRemember(ErrorSpeech.NOT_HEARD_GIVING_UP)
+            finish(); return
+        }
+
         heardText = text
         Earcon.end()
 
@@ -227,9 +242,37 @@ class VoiceCommandPipeline(
                 if (number.isNullOrBlank()) speakAndRemember("ยังไม่มีเบอร์ล่าสุดในแอปนี้")
                 else confirmThenCall(ContactEntry(id = "last", displayName = name, phoneNumber = number), null)
             }
+            is LocalIntercept.Intercept.CallFavorite -> handleFavoriteCall(intercept.zeroBasedSlot)
             LocalIntercept.Intercept.None -> Unit  // handled in caller
         }
         finish()
+    }
+
+    /**
+     * Voice-triggered Favorites (spec §2). Slot list is 0-based (0..4). Empty slot →
+     * dedicated TTS explaining how to fill it. Populated slot → confirm-flow, TTS
+     * announces the real name so the rider can hear which contact will be dialled.
+     */
+    private suspend fun handleFavoriteCall(zeroBasedSlot: Int) {
+        val favs = com.moto.voice.data.FavoritesStore(context).list()
+        val slotNumber = zeroBasedSlot + 1
+        val slotWord = FAVORITE_SLOT_WORDS.getOrElse(zeroBasedSlot) { "$slotNumber" }
+        if (zeroBasedSlot !in favs.indices) {
+            speakAndRemember("ยังไม่ได้ตั้งรายการโปรดหมายเลข$slotWordค่ะ ตั้งได้ในแอปนะคะ")
+            return
+        }
+        val fav = favs[zeroBasedSlot]
+        val entry = ContactEntry(id = fav.contactId, displayName = fav.displayName, phoneNumber = "")
+        // FavoritesStore holds only the ID + display name — resolve the phone number
+        // via ContactMatcher against the real name so we get the current number.
+        val matches = contactMatcher.findMatches(fav.displayName)
+        val target = matches.firstOrNull { it.contact.id == fav.contactId }?.contact
+            ?: matches.firstOrNull()?.contact
+        if (target == null) {
+            speakAndRemember("ไม่พบเบอร์ของ ${fav.displayName} ในเครื่อง")
+            return
+        }
+        confirmThenCall(target, "จะโทรหา${target.displayName} รายการโปรดหมายเลข$slotWord ใช่ไหมคะ")
     }
 
     // ─── Command processing ───────────────────────────────────────────────────
