@@ -75,9 +75,16 @@ object SlotFiller {
      *
      *   - whole-answer (normalised trim + lowercase) equals one of
      *     {"ยกเลิก", "ไม่เอา", "ไม่"}, OR
-     *   - answer STARTS with one of those tokens AND total length < 10 chars
-     *     (catches "ยกเลิกครับ" / "ไม่เอาแล้ว" without also swallowing long
-     *     legitimate sentences that happen to start with "ไม่").
+     *   - answer STARTS with one of those tokens AND total length ≤ 12 chars
+     *     (catches "ยกเลิกครับ" / "ยกเลิกค่ะ" / "ไม่เอาแล้ว" — the common
+     *     polite-particle suffixes — without swallowing longer sentences that
+     *     happen to start with "ไม่", e.g. "ไม่เอาอะไรเลย" = 13 chars).
+     *
+     * The 12-char guard was chosen empirically after the CI showed "ยกเลิกครับ" and
+     * "ไม่เอาแล้ว" are both exactly 10 UTF-16 code units — a stricter "< 10" boundary
+     * from the initial spec would have missed both, since Thai vowel/tone marks are
+     * separate code units. 12 is 2 above the natural length and still 1 below the
+     * shortest known false-positive.
      *
      * Blank answers are handled by the caller as a separate case (they mean "no
      * reply at all", not "user said cancel"), so [isCancelAnswer] returns false
@@ -87,12 +94,12 @@ object SlotFiller {
         val t = answer.trim().lowercase()
         if (t.isEmpty()) return false
         if (t in CANCEL_TOKENS) return true
-        if (t.length < CANCEL_STARTS_WITH_MAX_LEN && CANCEL_TOKENS.any { t.startsWith(it) }) return true
+        if (t.length <= CANCEL_STARTS_WITH_MAX_LEN && CANCEL_TOKENS.any { t.startsWith(it) }) return true
         return false
     }
 
     private val CANCEL_TOKENS = setOf("ยกเลิก", "ไม่เอา", "ไม่")
-    private const val CANCEL_STARTS_WITH_MAX_LEN = 10
+    private const val CANCEL_STARTS_WITH_MAX_LEN = 12
 
     // Match ONLY the bare openers — any additional token means the rider gave us a
     // payload already, and we shouldn't intercept. Whitespace inside is normalised
