@@ -60,10 +60,20 @@ object LocalIntercept {
         return NUMBER_TO_SLOT[number]?.let { it - 1 }
     }
 
-    // "โทร" prefix (optionally "หา"), optional whitespace, one of the favorite words,
-    // whitespace, then the number word (Thai 1-5 or Arabic 1-5).
+    /**
+     * Widened after field log 1783581952116 (v1.3.5) — both
+     *   "โทรหารายการโปรดที่ 1"      (with ที่ separator)
+     *   "โทรออกหารายการโปรดที่ 1"   (with the ออก verb prefix)
+     * fell through to the webhook because the pre-v1.3.6 pattern only allowed
+     * "โทร(หา)?" + favorite-word + digit — no ออก/ไป prefix and no separator words.
+     *
+     * Shape now:
+     *   verb   = โทร (ออก)? (ไป)? (หา)?              ← "โทร" / "โทรหา" / "โทรออกหา" / "โทรไปหา"
+     *   sep    = (?:ที่|หมายเลข|เบอร์|อันดับ|ลำดับ)?  ← optional connective the rider might insert
+     *   number = one of Thai หนึ่ง..ห้า or Arabic 1..5
+     */
     private val FAVORITE_CALL_REGEX = Regex(
-        "โทร(?:หา)?\\s*(รายการโปรด|เบอร์โปรด|favorite|เฟเวอริท)\\s*(หนึ่ง|สอง|สาม|สี่|ห้า|1|2|3|4|5)"
+        "โทร(?:ออก)?(?:ไป)?(?:หา)?\\s*(รายการโปรด|เบอร์โปรด|favorite|เฟเวอริท)\\s*(?:ที่|หมายเลข|เบอร์|อันดับ|ลำดับ)?\\s*(หนึ่ง|สอง|สาม|สี่|ห้า|1|2|3|4|5)"
     )
 
     private val NUMBER_TO_SLOT = mapOf(

@@ -70,4 +70,46 @@ class LocalInterceptFavoriteTest {
         assertTrue(r is LocalIntercept.Intercept.CallFavorite)
         assertEquals(3, (r as LocalIntercept.Intercept.CallFavorite).zeroBasedSlot)
     }
+
+    // ─── Field-log v1.3.5 regressions (log 1783581952116) ────────────────────
+    // These two sentences BOTH fell through to the webhook pre-v1.3.6: "ที่"
+    // separator + optional "ออก" verb prefix weren't in the pattern. Locked in
+    // as regression tests so future regex edits can't re-break them.
+
+    @Test fun realFieldSentenceWithThi() {
+        assertEquals(0, LocalIntercept.favoriteSlotOrNull("โทรหารายการโปรดที่ 1"))
+    }
+
+    @Test fun realFieldSentenceWithOokAndThi() {
+        assertEquals(0, LocalIntercept.favoriteSlotOrNull("โทรออกหารายการโปรดที่ 1"))
+    }
+
+    // ─── Verb prefix variants added in v1.3.6 ─────────────────────────────
+
+    @Test fun ookVerbAlone() = assertEquals(0, LocalIntercept.favoriteSlotOrNull("โทรออกรายการโปรดหนึ่ง"))
+    @Test fun paiVerbAlone() = assertEquals(0, LocalIntercept.favoriteSlotOrNull("โทรไปรายการโปรดหนึ่ง"))
+    @Test fun paiRhaVerb() = assertEquals(0, LocalIntercept.favoriteSlotOrNull("โทรไปหารายการโปรดหนึ่ง"))
+    @Test fun ookRhaVerb() = assertEquals(0, LocalIntercept.favoriteSlotOrNull("โทรออกหารายการโปรดหนึ่ง"))
+
+    // ─── Separator variants added in v1.3.6 ───────────────────────────────
+
+    @Test fun thiSeparator() = assertEquals(1, LocalIntercept.favoriteSlotOrNull("โทรหารายการโปรดที่ 2"))
+    @Test fun mailekSeparator() = assertEquals(2, LocalIntercept.favoriteSlotOrNull("โทรหารายการโปรดหมายเลข 3"))
+    @Test fun berSeparator() = assertEquals(3, LocalIntercept.favoriteSlotOrNull("โทรหาfavorite เบอร์ 4"))
+    @Test fun andaapSeparator() = assertEquals(4, LocalIntercept.favoriteSlotOrNull("โทรหาเฟเวอริท อันดับ 5"))
+    @Test fun lamdapSeparator() = assertEquals(0, LocalIntercept.favoriteSlotOrNull("โทรหารายการโปรด ลำดับ 1"))
+
+    // ─── Full pipeline via LocalIntercept.match for the field sentences ───
+
+    @Test fun matchReturnsCallFavoriteForFieldSentence() {
+        val r = LocalIntercept.match("โทรหารายการโปรดที่ 1")
+        assertTrue("expected CallFavorite, got $r", r is LocalIntercept.Intercept.CallFavorite)
+        assertEquals(0, (r as LocalIntercept.Intercept.CallFavorite).zeroBasedSlot)
+    }
+
+    @Test fun matchReturnsCallFavoriteForOokFieldSentence() {
+        val r = LocalIntercept.match("โทรออกหารายการโปรดที่ 1")
+        assertTrue("expected CallFavorite, got $r", r is LocalIntercept.Intercept.CallFavorite)
+        assertEquals(0, (r as LocalIntercept.Intercept.CallFavorite).zeroBasedSlot)
+    }
 }
