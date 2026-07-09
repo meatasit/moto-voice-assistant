@@ -1,6 +1,7 @@
 package com.moto.voice.nlu
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -79,5 +80,66 @@ class SlotFillerTest {
         val normalized = LocalIntercept.normalize("เปิด YouTube")
         assertTrue("normalizer lowercased: $normalized", normalized == "เปิด youtube")
         assertSame(SlotFiller.Need.YoutubeQuery, SlotFiller.detect(normalized))
+    }
+
+    // ─── isCancelAnswer — v1.3.7 tightening of the substring check ──────────
+
+    // Whole-answer matches (spec: exact equality after trim+lowercase)
+
+    @Test fun yokelekAloneCancels() = assertTrue(SlotFiller.isCancelAnswer("ยกเลิก"))
+    @Test fun maiAowAloneCancels() = assertTrue(SlotFiller.isCancelAnswer("ไม่เอา"))
+    @Test fun maiAloneCancels() = assertTrue(SlotFiller.isCancelAnswer("ไม่"))
+
+    @Test fun yokelekWithTrailingSpaceCancels() = assertTrue(SlotFiller.isCancelAnswer("  ยกเลิก  "))
+
+    // Starts-with matches WHEN answer is short
+
+    @Test fun yokelekKhrabIsCancel() = assertTrue(SlotFiller.isCancelAnswer("ยกเลิกครับ"))
+    @Test fun yokelekKhaIsCancel() = assertTrue(SlotFiller.isCancelAnswer("ยกเลิกค่ะ"))
+    @Test fun maiAowLaewIsCancel() = assertTrue(SlotFiller.isCancelAnswer("ไม่เอาแล้ว"))
+
+    // Starts-with but too long → NOT cancel (protects real answers that happen to begin with "ไม่")
+
+    @Test fun maiAowAllCoveredIsNotCancel() {
+        // "ไม่เอาอะไรเลย" = 13 chars — over the 10-char guard.
+        assertFalse(SlotFiller.isCancelAnswer("ไม่เอาอะไรเลย"))
+    }
+
+    // The substring false-positives spec v1.3.7 §2 called out
+
+    @Test fun dontCancelMeToCallMomIsNotCancel() {
+        // "อย่ายกเลิกโทรหาแม่" contains "ยกเลิก" but as a substring, not start of
+        // the sentence. Pre-v1.3.7 the contains() check would have false-positived.
+        assertFalse(SlotFiller.isCancelAnswer("อย่ายกเลิกโทรหาแม่"))
+    }
+
+    @Test fun callToCancelUrgentIsNotCancel() {
+        // "โทรยกเลิกด่วน" also contains "ยกเลิก" but starts with "โทร".
+        assertFalse(SlotFiller.isCancelAnswer("โทรยกเลิกด่วน"))
+    }
+
+    @Test fun midStringMaiIsNotCancel() {
+        // A rider naming a Thai contact whose first name starts with a partial that
+        // matches midway must not trigger — the answer is a name, not a cancel.
+        assertFalse(SlotFiller.isCancelAnswer("แม่ไม่ค่อยว่าง"))
+    }
+
+    // Blank / edge cases
+
+    @Test fun blankAnswerIsNotCancel() {
+        // Spec: blank is the caller's separate "no reply at all" branch, not cancel.
+        assertFalse(SlotFiller.isCancelAnswer(""))
+        assertFalse(SlotFiller.isCancelAnswer("   "))
+    }
+
+    @Test fun unrelatedShortAnswerIsNotCancel() {
+        assertFalse(SlotFiller.isCancelAnswer("แม่"))
+        assertFalse(SlotFiller.isCancelAnswer("fm 106"))
+    }
+
+    @Test fun trimmedExactMatchStillCancels() {
+        // Real STT often returns padded strings — the trim() inside isCancelAnswer
+        // must reach the exact-match branch, not fall into the startsWith path.
+        assertTrue(SlotFiller.isCancelAnswer("\tยกเลิก\n"))
     }
 }
