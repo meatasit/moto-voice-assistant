@@ -258,7 +258,10 @@ class VoiceCommandPipeline(
         entry.finishReason = FinishReason.SLOT_FILLED
 
         val answer = promptAndListen(SlotFiller.promptFor(need), entry).trim()
-        val cancelled = answer.isBlank() || answer.contains("ยกเลิก")
+        // Cancel detection tightened in v1.3.7 — used to be answer.contains("ยกเลิก")
+        // which false-positived on sentences like "อย่ายกเลิกโทรหาแม่". See
+        // SlotFiller.isCancelAnswer kdoc for the exact rule.
+        val cancelled = answer.isBlank() || SlotFiller.isCancelAnswer(answer)
         if (cancelled) {
             speakAndRemember(ErrorSpeech.CANCELLED)
             return null
@@ -728,8 +731,11 @@ class VoiceCommandPipeline(
      *
      * Spec v1.3.6 §2 — 3s after firing the intent, check [AudioManager.isMusicActive].
      * If music is playing, YouTube (or another app) is fine → no nudge. If not, we
-     * silence our own MediaSession so KEYCODE_MEDIA_PLAY routes to YouTube (not back
-     * to us), wait a beat for the release to propagate, then dispatch one PLAY key.
+     * yield our own MediaSession's media-button routing (v1.3.7 — used to be a full
+     * ACTION_STOP which killed FM, breaking the highway radio↔YouTube swap: after
+     * watching YouTube the rider would voice "เปิดวิทยุ" and get a cold-start delay
+     * because our service had been respawned), wait a beat for the yield to propagate,
+     * then dispatch one PLAY key.
      *
      * Uses a [Handler] rather than a coroutine because the pipeline's scope is torn
      * down as soon as finish() runs — this task needs to outlive the interaction.
@@ -743,14 +749,15 @@ class VoiceCommandPipeline(
                 Log.d(TAG, "youtube nudge check: music active — no nudge")
                 return@postDelayed
             }
-            Log.w(TAG, "youtube nudge: music inactive 3s after open — dispatching MEDIA_PLAY")
+            Log.w(TAG, "youtube nudge: music inactive 3s after open — yielding + dispatching MEDIA_PLAY")
             runCatching {
                 appCtx.startService(
-                    Intent(appCtx, FmPlayerService::class.java).setAction(FmPlayerService.ACTION_STOP)
+                    Intent(appCtx, FmPlayerService::class.java)
+                        .setAction(FmPlayerService.ACTION_YIELD_SESSION)
                 )
             }
-            // 250ms for our FmPlayerService to release its MediaSession, so the play
-            // key lands on YouTube's session instead of our now-defunct one.
+            // 250ms for the FM MediaSession to drop from the button-routing chain
+            // (player.stop() → STATE_IDLE takes effect on the next main-thread tick).
             handler.postDelayed({
                 MediaStopper.dispatchMediaPlay(appCtx)
                 entry.youtubeNudged = true
