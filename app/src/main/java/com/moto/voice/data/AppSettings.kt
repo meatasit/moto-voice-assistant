@@ -153,6 +153,15 @@ class AppSettings(context: Context) {
         get() = prefs.getFloat("listen_pace", DEFAULT_LISTEN_PACE_SEC).coerceIn(MIN_LISTEN_PACE_SEC, MAX_LISTEN_PACE_SEC)
         set(v) { prefs.edit().putFloat("listen_pace", v.coerceIn(MIN_LISTEN_PACE_SEC, MAX_LISTEN_PACE_SEC)).apply() }
 
+    /**
+     * Spec v1.3.8 B2 — "คุยต่อเนื่องหลังตอบ". After finish-eligible actions (chat, none,
+     * cancelled call, stop) the pipeline auto-opens a 4-second follow-up window so the
+     * rider can keep talking without another BVRA press. Default ON.
+     */
+    var followupEnabled: Boolean
+        get() = prefs.getBoolean("followup_enabled", true)
+        set(v) { prefs.edit().putBoolean("followup_enabled", v).apply() }
+
     /** Marker: first-run wizard completed. Set to true when the user finishes Onboarding. */
     var onboardingComplete: Boolean
         get() = prefs.getBoolean("onboarding_done", false)

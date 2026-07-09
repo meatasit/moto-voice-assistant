@@ -27,6 +27,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.Calendar
 
 /**
  * Listens for Bluetooth headset (HFP) connection events and, on CONNECTED, both
@@ -86,15 +87,36 @@ class HelmetGreeter(private val app: Context) {
 
         // TTS in a short-lived scope. We give up after 4s if TTS can't init in time —
         // the notification is the primary signal; the greeting is nice-to-have.
+        // Spec v1.3.8 B4 — pick a time-appropriate greeting so the assistant feels
+        // aware of context instead of repeating the same "พร้อมใช้งาน" every time.
         ttsJob?.cancel()
+        val greeting = pickTimeBasedGreeting()
         ttsJob = scope.launch {
             withTimeoutOrNull(4_000L) {
                 val tts = ThaiTTS(app)
-                tts.speakAwait(ErrorSpeech.HELMET_READY)
+                tts.speakAwait(greeting)
                 tts.stop()
             }
         }
     }
+
+    /**
+     * Spec v1.3.8 B4 — three greetings tuned to the rider's likely intent by hour:
+     *   * 05:00–10:59  → wake-up energy ("อรุณสวัสดิ์ค่ะ")
+     *   * 11:00–18:59  → midday-travel readiness ("พร้อมเดินทางแล้วค่ะ")
+     *   * 19:00–04:59  → evening safety wish ("ขี่ปลอดภัยนะคะ")
+     *
+     * All three variants are persona-aware and pre-synthesized in
+     * [ErrorSpeech.allSystemLines] so the greeting is a cache hit (no Azure round-trip
+     * on the connection critical path).
+     */
+    internal fun pickTimeBasedGreeting(hour: Int = currentHour()): String = when (hour) {
+        in 5..10 -> ErrorSpeech.GREET_MORNING
+        in 11..18 -> ErrorSpeech.GREET_MIDDAY
+        else -> ErrorSpeech.GREET_EVENING  // 19..23 and 0..4
+    }
+
+    private fun currentHour(): Int = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
 
     private fun onDisconnected() {
         Log.d(TAG, "helmet disconnected")

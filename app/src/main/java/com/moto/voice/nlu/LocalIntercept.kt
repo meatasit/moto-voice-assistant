@@ -29,6 +29,19 @@ object LocalIntercept {
 
         /** Call favorite by slot number (1-5). Zero-based [zeroBasedSlot] for lookup. */
         data class CallFavorite(val zeroBasedSlot: Int) : Intercept()
+
+        /**
+         * Spec v1.3.8 B5 — "อันต่อไป" / "เปลี่ยน" / "อันอื่น" / "ไม่เอาอันนี้". The
+         * pipeline consults [com.moto.voice.media.MediaSessionMemory] to find the
+         * next video in the current webhook's videos array and re-uses openYoutube.
+         */
+        object NextVideo : Intercept()
+
+        /**
+         * Spec v1.3.8 B5 — "เมื่อกี้อะไร" / "เล่นอะไรอยู่". Answered from
+         * [com.moto.voice.media.MediaSessionMemory.currentTitle].
+         */
+        object WhatIsPlaying : Intercept()
     }
 
     fun match(text: String): Intercept {
@@ -45,6 +58,13 @@ object LocalIntercept {
         if (matchesAsPhrase(t, HELP_PATTERNS)) return Intercept.Help
         if (matchesAsPhrase(t, REPEAT_PATTERNS)) return Intercept.RepeatLast
         if (matchesAsPhrase(t, CALL_BACK_PATTERNS)) return Intercept.CallBackLast
+
+        // v1.3.8 B5 — media-context intercepts. Order matters vs Stop: "เปลี่ยน" is
+        // an odd match candidate for STOP-adjacent patterns, so we check the media
+        // ones AFTER Stop to keep "หยุด/เปลี่ยน" resolution unambiguous even if a
+        // rider says both in the same sentence.
+        if (matchesAsPhrase(t, NEXT_VIDEO_PATTERNS)) return Intercept.NextVideo
+        if (matchesAsPhrase(t, WHAT_IS_PLAYING_PATTERNS)) return Intercept.WhatIsPlaying
 
         return Intercept.None
     }
@@ -113,6 +133,14 @@ object LocalIntercept {
     // Exact match only — anything longer goes to the webhook where an LLM picks the station.
     private val RESUME_RADIO_PATTERNS = listOf(
         "เปิดวิทยุ", "เปิด วิทยุ", "เล่นวิทยุ", "เอาวิทยุ"
+    )
+    /** Spec v1.3.8 B5 — advance to next video in the current webhook's `videos` array. */
+    private val NEXT_VIDEO_PATTERNS = listOf(
+        "อันต่อไป", "เปลี่ยน", "อันอื่น", "ไม่เอาอันนี้", "ต่อไป", "ถัดไป"
+    )
+    /** Spec v1.3.8 B5 — read back what's currently playing (from MediaSessionMemory). */
+    private val WHAT_IS_PLAYING_PATTERNS = listOf(
+        "เมื่อกี้อะไร", "เล่นอะไรอยู่", "อะไรอยู่", "นี่เพลงอะไร"
     )
 
     /** Short help text spoken by TTS on Help intercept. */

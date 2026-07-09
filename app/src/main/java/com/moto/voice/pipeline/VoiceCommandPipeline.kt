@@ -45,6 +45,7 @@ import com.moto.voice.network.WebhookResponse
 import com.moto.voice.nlu.LocalIntercept
 import com.moto.voice.nlu.NumberWordParser
 import com.moto.voice.nlu.CommandParser
+import com.moto.voice.nlu.RandomOpener
 import com.moto.voice.nlu.SlotFiller
 import com.moto.voice.nlu.VoiceCommand
 import com.moto.voice.tts.ThaiTTS
@@ -83,6 +84,8 @@ private const val YOUTUBE_NUDGE_DELAY_MS = 3_000L
 private const val STT_RECREATE_THRESHOLD = 2
 /** Spec v1.3.8 A3 — hard per-interaction ceiling. Longer than the SCO + STT + webhook + action budgets combined. */
 private const val INTERACTION_WATCHDOG_MS = 45_000L
+/** Spec v1.3.8 B2 — how long the follow-up window listens for a follow-up command. Short — the rider is on a bike. */
+private const val FOLLOWUP_LISTEN_MS = 4_000L
 
 class VoiceCommandPipeline(
     private val context: Context,
@@ -122,6 +125,15 @@ class VoiceCommandPipeline(
      * to recycle its internal state.
      */
     private var consecutiveSttErrors: Int = 0
+
+    /**
+     * Spec v1.3.8 B2 — set to true by action handlers whose reply is conversational
+     * (chat, none, cancelled call, stop). runFollowUpWindow reads this after
+     * executeWebhookAction returns and decides whether to open the 4-second listen.
+     * Media handlers (youtube_play, fm success) leave it false because the media
+     * itself will be playing and we can't listen over it.
+     */
+    private var followupEligible: Boolean = false
 
     /** True from start() until finish()/stop() runs. Read by VoiceCommandService to decide barge-in vs new interaction. */
     val isActive: Boolean get() = runJob?.isActive == true && !finished.get()
@@ -350,9 +362,38 @@ class VoiceCommandPipeline(
                 else confirmThenCall(ContactEntry(id = "last", displayName = name, phoneNumber = number), null)
             }
             is LocalIntercept.Intercept.CallFavorite -> handleFavoriteCall(intercept.zeroBasedSlot)
+            LocalIntercept.Intercept.NextVideo -> handleNextVideo(entry)
+            LocalIntercept.Intercept.WhatIsPlaying -> handleWhatIsPlaying()
             LocalIntercept.Intercept.None -> Unit  // handled in caller
         }
         finish()
+    }
+
+    /**
+     * Spec v1.3.8 B5 — "อันต่อไป" / "เปลี่ยน" etc. Uses [MediaSessionMemory] to find
+     * the next entry in the last webhook's `videos` array. If the list is exhausted
+     * or no video has been opened yet this session, speaks the short exhaust line
+     * instead of firing an empty intent.
+     */
+    private suspend fun handleNextVideo(entry: DebugEntry) {
+        val next = com.moto.voice.media.MediaSessionMemory.nextVideo()
+        if (next == null) {
+            speakAndRemember(ErrorSpeech.NEXT_VIDEO_EXHAUSTED)
+            return
+        }
+        val title = next.title.ifBlank { "อันต่อไป" }
+        speakAndRemember("กำลังเปิด $title")
+        com.moto.voice.media.MediaSessionMemory.advanceTo(next)
+        releaseScoBeforeMedia(entry)
+        openYoutube(next.id, null, entry)
+        recordHistory(HistoryAction.YoutubeOpen(next.id, next.title))
+    }
+
+    /** Spec v1.3.8 B5 — "เมื่อกี้อะไร" / "เล่นอะไรอยู่". */
+    private suspend fun handleWhatIsPlaying() {
+        val title = com.moto.voice.media.MediaSessionMemory.currentTitle()
+        if (title.isBlank()) speakAndRemember(ErrorSpeech.WHAT_IS_PLAYING_NONE)
+        else speakAndRemember("เมื่อกี้ $title")
     }
 
     /**
@@ -438,9 +479,54 @@ class VoiceCommandPipeline(
                 executeWebhookAction(result.response, entry)
                 entry.actionTimeMs = System.currentTimeMillis() - t2
                 entry.finishReason = FinishReason.OK
+                // Spec v1.3.8 B2 — after finish-eligible action handlers, open a 4s
+                // follow-up window. Media handlers (youtube_play, fm) leave
+                // followupEligible = false so this is a no-op there.
+                if (settings.followupEnabled && followupEligible) {
+                    runFollowUpWindow(entry)
+                }
                 finish()
             }
             is WebhookClient.Result.Failure -> handleWebhookFailure(text, entry, result)
+        }
+    }
+
+    /**
+     * Spec v1.3.8 B2 — 4-second passive listen after a conversational reply.
+     *
+     * Rider path: TTS reply finishes → soft "ready" earcon → mic opens for 4s → if
+     * something is captured, it's re-entered through the normal intercept + webhook
+     * path AS IF the rider had pressed BVRA again. Silence → soft end earcon → done.
+     *
+     * Spec §3 constraint — must go through [listenOnce] (the central listen loop) so
+     * the echo guard round-trip via [TtsRecentSpeech] catches our own TTS. Never
+     * create a bespoke listen path here.
+     *
+     * Non-recursive by design — set followupEligible=false BEFORE re-entering, so a
+     * follow-up chat that also flags eligible won't open another follow-up (that
+     * would let the assistant chatter until the rider silences it manually).
+     */
+    private suspend fun runFollowUpWindow(entry: DebugEntry) {
+        Earcon.ready()
+        val text = listenOnce(entry, minListenMs = FOLLOWUP_LISTEN_MS)
+        if (text.isBlank()) {
+            Earcon.end()
+            return
+        }
+        if (TtsEchoFilter.isSelfEcho(text)) {
+            Log.d(TAG, "followup captured self-echo — treating as silence")
+            Earcon.end()
+            return
+        }
+        Log.d(TAG, "followup captured: '$text' — re-entering pipeline")
+        entry.finishReason = FinishReason.FOLLOWUP_COMMAND
+        entry.followupUsed = true
+        heardText = text
+        entry.sttFinal = text
+        followupEligible = false  // one follow-up per interaction — no chatter loops
+        when (val i = LocalIntercept.match(text)) {
+            is LocalIntercept.Intercept.None -> processText(text, entry)
+            else -> handleIntercept(i, entry)
         }
     }
 
@@ -529,7 +615,7 @@ class VoiceCommandPipeline(
             "fm" -> {
                 if (!resp.streamUrl.isNullOrBlank()) {
                     val name = resp.stationName ?: resp.frequency?.let { "FM $it" } ?: "วิทยุ"
-                    speakAndRemember(resp.speak.ifBlank { "กำลังเปิด $name" })
+                    speakAndRememberWithOpener(resp.speak.ifBlank { "กำลังเปิด $name" })
                     releaseScoBeforeMedia(entry)
                     startFm(resp.streamUrl, name, resp.frequency)
                 } else {
@@ -541,8 +627,22 @@ class VoiceCommandPipeline(
                 executeStopSequence()
                 speakAndRemember(resp.speak.ifBlank { "หยุดแล้ว" })
                 recordHistory(HistoryAction.Stop)
+                followupEligible = true  // spec v1.3.8 B2 — stop is a natural pause, keep the mic open
             }
-            "none" -> speakAndRemember(resp.speak.ifBlank { "รับทราบ" })
+            "chat" -> {
+                // Spec v1.3.8 B1 — n8n added a conversational category. Route it as
+                // a first-class response (not "none" — no "ยังทำเรื่องนี้ไม่ได้" tone) so
+                // the reply feels natural. Also flagged for the follow-up window (B2)
+                // so the rider can keep talking without another BVRA press.
+                val spoken = resp.speak.ifBlank { "ค่ะ" }
+                speakAndRemember(spoken)
+                recordHistory(HistoryAction.Chat(spoken))
+                followupEligible = true
+            }
+            "none" -> {
+                speakAndRemember(resp.speak.ifBlank { "รับทราบ" })
+                followupEligible = true  // rider may want to correct or continue
+            }
             else -> speakAndRemember(resp.speak.ifBlank { "เข้าใจแล้ว" })
         }
     }
@@ -595,8 +695,12 @@ class VoiceCommandPipeline(
         // and they can always cancel the outgoing call from the phone dialer.
         val answer = promptAndListen("$msg พูด ยกเลิก เพื่อยกเลิก", null)
         val explicitCancel = answer.contains("ไม่") || answer.contains("ยกเลิก") || answer.contains("cancel", ignoreCase = true)
-        if (explicitCancel) speakAndRemember(ErrorSpeech.CANCELLED)
-        else makeCall(contact)
+        if (explicitCancel) {
+            speakAndRemember(ErrorSpeech.CANCELLED)
+            // Spec v1.3.8 B2 — cancelled call is a natural pause; keep listening in case
+            // the rider changes their mind or wants to dial someone else.
+            followupEligible = true
+        } else makeCall(contact)
     }
 
     /**
@@ -679,10 +783,12 @@ class VoiceCommandPipeline(
                 chosen.title.isNotBlank() -> "กำลังเปิด ${chosen.title}"
                 else -> "กำลังเปิด YouTube"
             }
-            speakAndRemember(spoken)
+            speakAndRememberWithOpener(spoken)
             releaseScoBeforeMedia(entry)
             openYoutube(chosen.id, resp.query, entry)
             recordHistory(HistoryAction.YoutubeOpen(chosen.id, chosen.title))
+            // Spec v1.3.8 B5 — remember the videos list so "อันต่อไป" can advance.
+            com.moto.voice.media.MediaSessionMemory.rememberYoutube(candidates, chosen.id, chosen.title)
             return
         }
 
@@ -866,6 +972,8 @@ class VoiceCommandPipeline(
         FmPlaybackState.clearAssistantPaused()
 
         memory.rememberStation(streamUrl, label, frequency)
+        // Spec v1.3.8 B5 — clear video context and set FM name so "เมื่อกี้อะไร" answers.
+        com.moto.voice.media.MediaSessionMemory.rememberFm(label)
         val intent = Intent(context, FmPlayerService::class.java)
             .setAction(FmPlayerService.ACTION_PLAY)
             .putExtra(FmPlayerService.EXTRA_STREAM_URL, streamUrl)
@@ -1135,6 +1243,20 @@ class VoiceCommandPipeline(
     private suspend fun speakAndRemember(text: String) {
         memory.lastSpoken = text
         tts.speakAwait(text)
+    }
+
+    /**
+     * Spec v1.3.8 B3 — variant used for action-taking replies where the webhook's
+     * speak text starts with "กำลัง". Prepends a short random opener ~40% of the
+     * time so the assistant doesn't sound identical on every consecutive command.
+     * Non-"กำลัง" text passes through unchanged.
+     *
+     * The two possible opener strings (ได้เลย{ค่ะ|ครับ}, จัดให้{ค่ะ|ครับ}) are in
+     * ErrorSpeech and therefore in the pre-synthesize cache — no Azure hit added.
+     */
+    private suspend fun speakAndRememberWithOpener(text: String) {
+        val combined = RandomOpener.pickPrefixFor(text) + text
+        speakAndRemember(combined)
     }
 
     /**

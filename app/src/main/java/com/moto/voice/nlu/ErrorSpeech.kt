@@ -102,6 +102,40 @@ object ErrorSpeech {
      */
     val ACTION_IN_PROGRESS: String get() = pick("กำลังทำอยู่ค่ะ", "กำลังทำอยู่ครับ")
 
+    // ─── Spec v1.3.8 B3 — random pre-action openers ──────────────────────────
+    // Prepended to webhook "speak" fields that start with "กำลัง" so the assistant
+    // doesn't sound robotically identical every time. Weighted so the "no prefix"
+    // path is most common (RandomOpener) and total audio stays ≤ 1s.
+
+    /** "ได้เลยค่ะ " / "ได้เลยครับ " — pre-action acknowledgment, feminine/masculine variant. */
+    val OPENER_DAI_LEUY: String get() = pick("ได้เลยค่ะ ", "ได้เลยครับ ")
+    /** "จัดให้ค่ะ " / "จัดให้ครับ " — pre-action acknowledgment, casual/warm variant. */
+    val OPENER_JAT_HAI: String get() = pick("จัดให้ค่ะ ", "จัดให้ครับ ")
+
+    // ─── Spec v1.3.8 B4 — time-based helmet-connect greetings ────────────────
+    // Replace the old flat HELMET_READY. Rider hears one of three based on hour;
+    // all ≤ 1.5s and all pre-synthesized so the greet is instant off SCO connect.
+
+    /** 05:00–10:59 wake-up energy. */
+    val GREET_MORNING: String get() = pick("อรุณสวัสดิ์ค่ะ", "อรุณสวัสดิ์ครับ")
+    /** 11:00–18:59 midday travel. */
+    val GREET_MIDDAY: String get() = pick("พร้อมเดินทางแล้วค่ะ", "พร้อมเดินทางแล้วครับ")
+    /** 19:00–04:59 evening safety wish. */
+    val GREET_EVENING: String get() = pick("ขี่ปลอดภัยนะคะ", "ขี่ปลอดภัยนะครับ")
+
+    // ─── Spec v1.3.8 B5 — media-context intercept responses ──────────────────
+
+    /** After "อันต่อไป" but the videos list has no next entry. */
+    val NEXT_VIDEO_EXHAUSTED: String get() = pick(
+        "หมดตัวเลือกแล้วค่ะ ลองค้นใหม่นะคะ",
+        "หมดตัวเลือกแล้วครับ ลองค้นใหม่นะครับ",
+    )
+    /** After "เมื่อกี้อะไร" but no media has been opened yet this session. */
+    val WHAT_IS_PLAYING_NONE: String get() = pick(
+        "ยังไม่ได้เปิดอะไรค่ะ",
+        "ยังไม่ได้เปิดอะไรครับ",
+    )
+
     /** All 21 lines, in a stable order — used by the pre-synthesize cache warmer. */
     fun allSystemLines(): List<String> = listOf(
         THINKING, ONE_MORE_MOMENT,
@@ -115,6 +149,10 @@ object ErrorSpeech {
         HELMET_READY, YT_PICKER_DEFAULT_FIRST, YT_PICKER_UNCLEAR_PREFIX,
         PREVIEW_SAMPLE,
         ACTION_IN_PROGRESS,
+        // v1.3.8 additions — RandomOpener prefixes, time-based greetings, media-context lines
+        OPENER_DAI_LEUY, OPENER_JAT_HAI,
+        GREET_MORNING, GREET_MIDDAY, GREET_EVENING,
+        NEXT_VIDEO_EXHAUSTED, WHAT_IS_PLAYING_NONE,
     )
 
     private fun pick(feminine: String, masculine: String): String =

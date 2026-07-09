@@ -31,6 +31,11 @@ data class SettingsBackup(
      * restore to the AppSettings default (2.0s). Not a schema-version bump.
      */
     @SerializedName("listen_pace_seconds") val listenPaceSeconds: Float? = null,
+    /**
+     * Added in v1.3.8 — spec B2 "คุยต่อเนื่องหลังตอบ" toggle. Optional so older
+     * backups keep working; missing = AppSettings default (true).
+     */
+    @SerializedName("followup_enabled") val followupEnabled: Boolean? = null,
     val favorites: List<Favorite>,
     @SerializedName("last_station") val lastStation: LastStation?,
 ) {
@@ -81,6 +86,7 @@ data class SettingsBackup(
                 resumeAfterCall = s.resumeAfterCall,
                 onboardingComplete = s.onboardingComplete,
                 listenPaceSeconds = s.listenPaceSeconds,
+                followupEnabled = s.followupEnabled,
                 favorites = fav,
                 lastStation = station,
             )
@@ -121,6 +127,7 @@ data class SettingsBackup(
             s.resumeAfterCall = backup.resumeAfterCall
             s.onboardingComplete = backup.onboardingComplete
             backup.listenPaceSeconds?.let { s.listenPaceSeconds = it }
+            backup.followupEnabled?.let { s.followupEnabled = it }
 
             val favStore = FavoritesStore(context)
             favStore.clear()

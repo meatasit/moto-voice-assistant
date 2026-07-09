@@ -114,6 +114,14 @@ data class DebugEntry(
      * back-to-back until the app was force-stopped.
      */
     var sttRecreated: Boolean = false,
+
+    /**
+     * True when the v1.3.8 B2 follow-up window (soft earcon → 4s listen after a
+     * finish-eligible action) actually captured text that got re-entered into the
+     * pipeline. Durable marker because [finishReason] may be overwritten by the
+     * follow-up command's downstream action.
+     */
+    var followupUsed: Boolean = false,
 ) {
     fun time(): String = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date(timestamp))
 
@@ -134,6 +142,7 @@ data class DebugEntry(
         if (youtubeNudged) append("  yt:nudged")
         if (sttRecreated) append("  stt:recreated")
         if (slotFilled) append("  slot:filled")
+        if (followupUsed) append("  followup:used")
         if (finishReason != null) append("  end:${finishReason}")
         if (error != null) append("  ⚠️ $error")
     }

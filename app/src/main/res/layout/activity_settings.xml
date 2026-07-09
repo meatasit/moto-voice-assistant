@@ -298,6 +298,25 @@
 
                 <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
 
+                <!-- v1.3.8 B2 — คุยต่อเนื่องหลังตอบ -->
+                <LinearLayout android:layout_width="match_parent" android:layout_height="64dp"
+                    android:orientation="horizontal" android:gravity="center_vertical"
+                    android:paddingHorizontal="8dp">
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:orientation="vertical">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="คุยต่อเนื่องหลังตอบ" android:textColor="@color/white" android:textSize="15sp" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="เปิดฟังต่อ 4 วินาที หลังจาวิสตอบ ไม่ต้องกดปุ่มอีก"
+                            android:textColor="#88FFFFFF" android:textSize="12sp" />
+                    </LinearLayout>
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switchFollowup"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                </LinearLayout>
+
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
+
                 <!-- Assistant volume 0.5 – 1.5 -->
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:orientation="vertical" android:padding="16dp">

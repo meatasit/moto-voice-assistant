@@ -67,6 +67,7 @@ class HistoryActivity : AppCompatActivity() {
         is HistoryAction.FmPlay -> "📻"
         HistoryAction.Stop -> "⏹"
         is HistoryAction.Speak -> "💬"
+        is HistoryAction.Chat -> "🗨"
     }
 
     private fun titleFor(action: HistoryAction) = when (action) {
@@ -75,6 +76,7 @@ class HistoryActivity : AppCompatActivity() {
         is HistoryAction.FmPlay -> "เปิดวิทยุ ${action.stationName}"
         HistoryAction.Stop -> "หยุดเสียง"
         is HistoryAction.Speak -> "ผู้ช่วยพูด"
+        is HistoryAction.Chat -> "คุยกับจาวิส"
     }
 
     private fun subtitleFor(entry: HistoryEntry): String {
@@ -108,6 +110,7 @@ class HistoryActivity : AppCompatActivity() {
             }
             HistoryAction.Stop -> MediaStopper.stopAnySimple(this)
             is HistoryAction.Speak -> Unit  // no-op: nothing to repeat for a speak-only entry
+            is HistoryAction.Chat -> Unit   // no-op: chat is conversational, no replay
         }
     }
 

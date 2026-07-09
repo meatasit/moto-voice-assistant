@@ -46,12 +46,22 @@ sealed class HistoryAction {
         override val type get() = TYPE_SPEAK
     }
 
+    /**
+     * Spec v1.3.8 B1 — the webhook returned action=chat (the n8n side just added the
+     * category). Displays in the rider-facing history as "คุยกับจาวิส" so a
+     * conversational reply stays distinguishable from unactionable "none" fallbacks.
+     */
+    data class Chat(val text: String) : HistoryAction() {
+        override val type get() = TYPE_CHAT
+    }
+
     companion object {
         const val TYPE_CALL = "call"
         const val TYPE_YT = "youtube_open"
         const val TYPE_FM = "fm_play"
         const val TYPE_STOP = "stop"
         const val TYPE_SPEAK = "speak"
+        const val TYPE_CHAT = "chat"
     }
 }
 
@@ -133,6 +143,7 @@ private class HistoryActionAdapter :
             HistoryAction.TYPE_FM -> g.fromJson(obj, HistoryAction.FmPlay::class.java)
             HistoryAction.TYPE_STOP -> HistoryAction.Stop
             HistoryAction.TYPE_SPEAK -> g.fromJson(obj, HistoryAction.Speak::class.java)
+            HistoryAction.TYPE_CHAT -> g.fromJson(obj, HistoryAction.Chat::class.java)
             else -> HistoryAction.Stop  // unrecognized; safe fallback
         }
     }
