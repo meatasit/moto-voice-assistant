@@ -48,6 +48,31 @@ class FmPlayerService : MediaSessionService() {
         /** Soft pause — service stays alive so [ACTION_RESUME] can pick up exactly where we left off. */
         const val ACTION_PAUSE = "com.moto.voice.FM_PAUSE"
         const val ACTION_RESUME = "com.moto.voice.FM_RESUME"
+        /**
+         * Yield our MediaSession's active state for the YouTube nudge (v1.3.7).
+         *
+         * v1.3.6 sent ACTION_STOP here which killed the service — the rider could
+         * still voice-resume via [com.moto.voice.nlu.LocalIntercept.ResumeLastRadio]
+         * because `AppMemory.lastStationUrl` is set independently, but the notification
+         * disappeared and any next play required a fresh service start.
+         *
+         * ACTION_YIELD_SESSION takes a lighter touch: [Player.stop] transitions the
+         * player to STATE_IDLE, which the framework reports as PlaybackState.STATE_STOPPED —
+         * dropping us out of the media button routing chain so KEYCODE_MEDIA_PLAY
+         * dispatched next lands on YouTube's session. The service stays alive and the
+         * foreground notification stays visible; a subsequent [ACTION_RESUME] detects
+         * the STATE_IDLE, re-prepares the same [currentUrl], and playback resumes.
+         *
+         * Common flow this enables — rider swaps radio ↔ YouTube on the highway:
+         *   1. "เปิดวิทยุ 106"     → FM playing
+         *   2. "เปิด YouTube ..."  → SCO teardown, YouTube intent, 3s later nudge
+         *                              → we YIELD, YouTube receives MEDIA_PLAY
+         *   3. Rider watches video → FM notification still visible (not "หยุด")
+         *   4. "เปิดวิทยุ"          → ResumeLastRadio → ACTION_PLAY → same URL,
+         *                              resume from cold — the notification never left,
+         *                              the service was never respawned.
+         */
+        const val ACTION_YIELD_SESSION = "com.moto.voice.FM_YIELD_SESSION"
         const val EXTRA_STREAM_URL = "stream_url"
         const val EXTRA_LABEL = "label"
         private const val TAG = "FmPlayerService"
@@ -115,9 +140,28 @@ class FmPlayerService : MediaSessionService() {
                 // Foreground notification stays — service remains alive so RESUME can
                 // continue instantly without a fresh SCO/prepare cycle.
             }
+            ACTION_YIELD_SESSION -> {
+                Log.d(TAG, "yield-session requested (YouTube nudge)")
+                // Player.stop() → STATE_IDLE → session becomes ineligible for media
+                // button routing. Service + notification stay alive so ACTION_PLAY /
+                // ACTION_RESUME can revive from currentUrl. See ACTION_YIELD_SESSION kdoc.
+                mediaSession?.player?.stop()
+                FmPlaybackState.setPlaying(false)
+            }
             ACTION_RESUME -> {
                 Log.d(TAG, "resume requested")
-                mediaSession?.player?.playWhenReady = true
+                val player = mediaSession?.player
+                val url = currentUrl
+                if (player?.playbackState == Player.STATE_IDLE && !url.isNullOrBlank()) {
+                    // Resuming from ACTION_YIELD_SESSION — player is IDLE so
+                    // playWhenReady=true alone won't help; need to rebuild the item.
+                    Log.d(TAG, "resume after yield — re-preparing $url")
+                    player.setMediaItem(MediaItem.fromUri(url))
+                    player.prepare()
+                    player.playWhenReady = true
+                } else {
+                    player?.playWhenReady = true
+                }
                 FmPlaybackState.clearAssistantPaused()
             }
             ACTION_PLAY -> {
