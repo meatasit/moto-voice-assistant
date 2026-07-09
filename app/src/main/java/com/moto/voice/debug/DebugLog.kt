@@ -94,6 +94,26 @@ data class DebugEntry(
      * after a successful call), so this boolean is the durable marker.
      */
     var slotFilled: Boolean = false,
+
+    /**
+     * True when [com.moto.voice.pipeline.VoiceCommandPipeline.openYoutube] observed
+     * audio playing at intent-fire time and pre-paused the previous stream (spec
+     * v1.3.8 A1) so the 3-second nudge check has a clean baseline. Field log
+     * 1783611077863 showed 3 back-to-back YouTube swaps of the same title where
+     * only the first ever nudged — root cause was `isMusicActive` still returning
+     * true from the previous video still decoding, so the nudge skipped for the
+     * new one.
+     */
+    var youtubePrepaused: Boolean = false,
+
+    /**
+     * True when the pipeline observed ≥2 consecutive non-NO_MATCH STT errors and
+     * inserted an extra 400ms breather before the next listen to let the platform
+     * SpeechRecognizer service recycle (spec v1.3.8 A2). Long sessions on the S24
+     * were reported to degrade — the recognizer would start returning ERROR 7 / 8
+     * back-to-back until the app was force-stopped.
+     */
+    var sttRecreated: Boolean = false,
 ) {
     fun time(): String = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date(timestamp))
 
@@ -110,7 +130,9 @@ data class DebugEntry(
         if (actionTimeMs > 0) append("  ACT:${actionTimeMs}ms")
         if (engineChoiceReason != null) append("  tts:${engineChoiceReason}")
         if (completeSilenceMs > 0) append("  silHint:${completeSilenceMs}ms")
+        if (youtubePrepaused) append("  yt:prepaused")
         if (youtubeNudged) append("  yt:nudged")
+        if (sttRecreated) append("  stt:recreated")
         if (slotFilled) append("  slot:filled")
         if (finishReason != null) append("  end:${finishReason}")
         if (error != null) append("  ⚠️ $error")
@@ -203,6 +225,25 @@ object FinishReason {
      * Spec v1.3.6 §2.
      */
     const val SLOT_FILLED = "slot_filled"
+    /**
+     * Interaction exceeded the 45s hard watchdog (spec v1.3.8 A3). The pipeline was
+     * force-cancelled to guarantee a clean idle state — SCO torn down, focus abandoned,
+     * TTS stopped. The next BVRA press starts a fresh interaction with no lingering state.
+     */
+    const val WATCHDOG_RESET = "watchdog_reset"
+    /**
+     * The rider repeated the same action within [com.moto.voice.pipeline.DedupeGuard.WINDOW_MS]
+     * (spec v1.3.8 A5). Second occurrence is answered with a short "กำลังทำอยู่ค่ะ"
+     * instead of re-executing — protects against double-dial / double-open.
+     */
+    const val DUPLICATE_ACTION = "duplicate_action"
+    /**
+     * A command captured during the v1.3.8 follow-up window (chat, none, cancelled
+     * call, or stop → soft earcon → 4s listen) produced actionable text and was
+     * re-entered into the pipeline. Set at the moment the follow-up captures text;
+     * later stages may overwrite as they process the follow-up command.
+     */
+    const val FOLLOWUP_COMMAND = "followup_command"
 }
 
 object DebugLog {

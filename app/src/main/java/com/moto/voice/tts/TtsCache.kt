@@ -76,6 +76,23 @@ class TtsCache(private val context: Context) {
         }
     }
 
+    /**
+     * Delete all LRU-tier files but leave the persistent set (pre-synthesized system
+     * lines) alone. Called from [com.moto.voice.MotoVoiceApplication.onTrimMemory] on
+     * TRIM_MEMORY_MODERATE+ (spec v1.3.8 A4) — the LRU is regenerable from Azure on
+     * demand, but the persistent lines are what keeps the app usable offline right
+     * after the OS reclaims memory.
+     *
+     * @return number of files deleted (test hook).
+     */
+    fun clearLru(): Int {
+        val files = runCatching { lruDir.listFiles()?.toList() ?: emptyList() }.getOrDefault(emptyList())
+        var deleted = 0
+        files.forEach { if (it.delete()) deleted++ }
+        Log.d(TAG, "clearLru deleted $deleted files")
+        return deleted
+    }
+
     /** Total on-disk size of the LRU tier (excludes persist). Test hook. */
     fun lruBytes(): Long = runCatching {
         (lruDir.listFiles() ?: emptyArray()).sumOf { it.length() }

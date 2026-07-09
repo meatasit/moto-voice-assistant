@@ -56,6 +56,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 
@@ -73,6 +74,15 @@ private const val DISAMBIG_MIN_LISTEN_MS = 6_000L
 private val FAVORITE_SLOT_WORDS = listOf("หนึ่ง", "สอง", "สาม", "สี่", "ห้า")
 /** Delay before checking whether the YouTube intent actually resulted in playback. Spec v1.3.6 §2. */
 private const val YOUTUBE_NUDGE_DELAY_MS = 3_000L
+/**
+ * Spec v1.3.8 A2 — 2 consecutive non-silence STT errors is when we start suspecting
+ * the platform recognizer service is degrading and force the throttle+recreate path.
+ * Lower would be too twitchy (a single ERROR_AUDIO can happen naturally); higher would
+ * miss the field-report pattern where the S24 loops errors 7/8 back-to-back.
+ */
+private const val STT_RECREATE_THRESHOLD = 2
+/** Spec v1.3.8 A3 — hard per-interaction ceiling. Longer than the SCO + STT + webhook + action budgets combined. */
+private const val INTERACTION_WATCHDOG_MS = 45_000L
 
 class VoiceCommandPipeline(
     private val context: Context,
@@ -103,6 +113,16 @@ class VoiceCommandPipeline(
     /** The debug entry currently owned by [runPipeline] — retained for [markBargeIn]. */
     private var currentEntry: DebugEntry? = null
 
+    /**
+     * Spec v1.3.8 A2 — count of consecutive non-NO_MATCH / non-TIMEOUT STT errors.
+     * Reset on any successful listen. Cross-listen state so long sessions where the
+     * platform SpeechRecognizer service degrades (ERROR 7 / ERROR 8 loops observed on
+     * S24 during multi-command bursts) can be caught and throttled: at ≥2 we insert
+     * an extra 400ms breather before the next listen so the OS-side service has time
+     * to recycle its internal state.
+     */
+    private var consecutiveSttErrors: Int = 0
+
     /** True from start() until finish()/stop() runs. Read by VoiceCommandService to decide barge-in vs new interaction. */
     val isActive: Boolean get() = runJob?.isActive == true && !finished.get()
 
@@ -125,7 +145,21 @@ class VoiceCommandPipeline(
         val entry = DebugLog.new()
         currentEntry = entry
         try {
-            runPipelineBody(entry)
+            // Spec v1.3.8 A3 — hard 45s ceiling on the entire interaction. Longer than
+            // the sum of SCO connect (~300ms) + STT window (~10s) + webhook (~15s) +
+            // action (~5s) + slot-fill loop, so a legitimate interaction never trips
+            // this. A null return means something is wedged; finishReason gets marked
+            // and the finally block below tears everything down cleanly.
+            val completed = withTimeoutOrNull(INTERACTION_WATCHDOG_MS) {
+                runPipelineBody(entry)
+                true
+            }
+            if (completed == null) {
+                Log.w(TAG, "interaction watchdog fired at ${INTERACTION_WATCHDOG_MS}ms — force-resetting")
+                entry.finishReason = FinishReason.WATCHDOG_RESET
+                entry.error = ((entry.error ?: "") + " watchdog_reset").trim()
+                runCatching { Earcon.cancel() }
+            }
         } catch (t: Throwable) {
             // Spec §1.1 — unexpected throw must NOT leave SCO holding the audio route.
             // Log the reason so the field can tell that finally saved us and it wasn't
@@ -463,7 +497,30 @@ class VoiceCommandPipeline(
 
     private suspend fun executeWebhookAction(resp: WebhookResponse, entry: DebugEntry) {
         Log.d(TAG, "action=${resp.action} speak=${resp.speak}")
-        when (resp.action.lowercase()) {
+        val action = resp.action.lowercase()
+
+        // Spec v1.3.8 A5 — dedupe the "user stuttered / helmet button double-tapped"
+        // pattern. Only side-effecting actions are guarded; "none" is a pure-TTS reply
+        // that's fine to repeat, and we don't want the dedupe to eat a legitimate
+        // second "หยุด" if the first stop didn't take.
+        val payloadForDedupe = when (action) {
+            "call" -> resp.contact
+            "youtube_play" -> resp.videoId ?: resp.query
+            "fm" -> resp.streamUrl ?: resp.frequency?.toString()
+            else -> null
+        }
+        if (payloadForDedupe != null) {
+            val key = DedupeGuard.keyOf(action, payloadForDedupe)
+            if (DedupeGuard.isRecentDuplicate(key)) {
+                Log.d(TAG, "dedupe hit for $key — swallowing duplicate action")
+                entry.finishReason = FinishReason.DUPLICATE_ACTION
+                speakAndRemember(ErrorSpeech.ACTION_IN_PROGRESS)
+                return
+            }
+            DedupeGuard.markExecuted(key)
+        }
+
+        when (action) {
             "call" -> {
                 val name = resp.contact?.takeIf { it.isNotBlank() } ?: resp.speak
                 handleCallByName(name, resp.speak)
@@ -696,7 +753,15 @@ class VoiceCommandPipeline(
         return top.first()
     }
 
-    private fun openYoutube(videoId: String?, query: String?, entry: DebugEntry) {
+    private suspend fun openYoutube(videoId: String?, query: String?, entry: DebugEntry) {
+        // Spec v1.3.8 A1 — field log 1783611077863 showed 3 consecutive "เปิดรายการเรื่องเล่าเช้านี้"
+        // where only the middle interaction ever nudged (youtubeNudged=true). Root cause:
+        // the previous YouTube video was still decoding when the new intent fired, so
+        // AudioManager.isMusicActive stayed true 3s later → nudge SKIPPED → new video
+        // remained paused. Pre-pausing before the intent gives the nudge check a clean
+        // "silent → active" transition to measure.
+        prepauseIfMusicActive(entry)
+
         fun view(uri: Uri) = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val pm = context.packageManager
 
@@ -721,6 +786,34 @@ class VoiceCommandPipeline(
             }
         }
         if (launched) scheduleYoutubeNudge(entry)
+    }
+
+    /**
+     * Pre-pause step for spec v1.3.8 A1 — described in [openYoutube] kdoc. Two things
+     * happen together so both music sources go quiet:
+     *
+     *   1. Yield our own FmPlayerService session (idempotent — no-op if we're not
+     *      running) so a subsequent MEDIA_PLAY key routes to YouTube's session.
+     *   2. Dispatch KEYCODE_MEDIA_PAUSE to whoever else holds media focus (previous
+     *      YouTube tab / Spotify / etc.).
+     *
+     * Then 400ms breathe for the pause to take effect, before the caller fires the
+     * deep-link intent. Only runs when [AudioManager.isMusicActive] is true — a fresh
+     * silent state doesn't need the treatment and would waste the 400ms delay.
+     */
+    private suspend fun prepauseIfMusicActive(entry: DebugEntry) {
+        val am = context.getSystemService(AudioManager::class.java) ?: return
+        if (!am.isMusicActive) return
+        Log.d(TAG, "youtube pre-pause: music currently active — quiescing before launch")
+        runCatching {
+            context.startService(
+                Intent(context, FmPlayerService::class.java)
+                    .setAction(FmPlayerService.ACTION_YIELD_SESSION)
+            )
+        }
+        MediaStopper.dispatchMediaPause(context)
+        delay(400L)
+        entry.youtubePrepaused = true
     }
 
     /**
@@ -878,6 +971,18 @@ class VoiceCommandPipeline(
         // Settle delay so TTS audio finishes draining and the recognizer isn't still
         // holding the mic from a previous session. See bug report §1.
         delay(350)
+        // Spec v1.3.8 A2 — if the previous 2+ listens hit non-silence errors, the
+        // platform recognizer service is likely degrading. Force an extra 400ms
+        // breather and explicit destroy so the fresh instance in listenOnceRaw hits
+        // an OS side that had time to reclaim its state. Log so field logs show
+        // when this kicked in.
+        if (consecutiveSttErrors >= STT_RECREATE_THRESHOLD) {
+            Log.w(TAG, "STT $consecutiveSttErrors consecutive errors — throttling + recreate")
+            recognizer?.destroy()
+            recognizer = null
+            entry?.sttRecreated = true
+            delay(400L)
+        }
         val first = listenOnceRaw(entry, isRetry = false, minListenMs = minListenMs)
         if (first.text.isNotBlank()) return first
         if (first.wasTransientError) {
@@ -956,6 +1061,10 @@ class VoiceCommandPipeline(
                         ?.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
                         ?.firstOrNull() ?: -1f
                     if (entry != null && conf >= 0f) entry.sttConfidence = conf
+                    // Spec v1.3.8 A2 — success resets the consecutive-error counter.
+                    // Blank text still counts as a "the engine was healthy enough to
+                    // return" so it's a legitimate reset too.
+                    consecutiveSttErrors = 0
                     Log.d(TAG, "final: '$text' confidence=$conf")
                     if (cont.isActive) cont.resume(
                         SttOutcome(text, wasTransientError = false, wasNoSpeech = false, confidence = conf)
@@ -976,6 +1085,10 @@ class VoiceCommandPipeline(
                     )
                     val noSpeech = error == SpeechRecognizer.ERROR_NO_MATCH ||
                                    error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                    // Spec v1.3.8 A2 — only count the "engine is degrading" family of
+                    // errors. NO_MATCH / TIMEOUT are silence, not degradation, and
+                    // shouldn't trigger the throttle.
+                    if (!noSpeech) consecutiveSttErrors++ else consecutiveSttErrors = 0
                     if (cont.isActive) cont.resume(
                         SttOutcome("", wasTransientError = transient, wasNoSpeech = noSpeech)
                     )

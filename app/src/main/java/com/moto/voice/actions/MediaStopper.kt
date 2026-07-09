@@ -33,6 +33,20 @@ object MediaStopper {
     }
 
     /**
+     * Dispatch a single KEYCODE_MEDIA_PAUSE (DOWN+UP) — the counterpart to
+     * [dispatchMediaPlay]. Used by the v1.3.8 pre-pause step (spec A1) to force the
+     * current playback into a known-idle state BEFORE we launch a YouTube deep link,
+     * so the 3-second isMusicActive nudge check can't false-positive on the previous
+     * video's still-decoding audio and skip the nudge for the new one.
+     */
+    fun dispatchMediaPause(context: Context) {
+        val am = context.getSystemService(AudioManager::class.java) ?: return
+        val now = SystemClock.uptimeMillis()
+        am.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PAUSE, 0))
+        am.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PAUSE, 0))
+    }
+
+    /**
      * Dispatch a single KEYCODE_MEDIA_PLAY (DOWN+UP). Used by the YouTube nudge:
      * field log 1783581952116 showed the YouTube intent succeeding, our SCO fully
      * torn down (scoTeardownMs=818) and yet the video staying paused — the rider

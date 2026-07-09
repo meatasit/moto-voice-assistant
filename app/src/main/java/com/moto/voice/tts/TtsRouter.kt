@@ -154,6 +154,15 @@ class TtsRouter private constructor(private val app: Context) {
     /** Test hook: expose the cache for instrumentation. */
     internal fun cacheForTest(): TtsCache = cache
 
+    /**
+     * Spec v1.3.8 A4 — public accessor used by [com.moto.voice.MotoVoiceApplication.onTrimMemory]
+     * to clear the LRU tier of the on-disk TTS cache under memory pressure. The
+     * persistent tier (pre-synthesized system lines) stays so the assistant is still
+     * responsive right after the OS reclaimed memory.
+     * @return number of LRU files deleted.
+     */
+    fun clearTtsCacheLru(): Int = cache.clearLru()
+
     companion object {
         private const val TAG = "TtsRouter"
         private val instance = AtomicReference<TtsRouter?>(null)

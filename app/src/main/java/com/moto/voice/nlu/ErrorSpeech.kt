@@ -94,6 +94,14 @@ object ErrorSpeech {
         "สวัสดีครับ ทดสอบความเร็วเสียงพูด",
     )
 
+    /**
+     * Spec v1.3.8 A5 — spoken when the pipeline detects the SAME action + payload
+     * within [com.moto.voice.pipeline.DedupeGuard.WINDOW_MS] of the previous execution.
+     * Keeps the answer short so the rider isn't punished for a stutter or a helmet
+     * button double-press: just a 1-word acknowledgment that we've got it.
+     */
+    val ACTION_IN_PROGRESS: String get() = pick("กำลังทำอยู่ค่ะ", "กำลังทำอยู่ครับ")
+
     /** All 21 lines, in a stable order — used by the pre-synthesize cache warmer. */
     fun allSystemLines(): List<String> = listOf(
         THINKING, ONE_MORE_MOMENT,
@@ -106,6 +114,7 @@ object ErrorSpeech {
         PREFLIGHT_MISSING_CONTACTS, PREFLIGHT_MISSING_CALL,
         HELMET_READY, YT_PICKER_DEFAULT_FIRST, YT_PICKER_UNCLEAR_PREFIX,
         PREVIEW_SAMPLE,
+        ACTION_IN_PROGRESS,
     )
 
     private fun pick(feminine: String, masculine: String): String =
