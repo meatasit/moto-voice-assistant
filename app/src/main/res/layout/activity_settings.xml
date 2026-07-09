@@ -365,6 +365,35 @@
                         android:layout_marginTop="8dp"
                         app:cornerRadius="8dp" />
 
+                    <!-- v1.3.6 §1: จังหวะรอฟัง — silence-length hint to the recognizer -->
+                    <LinearLayout
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:gravity="center_vertical"
+                        android:layout_marginTop="12dp" android:layout_marginBottom="4dp">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="จังหวะรอฟัง (ก่อนตัดจบ)" android:textColor="@color/white" android:textSize="15sp" />
+                        <TextView android:id="@+id/tvListenPaceValue"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="2.0s" android:textColor="@color/purple_200"
+                            android:textSize="14sp" android:fontFamily="monospace" />
+                    </LinearLayout>
+
+                    <com.google.android.material.slider.Slider
+                        android:id="@+id/sliderListenPace"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:stepSize="0.1"
+                        android:value="2.0"
+                        android:valueFrom="1.0"
+                        android:valueTo="3.0" />
+
+                    <TextView
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:text="พูดเว้นจังหวะได้นานขึ้น = ค่ามาก แต่ตอบสนองช้าลง"
+                        android:textColor="@color/purple_200" android:textSize="12sp"
+                        android:layout_marginBottom="4dp" />
+
                 </LinearLayout>
 
             </LinearLayout>

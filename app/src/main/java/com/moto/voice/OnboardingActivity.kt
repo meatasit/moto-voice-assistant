@@ -1,7 +1,6 @@
 package com.moto.voice
 
 import android.Manifest
-import android.app.role.RoleManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -17,15 +16,25 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
+import com.moto.voice.bt.AssistantRoleHelper
 import com.moto.voice.data.AppSettings
 import com.moto.voice.databinding.ActivityOnboardingBinding
 import com.moto.voice.network.WebhookClient
 import kotlinx.coroutines.launch
 
 /**
- * 5-step Thai first-run wizard (spec §7). Each step displays an inline status ✓/✗ so
- * users can see progress at a glance. The whole activity is safe to re-enter from
- * Settings ("เปิด Onboarding อีกครั้ง") — nothing here is one-shot.
+ * 4-step Thai first-run wizard (spec §7, refined v1.3.6). Each step shows an inline
+ * ✓/⬜ status. The whole activity is safe to re-enter from Settings — nothing is
+ * one-shot.
+ *
+ * v1.3.6 changes:
+ *   - "5. ลองพูดคำสั่งแรก" step removed. Field report: it never worked reliably
+ *     from onboarding context, and the rider can always test from the System Status
+ *     page (linked from the finish CTA copy) where verification is already wired up.
+ *   - Default-assistant action goes through the shared [AssistantRoleHelper] so the
+ *     onboarding button and the Settings button have identical behaviour. The old
+ *     onboarding-only path went through RoleManager first and was no-op on some
+ *     OEMs; Settings never had that problem because it just opened the OS picker.
  */
 class OnboardingActivity : AppCompatActivity() {
 
@@ -53,6 +62,10 @@ class OnboardingActivity : AppCompatActivity() {
         settings = AppSettings(this)
         binding.btnFinishOnboarding.setOnClickListener {
             settings.onboardingComplete = true
+            // Send the rider to System Status where the "ทดสอบเสียง" verification is
+            // wired up — used to be step 5 of onboarding but that path never worked
+            // reliably (v1.3.5 field report).
+            startActivity(Intent(this, SystemStatusActivity::class.java))
             finish()
         }
         render()
@@ -76,7 +89,6 @@ class OnboardingActivity : AppCompatActivity() {
         stepDefaultAssistant(),
         stepBattery(),
         stepWebhook(),
-        stepFirstCommand(),
     )
 
     private fun stepPermissions(): Step {
@@ -98,7 +110,7 @@ class OnboardingActivity : AppCompatActivity() {
     }
 
     private fun stepDefaultAssistant(): Step {
-        val isDefault = isDefaultAssistant()
+        val isDefault = AssistantRoleHelper.isDefaultAssistant(this)
         return Step(
             title = "2. ตั้งเป็น Default Assistant",
             reason = "เพื่อให้ปุ่มบนหมวก BVRA / ปุ่ม Home ค้าง เรียกแอปได้",
@@ -120,10 +132,6 @@ class OnboardingActivity : AppCompatActivity() {
     }
 
     private fun stepWebhook(): Step {
-        // "Done" == user has run the test at least once. We track that by whether webhookUrl
-        // is set (it always is by default) — so instead flip to done when user taps the action once.
-        // For a lightweight check, mark this done as soon as webhookUrl is non-empty AND the
-        // rest is done. It's the least interruptive definition of "ready".
         val ready = settings.webhookUrl.isNotBlank()
         return Step(
             title = "4. ทดสอบเชื่อม webhook",
@@ -133,16 +141,6 @@ class OnboardingActivity : AppCompatActivity() {
             action = { testWebhook() },
         )
     }
-
-    private fun stepFirstCommand(): Step = Step(
-        title = "5. ลองพูดคำสั่งแรก",
-        reason = "แตะเพื่อเริ่มฟัง แล้วพูดว่า \"ทำอะไรได้บ้าง\"",
-        done = false,
-        actionLabel = "เริ่มฟัง",
-        action = {
-            startActivity(Intent(this, VoiceAssistActivity::class.java))
-        },
-    )
 
     // ─── Render ──────────────────────────────────────────────────────────────
 
@@ -166,7 +164,8 @@ class OnboardingActivity : AppCompatActivity() {
         }
         val allCoreDone = steps.take(3).all { it.done }
         binding.btnFinishOnboarding.isEnabled = allCoreDone
-        binding.btnFinishOnboarding.text = if (allCoreDone) "เสร็จสิ้น" else "รอให้ครบ 3 ข้อแรกก่อน"
+        binding.btnFinishOnboarding.text =
+            if (allCoreDone) "เสร็จสิ้น — ทดสอบที่หน้า สถานะระบบ" else "รอให้ครบ 3 ข้อแรกก่อน"
     }
 
     // ─── Actions ─────────────────────────────────────────────────────────────
@@ -186,18 +185,17 @@ class OnboardingActivity : AppCompatActivity() {
     }
 
     private fun openDefaultAssistantSettings() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val rm = getSystemService(RoleManager::class.java)
-            if (rm != null && !rm.isRoleHeld(RoleManager.ROLE_ASSISTANT)) {
-                requestRole.launch(rm.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
-                return
-            }
-        }
-        runCatching { startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) }
+        val intent = AssistantRoleHelper.defaultAssistantPickerIntent(this)
+        // requestRole launcher re-renders on return so the ✓ appears if the picker
+        // succeeded; fall back to plain startActivity if the launcher throws.
+        runCatching { requestRole.launch(intent) }
             .onFailure {
-                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                    data = Uri.fromParts("package", packageName, null)
-                })
+                runCatching { startActivity(intent) }
+                    .onFailure {
+                        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.fromParts("package", packageName, null)
+                        })
+                    }
             }
     }
 
@@ -213,14 +211,6 @@ class OnboardingActivity : AppCompatActivity() {
 
     private fun hasPerm(p: String) =
         ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED
-
-    private fun isDefaultAssistant(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
-        } else {
-            Settings.Secure.getString(contentResolver, "assistant")?.contains(packageName) == true
-        }
-    }
 
     private fun isBatteryOptimizationDisabled(): Boolean {
         val pm = getSystemService(PowerManager::class.java) ?: return true

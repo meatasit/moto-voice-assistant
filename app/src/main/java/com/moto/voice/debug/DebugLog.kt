@@ -67,6 +67,33 @@ data class DebugEntry(
      * left the platform in MODE_NORMAL so A2DP can carry STREAM_MUSIC.
      */
     var audioMode: String? = null,
+
+    /**
+     * True when the pipeline dispatched KEYCODE_MEDIA_PLAY 3s after opening YouTube
+     * because [android.media.AudioManager.isMusicActive] was still false — the video
+     * was open but paused (common when the deep-linked video was already loaded).
+     * Field-test evidence: sttFinal="มันยังไม่เปิดเลยเงียบอยู่" in log 1783581952116.
+     * Only set to true when the nudge actually fires; false includes both "no need"
+     * and "not a media action" — grep for `true` to find real nudges in exports.
+     */
+    var youtubeNudged: Boolean = false,
+
+    /**
+     * The `EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS` value actually used
+     * for the main-STT listen this interaction. Configurable via Settings §"จังหวะรอฟัง"
+     * (spec v1.3.6 §1). Recorded so field logs can prove which value the recognizer
+     * was actually given, though the platform is free to honor it or not.
+     */
+    var completeSilenceMs: Long = 0,
+
+    /**
+     * True when the pipeline detected a bare command opener ("โทรหา" / "เปิด youtube" /
+     * "เปิดวิทยุ" with no payload) and asked one follow-up before running the pipeline
+     * with the combined sentence. Spec v1.3.6 §2. Finished with FinishReason.SLOT_FILLED
+     * at the moment of combination — a later stage may overwrite finishReason (e.g. OK
+     * after a successful call), so this boolean is the durable marker.
+     */
+    var slotFilled: Boolean = false,
 ) {
     fun time(): String = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date(timestamp))
 
@@ -82,6 +109,9 @@ data class DebugEntry(
         if (webhookTimeMs > 0) append("  WH:${webhookTimeMs}ms")
         if (actionTimeMs > 0) append("  ACT:${actionTimeMs}ms")
         if (engineChoiceReason != null) append("  tts:${engineChoiceReason}")
+        if (completeSilenceMs > 0) append("  silHint:${completeSilenceMs}ms")
+        if (youtubeNudged) append("  yt:nudged")
+        if (slotFilled) append("  slot:filled")
         if (finishReason != null) append("  end:${finishReason}")
         if (error != null) append("  ⚠️ $error")
     }
@@ -166,6 +196,13 @@ object FinishReason {
     const val BARGE_IN = "barge_in_cancel"
     /** STT captured the assistant's own TTS (via [com.moto.voice.tts.TtsRecentSpeech]). */
     const val SELF_ECHO = "self_echo"
+    /**
+     * Rider spoke a bare command opener ("โทรหา" / "เปิด youtube" / "เปิดวิทยุ" with
+     * no payload) and the local slot-filler asked one follow-up question, then
+     * combined the answer into a full sentence before re-entering the pipeline.
+     * Spec v1.3.6 §2.
+     */
+    const val SLOT_FILLED = "slot_filled"
 }
 
 object DebugLog {

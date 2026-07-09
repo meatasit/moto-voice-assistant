@@ -26,6 +26,11 @@ data class SettingsBackup(
     @SerializedName("assistant_volume") val assistantVolume: Float,
     @SerializedName("resume_after_call") val resumeAfterCall: Boolean,
     @SerializedName("onboarding_complete") val onboardingComplete: Boolean,
+    /**
+     * Added in v1.3.6 — optional so older v2/v1 backups still parse; missing values
+     * restore to the AppSettings default (2.0s). Not a schema-version bump.
+     */
+    @SerializedName("listen_pace_seconds") val listenPaceSeconds: Float? = null,
     val favorites: List<Favorite>,
     @SerializedName("last_station") val lastStation: LastStation?,
 ) {
@@ -75,6 +80,7 @@ data class SettingsBackup(
                 assistantVolume = s.assistantVolume,
                 resumeAfterCall = s.resumeAfterCall,
                 onboardingComplete = s.onboardingComplete,
+                listenPaceSeconds = s.listenPaceSeconds,
                 favorites = fav,
                 lastStation = station,
             )
@@ -114,6 +120,7 @@ data class SettingsBackup(
             s.assistantVolume = backup.assistantVolume
             s.resumeAfterCall = backup.resumeAfterCall
             s.onboardingComplete = backup.onboardingComplete
+            backup.listenPaceSeconds?.let { s.listenPaceSeconds = it }
 
             val favStore = FavoritesStore(context)
             favStore.clear()

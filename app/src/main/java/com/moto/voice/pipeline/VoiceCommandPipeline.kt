@@ -5,7 +5,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.media.AudioManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -42,6 +45,7 @@ import com.moto.voice.network.WebhookResponse
 import com.moto.voice.nlu.LocalIntercept
 import com.moto.voice.nlu.NumberWordParser
 import com.moto.voice.nlu.CommandParser
+import com.moto.voice.nlu.SlotFiller
 import com.moto.voice.nlu.VoiceCommand
 import com.moto.voice.tts.ThaiTTS
 import kotlinx.coroutines.CoroutineScope
@@ -67,6 +71,8 @@ private const val DEFAULT_MIN_LISTEN_MS = 3_000L
 private const val DISAMBIG_MIN_LISTEN_MS = 6_000L
 /** Spoken slot number for voice-call favorites — matches order of FavoritesStore slots 0..4. */
 private val FAVORITE_SLOT_WORDS = listOf("หนึ่ง", "สอง", "สาม", "สี่", "ห้า")
+/** Delay before checking whether the YouTube intent actually resulted in playback. Spec v1.3.6 §2. */
+private const val YOUTUBE_NUDGE_DELAY_MS = 3_000L
 
 class VoiceCommandPipeline(
     private val context: Context,
@@ -206,14 +212,58 @@ class VoiceCommandPipeline(
             return
         }
 
-        heardText = text
         Earcon.end()
 
+        // Spec v1.3.6 §2 — bare-opener slot-filling. Runs before intercept match so
+        // "เปิด YouTube" without payload triggers our follow-up instead of hitting the
+        // webhook with an unactionable snippet (log 1783581952116 evidence: "เปิด YouTube"
+        // three interactions in a row, none ever gave a query the webhook could act on).
+        val effectiveText = maybeSlotFill(text, entry) ?: return
+        heardText = effectiveText
+        entry.sttFinal = effectiveText
+
         // Local intercept ALWAYS runs before webhook — offline-first, sub-second response.
-        when (val intercept = LocalIntercept.match(text)) {
-            is LocalIntercept.Intercept.None -> processText(text, entry)
+        when (val intercept = LocalIntercept.match(effectiveText)) {
+            is LocalIntercept.Intercept.None -> processText(effectiveText, entry)
             else -> handleIntercept(intercept, entry)
         }
+    }
+
+    /**
+     * Bare-opener slot-filling — spec v1.3.6 §2.
+     *
+     * If [originalText] normalises to a bare opener with no payload (see [SlotFiller]),
+     * ask a single follow-up through [promptAndListen] (the central listen loop — spec §3
+     * prohibits any separate listen path here because the echo-guard round-trips
+     * through it) and combine the answer into a full sentence.
+     *
+     *   returns non-null → the sentence the pipeline should process (either the
+     *     original if no slot-fill was needed, or the combined form)
+     *   returns null      → the rider cancelled or gave a blank second answer; the
+     *     caller must NOT continue running the pipeline (we already spoke CANCELLED)
+     *
+     * "เปิดวิทยุ" with a saved last station is a special case: we let
+     * [LocalIntercept.ResumeLastRadio] handle it (no follow-up needed, we know what
+     * to resume). Only slot-fill radio when there's no last-station memory.
+     */
+    private suspend fun maybeSlotFill(originalText: String, entry: DebugEntry): String? {
+        val normalized = LocalIntercept.normalize(originalText)
+        val need = SlotFiller.detect(normalized)
+        if (need == SlotFiller.Need.None) return originalText
+        if (need == SlotFiller.Need.RadioStation && !memory.lastStationUrl.isNullOrBlank()) {
+            return originalText
+        }
+
+        entry.slotFilled = true
+        entry.finishReason = FinishReason.SLOT_FILLED
+
+        val answer = promptAndListen(SlotFiller.promptFor(need), entry).trim()
+        val cancelled = answer.isBlank() || answer.contains("ยกเลิก")
+        if (cancelled) {
+            speakAndRemember(ErrorSpeech.CANCELLED)
+            return null
+        }
+        return SlotFiller.combine(need, answer)
     }
 
     private fun recordHistory(action: HistoryAction) {
@@ -647,24 +697,65 @@ class VoiceCommandPipeline(
         fun view(uri: Uri) = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val pm = context.packageManager
 
-        if (videoId != null) {
+        val launched = if (videoId != null) {
             val app = view(Uri.parse("vnd.youtube:$videoId"))
             val web = view(Uri.parse("https://www.youtube.com/watch?v=$videoId"))
             val target = if (app.resolveActivity(pm) != null) app else web
-            runCatching { context.startActivity(target) }
-                .onFailure { entry.error = "youtube launch failed" }
-            return
+            runCatching { context.startActivity(target) }.isSuccess.also {
+                if (!it) entry.error = "youtube launch failed"
+            }
+        } else {
+            val q = query?.takeIf { it.isNotBlank() } ?: return
+            val search = Intent(Intent.ACTION_SEARCH).apply {
+                setPackage("com.google.android.youtube")
+                putExtra("query", q)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val target = if (search.resolveActivity(pm) != null) search
+                else view(Uri.parse("https://www.youtube.com/results?search_query=${Uri.encode(q)}"))
+            runCatching { context.startActivity(target) }.isSuccess.also {
+                if (!it) entry.error = "youtube search failed"
+            }
         }
-        val q = query?.takeIf { it.isNotBlank() } ?: return
-        val search = Intent(Intent.ACTION_SEARCH).apply {
-            setPackage("com.google.android.youtube")
-            putExtra("query", q)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        val target = if (search.resolveActivity(pm) != null) search
-            else view(Uri.parse("https://www.youtube.com/results?search_query=${Uri.encode(q)}"))
-        runCatching { context.startActivity(target) }
-            .onFailure { entry.error = "youtube search failed" }
+        if (launched) scheduleYoutubeNudge(entry)
+    }
+
+    /**
+     * Field log 1783581952116 evidence: sttFinal="มันยังไม่เปิดเลยเงียบอยู่" the entry
+     * after a successful YouTube open — the intent succeeded but the video stayed
+     * paused. Happens when the deep-linked video was already loaded in a paused state
+     * so the intent just brought YouTube to foreground without starting playback.
+     *
+     * Spec v1.3.6 §2 — 3s after firing the intent, check [AudioManager.isMusicActive].
+     * If music is playing, YouTube (or another app) is fine → no nudge. If not, we
+     * silence our own MediaSession so KEYCODE_MEDIA_PLAY routes to YouTube (not back
+     * to us), wait a beat for the release to propagate, then dispatch one PLAY key.
+     *
+     * Uses a [Handler] rather than a coroutine because the pipeline's scope is torn
+     * down as soon as finish() runs — this task needs to outlive the interaction.
+     */
+    private fun scheduleYoutubeNudge(entry: DebugEntry) {
+        val appCtx = context.applicationContext
+        val handler = Handler(Looper.getMainLooper())
+        handler.postDelayed({
+            val am = appCtx.getSystemService(AudioManager::class.java) ?: return@postDelayed
+            if (am.isMusicActive) {
+                Log.d(TAG, "youtube nudge check: music active — no nudge")
+                return@postDelayed
+            }
+            Log.w(TAG, "youtube nudge: music inactive 3s after open — dispatching MEDIA_PLAY")
+            runCatching {
+                appCtx.startService(
+                    Intent(appCtx, FmPlayerService::class.java).setAction(FmPlayerService.ACTION_STOP)
+                )
+            }
+            // 250ms for our FmPlayerService to release its MediaSession, so the play
+            // key lands on YouTube's session instead of our now-defunct one.
+            handler.postDelayed({
+                MediaStopper.dispatchMediaPlay(appCtx)
+                entry.youtubeNudged = true
+            }, 250L)
+        }, YOUTUBE_NUDGE_DELAY_MS)
     }
 
     // ─── FM radio ────────────────────────────────────────────────────────────
@@ -884,16 +975,24 @@ class VoiceCommandPipeline(
                 }
             })
 
+            // Silence-length hints — spec v1.3.6 §1: default bumped from 1200ms→2000ms
+            // after field complaint of riders getting cut off mid-sentence. Rider can
+            // tune 1000..3000ms via the "จังหวะรอฟัง" slider in Settings.
+            // NOTE: Android treats these as HINTS — the underlying vendor recognizer
+            // (Samsung / Google) may honor them, ignore them, or clamp them. Slot-filling
+            // for bare openers is the safety net when the hint is ignored.
+            val completeSilenceMs = (settings.listenPaceSeconds * 1000f).toLong()
+            val possiblyCompleteMs = (completeSilenceMs * 0.4f).toLong()  // scaled from previous 800/1200 ratio
+            entry?.completeSilenceMs = completeSilenceMs
+
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, "th-TH")
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "th-TH")
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
                 putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-                // §4.2: shorter complete-silence so the rider isn't left hanging in wind
-                // noise; minimum-length caller-overridable so disambig gets more time.
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, minListenMs)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_200L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 800L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, completeSilenceMs)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, possiblyCompleteMs)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             }
             runCatching { rec.startListening(intent) }.onFailure { err ->

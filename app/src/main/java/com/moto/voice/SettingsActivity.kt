@@ -72,6 +72,8 @@ class SettingsActivity : AppCompatActivity() {
         binding.switchResumeAfterCall.isChecked = settings.resumeAfterCall
         binding.sliderAssistantVolume.value = settings.assistantVolume
         binding.tvAssistantVolumeValue.text = formatRate(settings.assistantVolume)
+        binding.sliderListenPace.value = settings.listenPaceSeconds
+        binding.tvListenPaceValue.text = formatSeconds(settings.listenPaceSeconds)
 
         // Azure section
         binding.etAzureRegion.setText(settings.azureRegion)
@@ -88,6 +90,8 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun formatRate(rate: Float): String = "%.1fx".format(rate)
+
+    private fun formatSeconds(seconds: Float): String = "%.1fs".format(seconds)
 
     private fun setupListeners() {
         binding.btnShowToken.setOnClickListener {
@@ -111,13 +115,19 @@ class SettingsActivity : AppCompatActivity() {
             binding.tvAssistantVolumeValue.text = formatRate(value)
             settings.assistantVolume = value
         }
+        binding.sliderListenPace.addOnChangeListener { _, value, _ ->
+            binding.tvListenPaceValue.text = formatSeconds(value)
+            settings.listenPaceSeconds = value
+        }
         binding.switchResumeAfterCall.setOnCheckedChangeListener { _, v -> settings.resumeAfterCall = v }
         binding.btnPreviewTts.setOnClickListener { previewSpeech() }
 
         binding.btnTestConnection.setOnClickListener { testConnection() }
 
         binding.btnDefaultAssistant.setOnClickListener {
-            runCatching { startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) }
+            // Unified with OnboardingActivity via [AssistantRoleHelper] (v1.3.6) —
+            // used to be two copies that diverged (Settings worked, onboarding didn't).
+            runCatching { startActivity(com.moto.voice.bt.AssistantRoleHelper.defaultAssistantPickerIntent(this)) }
                 .onFailure { openAppSettings() }
         }
         binding.btnBatteryOpt.setOnClickListener {

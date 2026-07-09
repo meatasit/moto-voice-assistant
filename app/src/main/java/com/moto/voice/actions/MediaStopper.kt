@@ -33,6 +33,24 @@ object MediaStopper {
     }
 
     /**
+     * Dispatch a single KEYCODE_MEDIA_PLAY (DOWN+UP). Used by the YouTube nudge:
+     * field log 1783581952116 showed the YouTube intent succeeding, our SCO fully
+     * torn down (scoTeardownMs=818) and yet the video staying paused — the rider
+     * captured "มันยังไม่เปิดเลยเงียบอยู่" in the mic to confirm. Nudging with a
+     * play key at t+3s is the platform-agnostic way to wake it up without needing
+     * the YouTube app's internal control.
+     *
+     * Only call after verifying [AudioManager.isMusicActive] is false — otherwise
+     * we'd interrupt something that's actually playing.
+     */
+    fun dispatchMediaPlay(context: Context) {
+        val am = context.getSystemService(AudioManager::class.java) ?: return
+        val now = SystemClock.uptimeMillis()
+        am.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY, 0))
+        am.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY, 0))
+    }
+
+    /**
      * Convenience used by [com.moto.voice.HistoryActivity] "tap to repeat stop" — this
      * path is NOT inside the pipeline so it has no access to AudioFocusRouter, and the
      * user tapped from foreground (not while riding) so YouTube-resume-after-focus-release

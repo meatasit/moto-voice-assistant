@@ -26,6 +26,20 @@ class AppSettings(context: Context) {
         const val MIN_ASSIST_VOLUME = 0.5f
         const val MAX_ASSIST_VOLUME = 1.5f
         const val DEFAULT_ASSIST_VOLUME = 1.0f
+        /**
+         * "จังหวะรอฟัง" — how long to wait for the rider to be done speaking before
+         * the recognizer finalises. Field-test complaint: pauses in the middle of a
+         * sentence caused cut-off. Range 1.0..3.0 s; default 2.0 s.
+         *
+         * Fed to [android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS]
+         * (and the POSSIBLY_COMPLETE variant scaled to 0.4×). Note: Android treats
+         * these as hints only — some vendor STT engines ignore them entirely, which is
+         * why slot-filling in [com.moto.voice.pipeline.VoiceCommandPipeline] exists
+         * as the safety net for bare openers.
+         */
+        const val MIN_LISTEN_PACE_SEC = 1.0f
+        const val MAX_LISTEN_PACE_SEC = 3.0f
+        const val DEFAULT_LISTEN_PACE_SEC = 2.0f
         const val PERSONA_FEMININE = "feminine"
         const val PERSONA_MASCULINE = "masculine"
 
@@ -129,6 +143,15 @@ class AppSettings(context: Context) {
     var ttsSpeechRate: Float
         get() = prefs.getFloat("tts_rate", DEFAULT_TTS_RATE).coerceIn(MIN_TTS_RATE, MAX_TTS_RATE)
         set(v) { prefs.edit().putFloat("tts_rate", v.coerceIn(MIN_TTS_RATE, MAX_TTS_RATE)).apply() }
+
+    /**
+     * Spec v1.3.6 §1 — hint the recognizer to wait this many seconds of silence
+     * before finalising the STT result. Range 1.0..3.0, default 2.0 (was hard-coded
+     * to 1.2 s in v1.3.5 which cut riders off mid-sentence).
+     */
+    var listenPaceSeconds: Float
+        get() = prefs.getFloat("listen_pace", DEFAULT_LISTEN_PACE_SEC).coerceIn(MIN_LISTEN_PACE_SEC, MAX_LISTEN_PACE_SEC)
+        set(v) { prefs.edit().putFloat("listen_pace", v.coerceIn(MIN_LISTEN_PACE_SEC, MAX_LISTEN_PACE_SEC)).apply() }
 
     /** Marker: first-run wizard completed. Set to true when the user finishes Onboarding. */
     var onboardingComplete: Boolean
