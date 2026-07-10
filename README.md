@@ -15,13 +15,32 @@ Supported voice commands (all Thai):
 | Say | Result |
 |---|---|
 | "โทรหา / โทรไปหา [ชื่อ]" | Fuzzy-matches contact, confirms, dials |
+| "โทรหารายการโปรด [หนึ่ง..ห้า]" | Dial a favorite slot (also supports "โทรออก", "ที่", "หมายเลข", "อันดับ") |
 | "เปิด YouTube [ชื่อเพลง]" | Opens first result, or picks from 3 (toggle) |
+| "อันต่อไป / เปลี่ยน / อันอื่น" | v1.3.8 — advance to the next video from the last webhook's list |
+| "เมื่อกี้อะไร / เล่นอะไรอยู่" | v1.3.8 — read back the title of what's currently playing |
 | "เปิดวิทยุ FM 91.5" | Streams via ExoPlayer w/ media session |
 | "เปิดวิทยุ" (alone) | Resumes last-played station |
 | "หยุด / พอ / เงียบ / ปิดเพลง" | Stops current media |
 | "โทรกลับ" | Redials the last number this app called |
 | "ทำอะไรได้บ้าง" | Speaks a short command list |
 | "พูดอีกที" | Repeats the last TTS reply |
+
+Bare openers auto-prompt for the payload (v1.3.6 §2) — say "เปิด YouTube" alone
+and the assistant asks "เปิดอะไรดีคะ", combines the answer, and runs the full
+command in one pipeline.
+
+**คุยต่อเนื่องหลังตอบ (v1.3.8 B2)** — toggle in Settings, default ON. After a
+conversational reply (webhook `action=chat`, `action=none`, cancelled call, or
+stop), the mic auto-opens for 4 seconds so the rider can continue without
+pressing BVRA again. Media actions (YouTube / FM) don't trigger the window —
+the media is playing over the mic. Single-level only; no chatter loops.
+
+**"จังหวะรอฟัง" slider (v1.3.6 §1)** — Settings slider 1.0–3.0 s (default 2.0 s)
+that hints the recognizer how long to wait for silence before finalising the
+STT result. Longer values let the rider pause mid-sentence without being cut
+off. The platform recognizer treats this as a hint, so the slot-filling
+follow-up above exists as the safety net when the hint is ignored.
 
 ## Architecture
 

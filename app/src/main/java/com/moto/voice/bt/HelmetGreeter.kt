@@ -100,21 +100,8 @@ class HelmetGreeter(private val app: Context) {
         }
     }
 
-    /**
-     * Spec v1.3.8 B4 — three greetings tuned to the rider's likely intent by hour:
-     *   * 05:00–10:59  → wake-up energy ("อรุณสวัสดิ์ค่ะ")
-     *   * 11:00–18:59  → midday-travel readiness ("พร้อมเดินทางแล้วค่ะ")
-     *   * 19:00–04:59  → evening safety wish ("ขี่ปลอดภัยนะคะ")
-     *
-     * All three variants are persona-aware and pre-synthesized in
-     * [ErrorSpeech.allSystemLines] so the greeting is a cache hit (no Azure round-trip
-     * on the connection critical path).
-     */
-    internal fun pickTimeBasedGreeting(hour: Int = currentHour()): String = when (hour) {
-        in 5..10 -> ErrorSpeech.GREET_MORNING
-        in 11..18 -> ErrorSpeech.GREET_MIDDAY
-        else -> ErrorSpeech.GREET_EVENING  // 19..23 and 0..4
-    }
+    private fun pickTimeBasedGreeting(hour: Int = currentHour()): String =
+        pickTimeBasedGreetingFor(hour)
 
     private fun currentHour(): Int = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
 
@@ -166,8 +153,27 @@ class HelmetGreeter(private val app: Context) {
         return runCatching { device?.name }.getOrNull()
     }
 
-    private companion object {
-        const val TAG = "HelmetGreeter"
-        const val NOTIF_ID = 44
+    companion object {
+        private const val TAG = "HelmetGreeter"
+        private const val NOTIF_ID = 44
+
+        /**
+         * Spec v1.3.8 B4 — three greetings tuned to the rider's likely intent by hour:
+         *   * 05:00–10:59  → wake-up energy ("อรุณสวัสดิ์ค่ะ")
+         *   * 11:00–18:59  → midday-travel readiness ("พร้อมเดินทางแล้วค่ะ")
+         *   * 19:00–04:59  → evening safety wish ("ขี่ปลอดภัยนะคะ")
+         *
+         * All three variants are persona-aware and pre-synthesized in
+         * [ErrorSpeech.allSystemLines] so the greeting is a cache hit (no Azure round-trip
+         * on the connection critical path).
+         *
+         * Kept as a top-level companion function so JVM tests can exercise it directly
+         * without needing to construct a HelmetGreeter (which would need a Context).
+         */
+        fun pickTimeBasedGreetingFor(hour: Int): String = when (hour) {
+            in 5..10 -> ErrorSpeech.GREET_MORNING
+            in 11..18 -> ErrorSpeech.GREET_MIDDAY
+            else -> ErrorSpeech.GREET_EVENING  // 19..23 and 0..4
+        }
     }
 }
