@@ -84,6 +84,7 @@ class RidingModeActivity : AppCompatActivity() {
         is HistoryAction.FmPlay -> "📻 ${a.stationName}"
         HistoryAction.Stop -> "⏹ หยุดเสียง"
         is HistoryAction.Speak -> "💬 ${a.text}"
+        is HistoryAction.Chat -> "🗨 ${a.text}"
     }
 
     private fun isHeadsetConnected(): Boolean {
