@@ -58,9 +58,11 @@ object TtsEchoFilter {
      *   * [BargeInClass.UNKNOWN] if the partial is too short to classify with
      *     confidence (< 2 chars) — keep listening but don't cut TTS.
      *
-     * The similarity threshold is intentionally the same as [ECHO_SIMILARITY_THRESHOLD]
-     * so a rider whose answer happens to overlap with the prompt phonetically doesn't
-     * spuriously trigger barge-in.
+     * Uses [strictSimilarity] — Levenshtein-only, no substring shortcut — because
+     * a one-word answer that's a substring of a longer prompt ("ใช่" ⊆ "…ใช่ไหมคะ")
+     * is a legitimate reply, not an echo. The general-purpose [similarity] scores
+     * substrings 0.9 to help fuzzy contact-name matching, which is exactly wrong
+     * here.
      */
     fun classifyDuringTts(sttPartial: String, currentTtsText: String?): BargeInClass {
         val partial = sttPartial.trim()
@@ -69,10 +71,26 @@ object TtsEchoFilter {
             // TTS not tracking — treat as real (no way to know if it's echo).
             return BargeInClass.REAL_ANSWER
         }
-        return if (similarity(partial, currentTtsText) >= ECHO_SIMILARITY_THRESHOLD)
+        return if (strictSimilarity(partial, currentTtsText) >= ECHO_SIMILARITY_THRESHOLD)
             BargeInClass.ECHO
         else
             BargeInClass.REAL_ANSWER
+    }
+
+    /**
+     * Levenshtein-only similarity, no substring-boost. A short reply that appears
+     * as a substring of the prompt still scores by its edit distance to the WHOLE
+     * prompt, which correctly comes out low. See [classifyDuringTts] for why we
+     * need this variant instead of [similarity].
+     */
+    private fun strictSimilarity(a: String, b: String): Float {
+        val na = ThaiNormalizer.normalize(a)
+        val nb = ThaiNormalizer.normalize(b)
+        if (na == nb) return 1.0f
+        if (na.isEmpty() || nb.isEmpty()) return 0.0f
+        val dist = ThaiNormalizer.levenshtein(na, nb)
+        val max = maxOf(na.length, nb.length)
+        return (1.0f - dist.toFloat() / max).coerceAtLeast(0f)
     }
 
     /** Partial-result classification for the barge-in listener. See [classifyDuringTts]. */

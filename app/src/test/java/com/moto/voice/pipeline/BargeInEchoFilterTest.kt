@@ -104,18 +104,35 @@ class BargeInEchoFilterTest {
 
     // ─── Threshold discipline — the same 0.75 as post-listen isEcho ────────
 
-    @Test fun sameThresholdAsIsEcho() {
-        // If a future refactor lifts one threshold without the other the barge-in
-        // decision and the post-listen echo-drop decision would drift apart. Lock
-        // the two by construction: the classifier uses TtsEchoFilter.ECHO_SIMILARITY_THRESHOLD.
-        val roughlySimilar = "โทรหากุลวดีใช่ไหม"
-        val hardEcho = TtsEchoFilter.isEcho(roughlySimilar, confirmPrompt)
-        val bargeInSaysEcho = TtsEchoFilter.classifyDuringTts(roughlySimilar, confirmPrompt) ==
+    @Test fun nearPerfectMatchesAgreeAcrossBothFilters() {
+        // Whole-prompt-length near-echoes classify the same in both filters — the
+        // strict / substring-friendly variants only diverge on short partials that
+        // happen to be substrings of a much longer prompt. Lock that they agree on
+        // the non-divergent case.
+        val nearWholePromptEcho = "โทรหากุลวดี ใช่ไหมค่า"  // one char off from the prompt
+        val hardEcho = TtsEchoFilter.isEcho(nearWholePromptEcho, confirmPrompt)
+        val bargeInSaysEcho = TtsEchoFilter.classifyDuringTts(nearWholePromptEcho, confirmPrompt) ==
             TtsEchoFilter.BargeInClass.ECHO
-        // Both must agree: either both flag as echo or neither does.
-        assert(hardEcho == bargeInSaysEcho) {
-            "isEcho and classifyDuringTts must agree on threshold; " +
+        assert(hardEcho && bargeInSaysEcho) {
+            "near-whole-prompt echo must trigger both filters; " +
                 "isEcho=$hardEcho, classifyDuringTts=echo=$bargeInSaysEcho"
+        }
+    }
+
+    @Test fun shortAnswerInsidePromptDivergesIntentionally() {
+        // isEcho uses ThaiNormalizer.similarity which gives a substring 0.9 to help
+        // fuzzy contact-name matching ("สม" inside "สมชาย"). That's the wrong
+        // semantic for barge-in: "ใช่" is a legit short answer even though it's a
+        // substring of the confirm prompt. classifyDuringTts uses strict similarity
+        // (Levenshtein-only) so it correctly flags the short answer as REAL_ANSWER
+        // while isEcho — used for post-listen contact fuzz — flags it as echo.
+        val shortAnswer = "ใช่"
+        assert(TtsEchoFilter.isEcho(shortAnswer, confirmPrompt)) {
+            "isEcho substring boost should still fire (contact-match semantic)"
+        }
+        assert(TtsEchoFilter.classifyDuringTts(shortAnswer, confirmPrompt) ==
+            TtsEchoFilter.BargeInClass.REAL_ANSWER) {
+            "classifyDuringTts must NOT treat short substring as echo — that's the fix"
         }
     }
 }
