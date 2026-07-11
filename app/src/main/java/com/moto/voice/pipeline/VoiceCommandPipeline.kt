@@ -144,6 +144,32 @@ class VoiceCommandPipeline(
     private var consecutiveSttErrors: Int = 0
 
     /**
+     * v1.3.10 — classification of the MOST RECENT listen's outcome. Set inside
+     * [listenOnceRaw]'s callbacks. Consumed by [maybeSlotFill] (and available to
+     * any other caller that needs to distinguish "silence" from "server error"
+     * from "some other STT problem"). Reset to [ListenErrorClass.None] on
+     * successful results.
+     *
+     * Server-error family is separate because a server disconnect during a
+     * question prompt is recoverable — the pipeline should retry the listen
+     * once and tell the rider "server hiccup, try again" instead of the
+     * indistinguishable "ยกเลิกแล้ว" line that used to fire on any blank
+     * outcome (field report: rider heard cancel and thought they were rejected).
+     */
+    private var lastListenErrorClass: ListenErrorClass = ListenErrorClass.None
+
+    private enum class ListenErrorClass {
+        /** No error — result available or reset. */
+        None,
+        /** ERROR_NO_MATCH / ERROR_SPEECH_TIMEOUT — rider was silent, not a server problem. */
+        NoSpeech,
+        /** ERROR_NETWORK / ERROR_NETWORK_TIMEOUT / ERROR_SERVER / ERROR_SERVER_DISCONNECTED. */
+        ServerError,
+        /** Everything else — busy, audio, client, permissions, unknown. */
+        Other,
+    }
+
+    /**
      * Spec v1.3.8 B2 — set to true by action handlers whose reply is conversational
      * (chat, none, cancelled call, stop). runFollowUpWindow reads this after
      * executeWebhookAction returns and decides whether to open the 4-second listen.
@@ -366,16 +392,45 @@ class VoiceCommandPipeline(
         entry.slotFilled = true
         entry.finishReason = FinishReason.SLOT_FILLED
 
-        val answer = promptAndListen(withTeachingHint(SlotFiller.promptFor(need)), entry).trim()
-        // Cancel detection tightened in v1.3.7 — used to be answer.contains("ยกเลิก")
-        // which false-positived on sentences like "อย่ายกเลิกโทรหาแม่". See
-        // SlotFiller.isCancelAnswer kdoc for the exact rule.
-        val cancelled = answer.isBlank() || SlotFiller.isCancelAnswer(answer)
-        if (cancelled) {
+        val firstAnswer = promptAndListen(withTeachingHint(SlotFiller.promptFor(need)), entry).trim()
+
+        // Explicit cancel wins over everything else — spec v1.3.7.
+        if (SlotFiller.isCancelAnswer(firstAnswer)) {
             speakAndRemember(ErrorSpeech.CANCELLED)
             return null
         }
-        return SlotFiller.combine(need, answer)
+        if (firstAnswer.isNotBlank()) return SlotFiller.combine(need, firstAnswer)
+
+        // v1.3.10 — blank first answer. Distinguish "rider went silent" (accept
+        // the cancel semantic) from "Google STT server disconnected mid-listen"
+        // (retry once — field report of "เปิด YouTube → cancelled immediately"
+        // was actually STT ERROR_SERVER_DISCONNECTED, not a rider cancel).
+        val firstErrorClass = lastListenErrorClass
+        if (firstErrorClass != ListenErrorClass.ServerError) {
+            speakAndRemember(ErrorSpeech.CANCELLED)
+            return null
+        }
+
+        Log.w(TAG, "slot-fill first listen hit STT server error — retrying once")
+        delay(500L)  // let the recognizer service reconnect
+        // Retry with the plain prompt (no teaching hint) — keeps the retry short
+        // so the rider isn't stuck in a slot-fill loop on a bike.
+        val retryAnswer = promptAndListen(SlotFiller.promptFor(need), entry).trim()
+        if (SlotFiller.isCancelAnswer(retryAnswer)) {
+            speakAndRemember(ErrorSpeech.CANCELLED)
+            return null
+        }
+        if (retryAnswer.isNotBlank()) return SlotFiller.combine(need, retryAnswer)
+
+        // Still nothing — differentiate the message so the rider knows whether
+        // the assistant heard silence or hit a server problem.
+        val retryErrorClass = lastListenErrorClass
+        val line = if (retryErrorClass == ListenErrorClass.ServerError)
+            ErrorSpeech.SERVER_UNAVAILABLE
+        else
+            ErrorSpeech.CANCELLED
+        speakAndRemember(line)
+        return null
     }
 
     private fun recordHistory(action: HistoryAction) {
@@ -1308,6 +1363,7 @@ class VoiceCommandPipeline(
                     // Blank text still counts as a "the engine was healthy enough to
                     // return" so it's a legitimate reset too.
                     consecutiveSttErrors = 0
+                    lastListenErrorClass = ListenErrorClass.None
                     Log.d(TAG, "final: '$text' confidence=$conf")
                     if (cont.isActive) cont.resume(
                         SttOutcome(text, wasTransientError = false, wasNoSpeech = false, confidence = conf)
@@ -1328,10 +1384,21 @@ class VoiceCommandPipeline(
                     )
                     val noSpeech = error == SpeechRecognizer.ERROR_NO_MATCH ||
                                    error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                    val serverFamily = error == SpeechRecognizer.ERROR_NETWORK ||
+                                       error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT ||
+                                       error == SpeechRecognizer.ERROR_SERVER ||
+                                       error == SpeechRecognizer.ERROR_SERVER_DISCONNECTED
                     // Spec v1.3.8 A2 — only count the "engine is degrading" family of
                     // errors. NO_MATCH / TIMEOUT are silence, not degradation, and
                     // shouldn't trigger the throttle.
                     if (!noSpeech) consecutiveSttErrors++ else consecutiveSttErrors = 0
+                    // v1.3.10 — classify for callers that need to distinguish
+                    // "server hiccup" from "rider was silent" (used by maybeSlotFill).
+                    lastListenErrorClass = when {
+                        noSpeech -> ListenErrorClass.NoSpeech
+                        serverFamily -> ListenErrorClass.ServerError
+                        else -> ListenErrorClass.Other
+                    }
                     if (cont.isActive) cont.resume(
                         SttOutcome("", wasTransientError = transient, wasNoSpeech = noSpeech)
                     )

@@ -144,6 +144,19 @@ object ErrorSpeech {
      */
     val TEACHING_HINT: String get() = pick(" ตอบหลังเสียงติ๊งนะคะ", " ตอบหลังเสียงติ๊งนะครับ")
 
+    /**
+     * v1.3.10 — spoken when slot-fill or another prompt-answer window couldn't
+     * even reach Google's speech server (STT ERROR_SERVER_DISCONNECTED / NETWORK /
+     * NETWORK_TIMEOUT / SERVER). Field report: the rider said "เปิด YouTube",
+     * heard "เปิดอะไรดีคะ", then heard "ยกเลิกแล้ว" — leaving them confused
+     * because from the outside it looked like they were told to cancel. This
+     * line makes it clear it's a server hiccup, not a rejection.
+     */
+    val SERVER_UNAVAILABLE: String get() = pick(
+        "ระบบไม่ตอบชั่วคราวค่ะ ลองใหม่นะคะ",
+        "ระบบไม่ตอบชั่วคราวครับ ลองใหม่นะครับ",
+    )
+
     /** All 21 lines, in a stable order — used by the pre-synthesize cache warmer. */
     fun allSystemLines(): List<String> = listOf(
         THINKING, ONE_MORE_MOMENT,
@@ -162,6 +175,7 @@ object ErrorSpeech {
         GREET_MORNING, GREET_MIDDAY, GREET_EVENING,
         NEXT_VIDEO_EXHAUSTED, WHAT_IS_PLAYING_NONE,
         TEACHING_HINT,
+        SERVER_UNAVAILABLE,
     )
 
     private fun pick(feminine: String, masculine: String): String =
