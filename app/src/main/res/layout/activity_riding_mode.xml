@@ -45,12 +45,21 @@
 
     </LinearLayout>
 
-    <!-- Central mic — the whole point of riding mode -->
+    <!-- Central mic — the whole point of riding mode.
+         Behind the mic button sits the v1.3.9 §4 status circle: green pulsing
+         = listening, yellow = thinking, gray = idle. Same FrameLayout so the
+         circle is centred behind the button. -->
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:gravity="center">
+
+        <com.moto.voice.ui.StatusIndicatorView
+            android:id="@+id/statusIndicator"
+            android:layout_width="280dp"
+            android:layout_height="280dp"
+            android:layout_gravity="center" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnRideMic"

@@ -10,10 +10,15 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.moto.voice.data.AppHistory
 import com.moto.voice.data.HistoryAction
 import com.moto.voice.databinding.ActivityRidingModeBinding
+import com.moto.voice.pipeline.PipelineState
 import com.moto.voice.service.VoiceCommandService
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -42,6 +47,16 @@ class RidingModeActivity : AppCompatActivity() {
 
         binding.btnRideMic.setOnClickListener { startListening() }
         binding.btnRideExit.setOnClickListener { finish() }
+
+        // Spec v1.3.9 §4 — mirror the pipeline state onto the big status circle.
+        // repeatOnLifecycle(STARTED) pauses collection in onStop, which also stops
+        // the ValueAnimator inside the view (via setState being idempotent), so
+        // battery isn't burned while the activity is in the background.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                PipelineState.state.collect { binding.statusIndicator.setState(it) }
+            }
+        }
     }
 
     override fun onResume() {

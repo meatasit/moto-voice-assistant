@@ -215,6 +215,10 @@ class VoiceCommandPipeline(
             entry.error = ((entry.error ?: "") + " runPipeline_threw:${t.javaClass.simpleName}").trim()
             throw t
         } finally {
+            // Spec v1.3.9 §4 — final visual transition to Idle. The circle in
+            // RidingModeActivity goes gray at the same moment the endInteraction
+            // earcon fires below (audio + visual match).
+            PipelineState.setIdle()
             // Spec v1.3.9 §2.3 — decrement teaching-hint budget by 1 per interaction
             // (not per prompt) when at least one prompt appended the hint.
             if (teachingHintFired) {
@@ -288,8 +292,10 @@ class VoiceCommandPipeline(
         Earcon.ready()
         delay(Earcon.MIC_OPEN_GAP_MS)  // spec §1.4 — earcon decay tail out before mic opens
 
+        PipelineState.setListening()  // spec v1.3.9 §4 — visual match to audio
         val t1 = System.currentTimeMillis()
         val text = listenMainWithMissRetry(entry)
+        PipelineState.setThinking()
         entry.sttTimeMs = System.currentTimeMillis() - t1
         entry.sttFinal = text
 
@@ -571,7 +577,9 @@ class VoiceCommandPipeline(
         // that would signal "new interaction start".
         Earcon.answerListen()
         delay(Earcon.MIC_OPEN_GAP_MS)  // spec §1.4 — don't let the tail hit the mic
+        PipelineState.setListening()  // spec v1.3.9 §4
         val text = listenOnce(entry, minListenMs = FOLLOWUP_LISTEN_MS)
+        PipelineState.setThinking()
         if (text.isBlank()) {
             // Spec §1.3 — silent-timeout is a real interaction exit; fire the
             // end tone so the rider knows the mic is closed and they need BVRA to
@@ -1435,9 +1443,11 @@ class VoiceCommandPipeline(
         speakAndRemember(prompt)
         Earcon.answerListen()
         delay(Earcon.MIC_OPEN_GAP_MS)
+        PipelineState.setListening()  // spec v1.3.9 §4
         val result = withRemainingReminder(minListenMs, withReminder) {
             listenOnce(entry, minListenMs)
         }
+        PipelineState.setThinking()
         if (TtsEchoFilter.isEcho(result, memory.lastSpoken)) {
             Log.w(TAG, "echo detected — treating as no-speech: '$result'")
             entry?.error = ((entry?.error ?: "") + " tts_echo_filtered").trim()
@@ -1481,6 +1491,7 @@ class VoiceCommandPipeline(
         delay(150)
         Earcon.answerListen()
         delay(Earcon.MIC_OPEN_GAP_MS)
+        PipelineState.setListening()  // spec v1.3.9 §4
 
         val partialHandler: (String) -> BargeInPartialAction = { partial ->
             if (ttsCompletedAt.get() != 0L) {
@@ -1519,6 +1530,7 @@ class VoiceCommandPipeline(
         }.trim()
 
         if (!bargedIn.get()) ttsJob.join()
+        PipelineState.setThinking()
 
         // Post-listen echo defence in depth — the pre-partial classifier is best
         // effort; if a final result slipped through that still looks like our
