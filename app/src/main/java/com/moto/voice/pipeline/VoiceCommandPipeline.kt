@@ -69,8 +69,24 @@ private const val MIN_MEANINGFUL_LEN = 2
 private val YOUTUBE_ID_EXTRACT = Regex("([A-Za-z0-9_-]{11})")
 /** Default STT minimum-listen window (spec §4.2). */
 private const val DEFAULT_MIN_LISTEN_MS = 3_000L
-/** Disambiguation (contact / YouTube picker) needs longer for the rider to hear + reply. */
-private const val DISAMBIG_MIN_LISTEN_MS = 6_000L
+/**
+ * Disambiguation (contact / YouTube picker) needs longer for the rider to hear + reply.
+ * Bumped 6000 → 8000 in v1.3.9 §3 — field feedback that riders on the highway need
+ * a beat longer to process "did she say หนึ่ง or สอง" before answering.
+ */
+private const val DISAMBIG_MIN_LISTEN_MS = 8_000L
+/**
+ * Confirm-listen (confirmThenCall's "ใช่ไหมคะ" answer window). Was DEFAULT_MIN_LISTEN_MS
+ * (3s) which the rider spec calls out as too fast for a bike. Bumped to match disambig.
+ */
+private const val CONFIRM_MIN_LISTEN_MS = 8_000L
+/**
+ * Spec v1.3.9 §3 — when the listen window has this many ms left with no partial STT
+ * captured yet, fire a soft answer-listen beep as "still waiting, you're not alone".
+ * Only for confirm/disambig style prompts where the window is long enough for it to
+ * be useful.
+ */
+private const val ANSWER_LISTEN_REMINDER_MS = 2_000L
 /** Spoken slot number for voice-call favorites — matches order of FavoritesStore slots 0..4. */
 private val FAVORITE_SLOT_WORDS = listOf("หนึ่ง", "สอง", "สาม", "สี่", "ห้า")
 /** Delay before checking whether the YouTube intent actually resulted in playback. Spec v1.3.6 §2. */
@@ -135,6 +151,15 @@ class VoiceCommandPipeline(
      */
     private var followupEligible: Boolean = false
 
+    /**
+     * Spec v1.3.9 §1.3 — set to true when a media handler (youtube_play with a
+     * valid video, fm with a valid stream URL, ResumeLastRadio, NextVideo) actually
+     * fires playback. Consumed by [runPipeline]'s finally block to decide whether
+     * to fire the end-interaction earcon: media is its own "we're done listening"
+     * signal, so we skip the tone when it will play immediately after.
+     */
+    private var mediaActionStarted: Boolean = false
+
     /** True from start() until finish()/stop() runs. Read by VoiceCommandService to decide barge-in vs new interaction. */
     val isActive: Boolean get() = runJob?.isActive == true && !finished.get()
 
@@ -180,6 +205,20 @@ class VoiceCommandPipeline(
             entry.error = ((entry.error ?: "") + " runPipeline_threw:${t.javaClass.simpleName}").trim()
             throw t
         } finally {
+            // Spec v1.3.9 §1.3 — every non-media exit fires the end-interaction tone
+            // so the rider knows the mic is closed and BVRA is required to talk again.
+            // Skip if:
+            //   * media (youtube_play, fm success) is playing — the media sound itself
+            //     is the "we're done" signal;
+            //   * we already fired cancel (barge-in / watchdog) — that motif already
+            //     communicates the same "we stopped listening" meaning and doubling
+            //     up would sound like a bug;
+            //   * the follow-up window's silent-timeout branch already fired the tone.
+            val alreadySignalled = entry.finishReason == FinishReason.WATCHDOG_RESET ||
+                entry.finishReason == FinishReason.BARGE_IN
+            if (!mediaActionStarted && !alreadySignalled) {
+                runCatching { Earcon.endInteraction() }
+            }
             // finish() no-ops if already called by one of the explicit branches, so
             // callers still get a single onFinished() event but cleanup() is guaranteed
             // to run — SCO teardown, MODE_NORMAL, focus abandon, TTS stop.
@@ -232,6 +271,7 @@ class VoiceCommandPipeline(
         }
 
         Earcon.ready()
+        delay(Earcon.MIC_OPEN_GAP_MS)  // spec §1.4 — earcon decay tail out before mic opens
 
         val t1 = System.currentTimeMillis()
         val text = listenMainWithMissRetry(entry)
@@ -258,7 +298,9 @@ class VoiceCommandPipeline(
             return
         }
 
-        Earcon.end()
+        // v1.3.9 spec §1 — the old "processing" earcon here was redundant with the
+        // TTS reply that immediately follows. Skipped now so the audio language
+        // stays 3-signal (ready / answerListen / endInteraction) instead of 4.
 
         // Spec v1.3.6 §2 — bare-opener slot-filling. Runs before intercept match so
         // "เปิด YouTube" without payload triggers our follow-up instead of hitting the
@@ -353,6 +395,7 @@ class VoiceCommandPipeline(
                     speakAndRemember("เปิด $name")
                     releaseScoBeforeMedia(entry)
                     startFm(url, name, memory.lastStationFrequency)
+                    mediaActionStarted = true  // spec v1.3.9 §1.3
                 }
             }
             LocalIntercept.Intercept.CallBackLast -> {
@@ -387,6 +430,7 @@ class VoiceCommandPipeline(
         releaseScoBeforeMedia(entry)
         openYoutube(next.id, null, entry)
         recordHistory(HistoryAction.YoutubeOpen(next.id, next.title))
+        mediaActionStarted = true  // spec v1.3.9 §1.3
     }
 
     /** Spec v1.3.8 B5 — "เมื่อกี้อะไร" / "เล่นอะไรอยู่". */
@@ -507,15 +551,24 @@ class VoiceCommandPipeline(
      * would let the assistant chatter until the rider silences it manually).
      */
     private suspend fun runFollowUpWindow(entry: DebugEntry) {
-        Earcon.ready()
+        // Spec v1.3.9 §1.2 — the follow-up window is exactly the "waiting for your
+        // reply" state, so it gets the dual-beep answerListen, not the ready tone
+        // that would signal "new interaction start".
+        Earcon.answerListen()
+        delay(Earcon.MIC_OPEN_GAP_MS)  // spec §1.4 — don't let the tail hit the mic
         val text = listenOnce(entry, minListenMs = FOLLOWUP_LISTEN_MS)
         if (text.isBlank()) {
-            Earcon.end()
+            // Spec §1.3 — silent-timeout is a real interaction exit; fire the
+            // end tone so the rider knows the mic is closed and they need BVRA to
+            // talk again. The finally-block hook in runPipeline would also fire it,
+            // but the earlier fire here means the tone lands right when the mic
+            // actually closes.
+            Earcon.endInteraction()
             return
         }
         if (TtsEchoFilter.isSelfEcho(text)) {
             Log.d(TAG, "followup captured self-echo — treating as silence")
-            Earcon.end()
+            Earcon.endInteraction()
             return
         }
         Log.d(TAG, "followup captured: '$text' — re-entering pipeline")
@@ -618,6 +671,7 @@ class VoiceCommandPipeline(
                     speakAndRememberWithOpener(resp.speak.ifBlank { "กำลังเปิด $name" })
                     releaseScoBeforeMedia(entry)
                     startFm(resp.streamUrl, name, resp.frequency)
+                    mediaActionStarted = true  // spec §1.3 — skip end-interaction earcon
                 } else {
                     speakAndRemember(resp.speak.ifBlank { "ไม่มี stream URL" })
                 }
@@ -693,7 +747,12 @@ class VoiceCommandPipeline(
         // clearly says "ไม่/ยกเลิก" we cancel; otherwise (positive keyword OR unusable
         // response OR silence) we CALL — riders don't have time to re-do this on a bike
         // and they can always cancel the outgoing call from the phone dialer.
-        val answer = promptAndListen("$msg พูด ยกเลิก เพื่อยกเลิก", null)
+        val answer = promptAndListen(
+            "$msg พูด ยกเลิก เพื่อยกเลิก",
+            null,
+            minListenMs = CONFIRM_MIN_LISTEN_MS,
+            withReminder = true,
+        )
         val explicitCancel = answer.contains("ไม่") || answer.contains("ยกเลิก") || answer.contains("cancel", ignoreCase = true)
         if (explicitCancel) {
             speakAndRemember(ErrorSpeech.CANCELLED)
@@ -717,14 +776,14 @@ class VoiceCommandPipeline(
         val answerHint = disambigAnswerHint(candidates.size)
         val fullPrompt = "มี ${candidates.size} รายชื่อค่ะ $list เลือก $answerHint หรือ ยกเลิก"
 
-        val firstAns = promptAndListen(fullPrompt, null, DISAMBIG_MIN_LISTEN_MS)
+        val firstAns = promptAndListen(fullPrompt, null, DISAMBIG_MIN_LISTEN_MS, withReminder = true)
         val firstChoice = NumberWordParser.parse(firstAns, candidates.size)
         if (firstChoice is NumberWordParser.Choice.Index) return firstChoice.zeroBased
         if (firstChoice is NumberWordParser.Choice.Cancel) return -1
 
         // Miss: re-prompt with a short one so the rider isn't left hanging.
         val shortPrompt = "เลือก $answerHint คะ"
-        val retryAns = promptAndListen(shortPrompt, null, DISAMBIG_MIN_LISTEN_MS)
+        val retryAns = promptAndListen(shortPrompt, null, DISAMBIG_MIN_LISTEN_MS, withReminder = true)
         val retryChoice = NumberWordParser.parse(retryAns, candidates.size)
         if (retryChoice is NumberWordParser.Choice.Index) return retryChoice.zeroBased
         return -1  // Cancel / None → announce cancelled in caller.
@@ -789,6 +848,7 @@ class VoiceCommandPipeline(
             recordHistory(HistoryAction.YoutubeOpen(chosen.id, chosen.title))
             // Spec v1.3.8 B5 — remember the videos list so "อันต่อไป" can advance.
             com.moto.voice.media.MediaSessionMemory.rememberYoutube(candidates, chosen.id, chosen.title)
+            mediaActionStarted = true  // spec v1.3.9 §1.3 — skip end-interaction earcon
             return
         }
 
@@ -1262,18 +1322,31 @@ class VoiceCommandPipeline(
     /**
      * Every place that asks the rider a question uses this helper. It enforces the
      * flow contract from field-test bug §2: speakAwait must complete (audio done,
-     * not just synth done) → Earcon.ready gives an audible gap → then listen. This
-     * is what stops the mic from picking up the tail of the assistant's own TTS —
-     * the exact echo captured in log 1783432847869.
+     * not just synth done) → [Earcon.answerListen] gives the "your turn" dual-beep →
+     * a [Earcon.MIC_OPEN_GAP_MS] silence gap → then listen. This is what stops the
+     * mic from picking up the tail of the assistant's own TTS — the exact echo
+     * captured in log 1783432847869.
+     *
+     * Earcon updated from `ready` (rising beep, spec meaning "new interaction") to
+     * `answerListen` (dual beep, spec meaning "your turn to reply") in v1.3.9 so
+     * the rider can distinguish "press BVRA to talk" from "just talk, no button".
      *
      * On top of the audible gap, [TtsEchoFilter] rejects any STT result that is
      * ≥75% similar to the prompt we just spoke, as an extra guard for phone-mic
      * mode where speaker/mic isolation is zero.
      */
-    private suspend fun promptAndListen(prompt: String, entry: DebugEntry?, minListenMs: Long = DEFAULT_MIN_LISTEN_MS): String {
+    private suspend fun promptAndListen(
+        prompt: String,
+        entry: DebugEntry?,
+        minListenMs: Long = DEFAULT_MIN_LISTEN_MS,
+        withReminder: Boolean = false,
+    ): String {
         speakAndRemember(prompt)
-        Earcon.ready()
-        val result = listenOnce(entry, minListenMs)
+        Earcon.answerListen()
+        delay(Earcon.MIC_OPEN_GAP_MS)
+        val result = withRemainingReminder(minListenMs, withReminder) {
+            listenOnce(entry, minListenMs)
+        }
         if (TtsEchoFilter.isEcho(result, memory.lastSpoken)) {
             Log.w(TAG, "echo detected — treating as no-speech: '$result'")
             entry?.error = ((entry?.error ?: "") + " tts_echo_filtered").trim()
@@ -1282,10 +1355,40 @@ class VoiceCommandPipeline(
         return result
     }
 
+    /**
+     * Spec v1.3.9 §3 — for long confirm / disambig windows, fire a soft
+     * [Earcon.answerListen] "ping" at (window − 2s) if the rider hasn't answered
+     * yet. Signals "still waiting on you" without saying anything new. Cancelled
+     * automatically if [block] returns before the reminder time.
+     *
+     * When [enabled] is false this is a passthrough — used for short main-STT
+     * listens where 2s is most of the window and the reminder would be noise.
+     */
+    private suspend fun <T> withRemainingReminder(
+        windowMs: Long,
+        enabled: Boolean,
+        block: suspend () -> T,
+    ): T {
+        if (!enabled || windowMs <= ANSWER_LISTEN_REMINDER_MS + 500) {
+            return block()
+        }
+        val reminderAt = windowMs - ANSWER_LISTEN_REMINDER_MS
+        val reminderJob = scope.launch {
+            delay(reminderAt)
+            runCatching { Earcon.answerListen() }
+        }
+        try {
+            return block()
+        } finally {
+            reminderJob.cancel()
+        }
+    }
+
     /** Detailed variant used by [listenMainWithMissRetry] where we need the SttOutcome. */
     private suspend fun promptAndListenDetailed(prompt: String, entry: DebugEntry): SttOutcome {
         speakAndRemember(prompt)
-        Earcon.ready()
+        Earcon.answerListen()
+        delay(Earcon.MIC_OPEN_GAP_MS)
         val outcome = listenOnceDetailed(entry)
         if (TtsEchoFilter.isEcho(outcome.text, memory.lastSpoken)) {
             Log.w(TAG, "echo detected — treating as no-speech: '${outcome.text}'")
