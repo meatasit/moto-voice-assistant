@@ -48,6 +48,36 @@ object TtsEchoFilter {
         return similarity(sttResult, lastTtsText) >= ECHO_SIMILARITY_THRESHOLD
     }
 
+    /**
+     * Spec v1.3.9 §2.2.ข — classification used by the barge-in listener while TTS
+     * is still speaking. Returns:
+     *   * [BargeInClass.ECHO] if the partial STT result is similar enough to the
+     *     text currently being spoken — drop it and keep listening.
+     *   * [BargeInClass.REAL_ANSWER] if it's clearly different — the rider spoke
+     *     during the question, so we stop the TTS and use this as the answer.
+     *   * [BargeInClass.UNKNOWN] if the partial is too short to classify with
+     *     confidence (< 2 chars) — keep listening but don't cut TTS.
+     *
+     * The similarity threshold is intentionally the same as [ECHO_SIMILARITY_THRESHOLD]
+     * so a rider whose answer happens to overlap with the prompt phonetically doesn't
+     * spuriously trigger barge-in.
+     */
+    fun classifyDuringTts(sttPartial: String, currentTtsText: String?): BargeInClass {
+        val partial = sttPartial.trim()
+        if (partial.length < 2) return BargeInClass.UNKNOWN
+        if (currentTtsText.isNullOrBlank()) {
+            // TTS not tracking — treat as real (no way to know if it's echo).
+            return BargeInClass.REAL_ANSWER
+        }
+        return if (similarity(partial, currentTtsText) >= ECHO_SIMILARITY_THRESHOLD)
+            BargeInClass.ECHO
+        else
+            BargeInClass.REAL_ANSWER
+    }
+
+    /** Partial-result classification for the barge-in listener. See [classifyDuringTts]. */
+    enum class BargeInClass { ECHO, REAL_ANSWER, UNKNOWN }
+
     private fun similarity(sttResult: String, lastTtsText: String): Float {
         val a = ThaiNormalizer.normalize(sttResult)
         val b = ThaiNormalizer.normalize(lastTtsText)

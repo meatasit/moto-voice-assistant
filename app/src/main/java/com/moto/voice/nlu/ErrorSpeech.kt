@@ -136,6 +136,14 @@ object ErrorSpeech {
         "ยังไม่ได้เปิดอะไรครับ",
     )
 
+    /**
+     * Spec v1.3.9 §2.3 — appended to confirm/disambig/slot-fill prompts for the
+     * first [com.moto.voice.data.AppSettings.TEACHING_MODE_BUDGET] uses after install.
+     * After the budget is spent the hint auto-suppresses so returning riders don't
+     * hear it repeatedly. Persona-aware.
+     */
+    val TEACHING_HINT: String get() = pick(" ตอบหลังเสียงติ๊งนะคะ", " ตอบหลังเสียงติ๊งนะครับ")
+
     /** All 21 lines, in a stable order — used by the pre-synthesize cache warmer. */
     fun allSystemLines(): List<String> = listOf(
         THINKING, ONE_MORE_MOMENT,
@@ -153,6 +161,7 @@ object ErrorSpeech {
         OPENER_DAI_LEUY, OPENER_JAT_HAI,
         GREET_MORNING, GREET_MIDDAY, GREET_EVENING,
         NEXT_VIDEO_EXHAUSTED, WHAT_IS_PLAYING_NONE,
+        TEACHING_HINT,
     )
 
     private fun pick(feminine: String, masculine: String): String =

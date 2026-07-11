@@ -40,6 +40,13 @@ class AppSettings(context: Context) {
         const val MIN_LISTEN_PACE_SEC = 1.0f
         const val MAX_LISTEN_PACE_SEC = 3.0f
         const val DEFAULT_LISTEN_PACE_SEC = 2.0f
+        /**
+         * Spec v1.3.9 §2.3 — number of prompts that get the "ตอบหลังเสียงติ๊งนะคะ"
+         * teaching hint before auto-suppression. Ten interactions is enough for the
+         * rider to learn the dual-beep vs single-beep language without becoming
+         * chatter.
+         */
+        const val TEACHING_MODE_BUDGET = 10
         const val PERSONA_FEMININE = "feminine"
         const val PERSONA_MASCULINE = "masculine"
 
@@ -161,6 +168,24 @@ class AppSettings(context: Context) {
     var followupEnabled: Boolean
         get() = prefs.getBoolean("followup_enabled", true)
         set(v) { prefs.edit().putBoolean("followup_enabled", v).apply() }
+
+    /**
+     * Spec v1.3.9 §2.3 — how many more question-answer prompts still get the
+     * "ตอบหลังเสียงติ๊งนะคะ" teaching hint. Starts at [TEACHING_MODE_BUDGET] on install
+     * and decrements per prompt that fires. Clamps at 0. Intentionally not part of
+     * the backup schema — this is a per-install onboarding metric; restoring an old
+     * backup with a spent budget onto a fresh device would defeat the purpose.
+     *
+     * A negative value in prefs (never set) is treated as [TEACHING_MODE_BUDGET] so
+     * fresh installs get the full 10 without needing an onCreate migration.
+     */
+    var teachingUsesLeft: Int
+        get() = prefs.getInt("teaching_uses_left", TEACHING_MODE_BUDGET).coerceAtLeast(0)
+        set(v) { prefs.edit().putInt("teaching_uses_left", v.coerceAtLeast(0)).apply() }
+
+    /** Convenience — is the teaching hint still allowed? */
+    val isTeachingModeActive: Boolean
+        get() = teachingUsesLeft > 0
 
     /** Marker: first-run wizard completed. Set to true when the user finishes Onboarding. */
     var onboardingComplete: Boolean

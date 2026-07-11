@@ -49,6 +49,7 @@ import com.moto.voice.nlu.RandomOpener
 import com.moto.voice.nlu.SlotFiller
 import com.moto.voice.nlu.VoiceCommand
 import com.moto.voice.tts.ThaiTTS
+import com.moto.voice.tts.TtsRecentSpeech
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -160,6 +161,15 @@ class VoiceCommandPipeline(
      */
     private var mediaActionStarted: Boolean = false
 
+    /**
+     * Spec v1.3.9 §2.3 — set to true by [withTeachingHint] when at least one prompt
+     * this interaction actually appended the teaching hint. Consumed once at the end
+     * of the interaction (in [runPipeline]'s finally) to decrement the budget by 1,
+     * regardless of how many prompts the interaction had. Per-interaction budgeting
+     * (not per-prompt) matches spec §2.3 "10 interaction แรก".
+     */
+    private var teachingHintFired: Boolean = false
+
     /** True from start() until finish()/stop() runs. Read by VoiceCommandService to decide barge-in vs new interaction. */
     val isActive: Boolean get() = runJob?.isActive == true && !finished.get()
 
@@ -205,6 +215,11 @@ class VoiceCommandPipeline(
             entry.error = ((entry.error ?: "") + " runPipeline_threw:${t.javaClass.simpleName}").trim()
             throw t
         } finally {
+            // Spec v1.3.9 §2.3 — decrement teaching-hint budget by 1 per interaction
+            // (not per prompt) when at least one prompt appended the hint.
+            if (teachingHintFired) {
+                runCatching { settings.teachingUsesLeft = settings.teachingUsesLeft - 1 }
+            }
             // Spec v1.3.9 §1.3 — every non-media exit fires the end-interaction tone
             // so the rider knows the mic is closed and BVRA is required to talk again.
             // Skip if:
@@ -345,7 +360,7 @@ class VoiceCommandPipeline(
         entry.slotFilled = true
         entry.finishReason = FinishReason.SLOT_FILLED
 
-        val answer = promptAndListen(SlotFiller.promptFor(need), entry).trim()
+        val answer = promptAndListen(withTeachingHint(SlotFiller.promptFor(need)), entry).trim()
         // Cancel detection tightened in v1.3.7 — used to be answer.contains("ยกเลิก")
         // which false-positived on sentences like "อย่ายกเลิกโทรหาแม่". See
         // SlotFiller.isCancelAnswer kdoc for the exact rule.
@@ -736,19 +751,27 @@ class VoiceCommandPipeline(
     }
 
     private suspend fun confirmThenCall(contact: ContactEntry, speakOverride: String?) {
-        val msg = speakOverride?.takeIf { it.isNotBlank() } ?: "กำลังโทรหา ${contact.displayName}"
+        // Spec v1.3.9 §2.1 — trim to the essence and END with the question word.
+        // Old: "กำลังโทรหา แม่ พูด ยกเลิก เพื่อยกเลิก" — ended on the instruction, mid-
+        // instruction is when riders start to talk over the assistant. New base line
+        // ends on "ใช่ไหมคะ" so the last word before the answer-listen beep is a
+        // question. The "พูด ยกเลิก" hint is now gated on teaching mode (§2.3).
+        val basePrompt = speakOverride?.takeIf { it.isNotBlank() }
+            ?: "โทรหา${contact.displayName} ใช่ไหมคะ"
         if (!settings.confirmBeforeCall) {
-            speakAndRemember(msg)
+            speakAndRemember(basePrompt)
             makeCall(contact)
             return
         }
+
+        val prompt = withTeachingHint(basePrompt)
 
         // Confirmation flow: prompt, listen for a positive/negative reply. If the reply
         // clearly says "ไม่/ยกเลิก" we cancel; otherwise (positive keyword OR unusable
         // response OR silence) we CALL — riders don't have time to re-do this on a bike
         // and they can always cancel the outgoing call from the phone dialer.
         val answer = promptAndListen(
-            "$msg พูด ยกเลิก เพื่อยกเลิก",
+            prompt,
             null,
             minListenMs = CONFIRM_MIN_LISTEN_MS,
             withReminder = true,
@@ -774,7 +797,11 @@ class VoiceCommandPipeline(
             "${labels.getOrElse(i) { "อันดับ${i + 1}" }} ${m.contact.displayName}"
         }.joinToString(" ")
         val answerHint = disambigAnswerHint(candidates.size)
-        val fullPrompt = "มี ${candidates.size} รายชื่อค่ะ $list เลือก $answerHint หรือ ยกเลิก"
+        // Spec v1.3.9 §2.1 — must end with a question word. Old version ended on
+        // "ยกเลิก" (an option, not a question) so a rider whose answer landed right
+        // at the tail of the prompt would get an ambiguous "did she say cancel or is
+        // that just the last word of her sentence?" listen. New shape: "…พูด X คะ".
+        val fullPrompt = withTeachingHint("มี ${candidates.size} รายชื่อ $list พูด $answerHint คะ")
 
         val firstAns = promptAndListen(fullPrompt, null, DISAMBIG_MIN_LISTEN_MS, withReminder = true)
         val firstChoice = NumberWordParser.parse(firstAns, candidates.size)
@@ -1195,7 +1222,27 @@ class VoiceCommandPipeline(
         val confidence: Float = -1f,
     )
 
-    private suspend fun listenOnceRaw(entry: DebugEntry?, isRetry: Boolean, minListenMs: Long = DEFAULT_MIN_LISTEN_MS): SttOutcome =
+    /**
+     * Spec v1.3.9 §2.2 — reaction to a live STT partial while another coroutine is
+     * driving TTS. Passed to [listenOnceRaw] via the optional [onPartial] parameter.
+     * Existing callers pass `null` and get the previous behaviour (partial written
+     * to entry, nothing else).
+     */
+    private enum class BargeInPartialAction {
+        /** Not a decision moment — keep listening as normal. */
+        Continue,
+        /** Partial matched the current TTS text — discard from entry, keep listening. */
+        EchoDrop,
+        /** Partial is a real answer during TTS — return it as the final result NOW. */
+        UseAsFinal,
+    }
+
+    private suspend fun listenOnceRaw(
+        entry: DebugEntry?,
+        isRetry: Boolean,
+        minListenMs: Long = DEFAULT_MIN_LISTEN_MS,
+        onPartial: ((String) -> BargeInPartialAction)? = null,
+    ): SttOutcome =
         suspendCancellableCoroutine { cont ->
             recognizer?.destroy()
             val rec = SpeechRecognizer.createSpeechRecognizer(context)
@@ -1217,6 +1264,26 @@ class VoiceCommandPipeline(
                         ?.firstOrNull() ?: return
                     entry?.sttPartial = partial
                     Log.d(TAG, "partial: $partial")
+                    if (onPartial == null) return
+                    // Spec v1.3.9 §2.2.ข — barge-in classifier. Runs on the main thread
+                    // (RecognitionListener callback), same thread the coroutine will
+                    // resume on, so resume-once via [resumed] is race-free.
+                    when (onPartial.invoke(partial)) {
+                        BargeInPartialAction.Continue -> Unit
+                        BargeInPartialAction.EchoDrop -> {
+                            entry?.sttPartial = ""  // hide echo from the debug entry
+                        }
+                        BargeInPartialAction.UseAsFinal -> {
+                            if (resumed.compareAndSet(false, true)) {
+                                runCatching { rec.stopListening() }
+                                consecutiveSttErrors = 0
+                                Log.d(TAG, "barge-in: promoting partial '$partial' to final")
+                                if (cont.isActive) cont.resume(
+                                    SttOutcome(partial, wasTransientError = false, wasNoSpeech = false)
+                                )
+                            }
+                        }
+                    }
                 }
 
                 override fun onResults(results: Bundle?) {
@@ -1320,6 +1387,23 @@ class VoiceCommandPipeline(
     }
 
     /**
+     * Spec v1.3.9 §2.3 — append the teaching hint (" ตอบหลังเสียงติ๊งนะคะ") to
+     * question prompts for the first [com.moto.voice.data.AppSettings.TEACHING_MODE_BUDGET]
+     * interactions after install. After the budget is exhausted the hint auto-
+     * suppresses so returning riders don't hear it forever.
+     *
+     * Idempotent per interaction: flips [teachingHintFired] the first time it
+     * fires; the finally-block in [runPipeline] decrements the budget by exactly
+     * one per interaction (not per prompt) so a confirm-with-disambig doesn't
+     * eat two uses.
+     */
+    private fun withTeachingHint(basePrompt: String): String {
+        if (!settings.isTeachingModeActive) return basePrompt
+        teachingHintFired = true
+        return basePrompt + ErrorSpeech.TEACHING_HINT
+    }
+
+    /**
      * Every place that asks the rider a question uses this helper. It enforces the
      * flow contract from field-test bug §2: speakAwait must complete (audio done,
      * not just synth done) → [Earcon.answerListen] gives the "your turn" dual-beep →
@@ -1341,6 +1425,13 @@ class VoiceCommandPipeline(
         minListenMs: Long = DEFAULT_MIN_LISTEN_MS,
         withReminder: Boolean = false,
     ): String {
+        // Spec v1.3.9 §2.2 — barge-in mode when on SCO (helmet mic + separate
+        // speaker channel = echo is manageable). Phone-mic mode keeps the safe
+        // serial "speak then listen" flow because acoustic bleed is too strong
+        // to filter reliably.
+        if (entry?.audioRoute == AudioRoute.SCO) {
+            return promptAndListenBargeIn(prompt, entry, minListenMs, withReminder)
+        }
         speakAndRemember(prompt)
         Earcon.answerListen()
         delay(Earcon.MIC_OPEN_GAP_MS)
@@ -1353,6 +1444,91 @@ class VoiceCommandPipeline(
             return ""
         }
         return result
+    }
+
+    /**
+     * Spec v1.3.9 §2.2 — full barge-in variant of [promptAndListen] used when the
+     * pipeline is on SCO. Opens the mic concurrent with TTS start (§2.2.ก) and runs
+     * an echo-vs-real-answer classifier on every partial STT result via
+     * [TtsEchoFilter.classifyDuringTts] (§2.2.ข). A real answer during TTS stops
+     * the TTS mid-sentence and is processed immediately.
+     *
+     * Timing per §2.2.ค: the effective silence-input window is padded by an
+     * estimated TTS duration so the recognizer doesn't time out mid-prompt; the
+     * rider's usable "waiting-for-them" budget after the earcon still amounts to
+     * [minListenMs].
+     *
+     * Marks [DebugEntry.bargeInAnswer] on success.
+     */
+    private suspend fun promptAndListenBargeIn(
+        prompt: String,
+        entry: DebugEntry?,
+        minListenMs: Long,
+        withReminder: Boolean,
+    ): String = kotlinx.coroutines.coroutineScope {
+        memory.lastSpoken = prompt
+
+        val ttsCompletedAt = java.util.concurrent.atomic.AtomicLong(0L)
+        val bargedIn = AtomicBoolean(false)
+        val ttsJob = launch {
+            tts.speakAwait(prompt)
+            ttsCompletedAt.set(System.currentTimeMillis())
+        }
+
+        // §2.2.ก — mic opens concurrent with TTS. Wait a moment for TTS to actually
+        // start producing audio (so the answer-listen earcon lands between our
+        // start and the mic open) but do NOT wait for TTS to finish.
+        delay(150)
+        Earcon.answerListen()
+        delay(Earcon.MIC_OPEN_GAP_MS)
+
+        val partialHandler: (String) -> BargeInPartialAction = { partial ->
+            if (ttsCompletedAt.get() != 0L) {
+                // TTS already finished — normal partial, no barge-in classification
+                BargeInPartialAction.Continue
+            } else {
+                when (TtsEchoFilter.classifyDuringTts(partial, TtsRecentSpeech.currentOrRecent())) {
+                    TtsEchoFilter.BargeInClass.ECHO -> BargeInPartialAction.EchoDrop
+                    TtsEchoFilter.BargeInClass.REAL_ANSWER -> {
+                        Log.d(TAG, "barge-in real answer during TTS: '$partial' — stopping TTS")
+                        entry?.bargeInAnswer = true
+                        bargedIn.set(true)
+                        ttsJob.cancel()
+                        runCatching { tts.stop() }
+                        BargeInPartialAction.UseAsFinal
+                    }
+                    TtsEchoFilter.BargeInClass.UNKNOWN -> BargeInPartialAction.Continue
+                }
+            }
+        }
+
+        // §2.2.ค — pad the STT minimum window by an estimate of TTS length so the
+        // rider still gets ≈[minListenMs] to think AFTER TTS finishes. ~60ms/char
+        // is empirical for Thai Neural TTS at rate 1.0; capped so we don't spin
+        // the recognizer forever.
+        val ttsEstimateMs = (prompt.length * 60L).coerceAtMost(6_000L)
+        val effectiveMin = minListenMs + ttsEstimateMs
+
+        val result = withRemainingReminder(effectiveMin, withReminder) {
+            listenOnceRaw(
+                entry = entry,
+                isRetry = false,
+                minListenMs = effectiveMin,
+                onPartial = partialHandler,
+            ).text
+        }.trim()
+
+        if (!bargedIn.get()) ttsJob.join()
+
+        // Post-listen echo defence in depth — the pre-partial classifier is best
+        // effort; if a final result slipped through that still looks like our
+        // prompt, drop it (matches non-barge-in promptAndListen behaviour).
+        if (TtsEchoFilter.isEcho(result, memory.lastSpoken)) {
+            Log.w(TAG, "post-listen echo detected — dropping '$result'")
+            entry?.error = ((entry?.error ?: "") + " tts_echo_filtered").trim()
+            return@coroutineScope ""
+        }
+        result
     }
 
     /**

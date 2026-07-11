@@ -122,6 +122,14 @@ data class DebugEntry(
      * follow-up command's downstream action.
      */
     var followupUsed: Boolean = false,
+
+    /**
+     * Spec v1.3.9 §2.2.จ — the rider's answer to a question prompt landed BEFORE
+     * TTS finished speaking, and the pipeline stopped TTS mid-sentence + processed
+     * the answer. Only possible on SCO (helmet mic + separate speaker channel);
+     * phone-mic mode is not eligible for barge-in and stays false there.
+     */
+    var bargeInAnswer: Boolean = false,
 ) {
     fun time(): String = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date(timestamp))
 
@@ -143,6 +151,7 @@ data class DebugEntry(
         if (sttRecreated) append("  stt:recreated")
         if (slotFilled) append("  slot:filled")
         if (followupUsed) append("  followup:used")
+        if (bargeInAnswer) append("  bargeIn:answer")
         if (finishReason != null) append("  end:${finishReason}")
         if (error != null) append("  ⚠️ $error")
     }
