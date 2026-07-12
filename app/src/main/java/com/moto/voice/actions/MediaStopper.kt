@@ -47,6 +47,24 @@ object MediaStopper {
     }
 
     /**
+     * v1.3.11 §2.2 fallback seek — dispatch one KEYCODE_MEDIA_FAST_FORWARD or
+     * KEYCODE_MEDIA_REWIND per positive/negative signal. Used when no
+     * MediaController is available (notification-listener permission denied).
+     * We can't specify a precise delta this way — media keys only mean "seek
+     * forward some amount"; each app decides how much (YouTube = 10s, Spotify
+     * = 15s). Caller must speak the non-committal
+     * [com.moto.voice.nlu.ErrorSpeech.SEEK_ATTEMPTED] line instead of asserting
+     * the exact delta happened.
+     */
+    fun dispatchMediaSeek(context: Context, forward: Boolean) {
+        val am = context.getSystemService(AudioManager::class.java) ?: return
+        val keyCode = if (forward) KeyEvent.KEYCODE_MEDIA_FAST_FORWARD else KeyEvent.KEYCODE_MEDIA_REWIND
+        val now = SystemClock.uptimeMillis()
+        am.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0))
+        am.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, keyCode, 0))
+    }
+
+    /**
      * Dispatch a single KEYCODE_MEDIA_PLAY (DOWN+UP). Used by the YouTube nudge:
      * field log 1783581952116 showed the YouTube intent succeeding, our SCO fully
      * torn down (scoTeardownMs=818) and yet the video staying paused — the rider

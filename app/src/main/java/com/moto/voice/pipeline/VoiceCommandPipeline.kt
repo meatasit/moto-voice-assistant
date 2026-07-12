@@ -493,9 +493,37 @@ class VoiceCommandPipeline(
             is LocalIntercept.Intercept.CallFavorite -> handleFavoriteCall(intercept.zeroBasedSlot)
             LocalIntercept.Intercept.NextVideo -> handleNextVideo(entry)
             LocalIntercept.Intercept.WhatIsPlaying -> handleWhatIsPlaying()
+            is LocalIntercept.Intercept.Seek -> handleSeek(intercept.deltaSeconds, entry)
             LocalIntercept.Intercept.None -> Unit  // handled in caller
         }
         finish()
+    }
+
+    /**
+     * v1.3.11 §2 — dispatch a signed-seconds seek through the best available
+     * mechanism.
+     *
+     *   1. [MediaSessions.controllerFor] on the YouTube package → precise
+     *      seekTo(currentPosition + deltaMs). Speak the webhook's speak or a
+     *      built-in confirmation.
+     *   2. Any other active controller → precise seekTo on it too.
+     *   3. No controller (permission denied or nothing playing) → dispatch
+     *      KEYCODE_MEDIA_FAST_FORWARD / KEYCODE_MEDIA_REWIND and speak the
+     *      non-committal [ErrorSpeech.SEEK_ATTEMPTED] line — we can't verify
+     *      the app honoured the seek.
+     */
+    private suspend fun handleSeek(deltaSeconds: Int, entry: DebugEntry) {
+        val controller = com.moto.voice.media.MediaSessions.activeControllers(context).firstOrNull()
+        if (controller != null) {
+            val pos = controller.playbackState?.position ?: 0L
+            val target = (pos + deltaSeconds * 1000L).coerceAtLeast(0L)
+            runCatching { controller.transportControls.seekTo(target) }
+                .onFailure { Log.w(TAG, "controller.seekTo failed", it) }
+            speakAndRemember(if (deltaSeconds >= 0) "เลื่อนไปข้างหน้าให้แล้ว" else "ย้อนกลับให้แล้ว")
+        } else {
+            MediaStopper.dispatchMediaSeek(context, forward = deltaSeconds >= 0)
+            speakAndRemember(ErrorSpeech.SEEK_ATTEMPTED)
+        }
     }
 
     /**
@@ -784,6 +812,24 @@ class VoiceCommandPipeline(
             "none" -> {
                 speakAndRemember(resp.speak.ifBlank { "รับทราบ" })
                 followupEligible = true  // rider may want to correct or continue
+            }
+            "seek" -> {
+                // v1.3.11 §2 — reuse the existing `frequency` field for signed
+                // seconds (spec: "frequency = วินาที, บวก=หน้า ลบ=หลัง, 0=สั่งเล่น").
+                // Zero means "start playing the current media" via controller.play().
+                val n = (resp.frequency ?: 0.0).toInt()
+                if (n == 0) {
+                    val controller = com.moto.voice.media.MediaSessions.activeControllers(context).firstOrNull()
+                    if (controller != null) {
+                        runCatching { controller.transportControls.play() }
+                    } else {
+                        MediaStopper.dispatchMediaPlay(context)
+                    }
+                    speakAndRemember(resp.speak.ifBlank { "เล่นต่อค่ะ" })
+                } else {
+                    handleSeek(n, entry)
+                    if (resp.speak.isNotBlank()) speakAndRemember(resp.speak)
+                }
             }
             else -> speakAndRemember(resp.speak.ifBlank { "เข้าใจแล้ว" })
         }

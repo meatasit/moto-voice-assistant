@@ -157,6 +157,38 @@ object ErrorSpeech {
         "ระบบไม่ตอบชั่วคราวครับ ลองใหม่นะครับ",
     )
 
+    // ─── v1.3.11 §2 / §3 — MediaController control feedback ─────────────────
+
+    /**
+     * §2.2 fallback speech — spoken when we dispatched KEYCODE_MEDIA_FAST_FORWARD/REWIND
+     * because we have no MediaController to confirm the seek actually took. Non-
+     * committal per approval note: "without a controller we can't verify success,
+     * so the fallback TTS must be non-committal ('ลองเลื่อนให้แล้วค่ะ') instead of
+     * asserting the seek happened."
+     */
+    val SEEK_ATTEMPTED: String get() = pick(
+        "ลองเลื่อนให้แล้วค่ะ",
+        "ลองเลื่อนให้แล้วครับ",
+    )
+
+    /**
+     * §3.1 confirmed-play speech — spoken ONLY after the YouTube MediaController's
+     * PlaybackState observed STATE_PLAYING. Shortest possible line per spec so it
+     * doesn't stack on top of the media audio the rider just wanted to hear.
+     * Pre-synthesized.
+     */
+    val MEDIA_PLAY_CONFIRMED: String get() = pick("เล่นแล้วค่ะ", "เล่นแล้วครับ")
+
+    /**
+     * §3.1 fallback speech — YouTube deep-link succeeded (the app opened) but the
+     * MediaController still wasn't in STATE_PLAYING after the poll + one play()
+     * attempt. Tells the rider what actually happened.
+     */
+    val MEDIA_OPENED_NOT_PLAYING: String get() = pick(
+        "เปิดหน้าวิดีโอให้แล้ว แต่ยังไม่เล่นค่ะ",
+        "เปิดหน้าวิดีโอให้แล้ว แต่ยังไม่เล่นครับ",
+    )
+
     /** All 21 lines, in a stable order — used by the pre-synthesize cache warmer. */
     fun allSystemLines(): List<String> = listOf(
         THINKING, ONE_MORE_MOMENT,
@@ -176,6 +208,7 @@ object ErrorSpeech {
         NEXT_VIDEO_EXHAUSTED, WHAT_IS_PLAYING_NONE,
         TEACHING_HINT,
         SERVER_UNAVAILABLE,
+        SEEK_ATTEMPTED, MEDIA_PLAY_CONFIRMED, MEDIA_OPENED_NOT_PLAYING,
     )
 
     private fun pick(feminine: String, masculine: String): String =

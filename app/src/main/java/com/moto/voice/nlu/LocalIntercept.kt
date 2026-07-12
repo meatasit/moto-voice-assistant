@@ -42,6 +42,14 @@ object LocalIntercept {
          * [com.moto.voice.media.MediaSessionMemory.currentTitle].
          */
         object WhatIsPlaying : Intercept()
+
+        /**
+         * Spec v1.3.11 §2.3 — "เลื่อน 30 วิ" / "ย้อน 1 นาที" / "skip". The
+         * pipeline dispatches [deltaSeconds] through the active MediaController
+         * (v1.3.11 §1 permission) or falls back to KEYCODE_MEDIA_FAST_FORWARD /
+         * KEYCODE_MEDIA_REWIND. Positive = forward, negative = backward.
+         */
+        data class Seek(val deltaSeconds: Int) : Intercept()
     }
 
     fun match(text: String): Intercept {
@@ -65,6 +73,10 @@ object LocalIntercept {
         // rider says both in the same sentence.
         if (matchesAsPhrase(t, NEXT_VIDEO_PATTERNS)) return Intercept.NextVideo
         if (matchesAsPhrase(t, WHAT_IS_PLAYING_PATTERNS)) return Intercept.WhatIsPlaying
+
+        // v1.3.11 §2.3 — seek intercept. Runs LAST so any of the earlier command
+        // families win first (e.g. "หยุดเลื่อน" is Stop, not Seek).
+        SeekParser.parse(t)?.let { return Intercept.Seek(it.deltaSeconds) }
 
         return Intercept.None
     }
