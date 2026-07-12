@@ -80,12 +80,7 @@
             android:label="@string/title_favorites"
             android:parentActivityName=".MainActivity" />
 
-        <activity
-            android:name=".RidingModeActivity"
-            android:exported="false"
-            android:label="@string/title_riding_mode"
-            android:screenOrientation="portrait"
-            android:parentActivityName=".MainActivity" />
+        <!-- RidingModeActivity removed in v1.3.16 — rider keeps phone in pocket -->
 
         <activity
             android:name=".OnboardingActivity"

@@ -52,7 +52,6 @@ class MainActivity : AppCompatActivity() {
         binding.btnSetDefault.setOnClickListener { openDefaultAssistantSettings() }
         binding.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         binding.btnDebugLog.setOnClickListener { startActivity(Intent(this, DebugLogActivity::class.java)) }
-        binding.btnRidingMode.setOnClickListener { startActivity(Intent(this, RidingModeActivity::class.java)) }
         binding.btnHistory.setOnClickListener { startActivity(Intent(this, HistoryActivity::class.java)) }
         binding.btnFavorites.setOnClickListener { startActivity(Intent(this, FavoritesActivity::class.java)) }
     }

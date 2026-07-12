@@ -166,17 +166,8 @@
             android:layout_marginBottom="16dp"
             app:cornerRadius="12dp" />
 
-        <!-- Quick access: Riding Mode / History / Favorites -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnRidingMode"
-            android:layout_width="match_parent"
-            android:layout_height="64dp"
-            android:text="🏍️  โหมดขี่ (Riding Mode)"
-            android:textSize="16sp"
-            android:layout_marginBottom="8dp"
-            app:cornerRadius="12dp"
-            app:backgroundTint="@color/purple_500" />
-
+        <!-- Quick access: History / Favorites (Riding Mode removed v1.3.16 —
+             rider keeps phone in pocket 100% of the time, tap-to-listen UI unused) -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
