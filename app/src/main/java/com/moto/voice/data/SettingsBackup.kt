@@ -36,6 +36,11 @@ data class SettingsBackup(
      * backups keep working; missing = AppSettings default (true).
      */
     @SerializedName("followup_enabled") val followupEnabled: Boolean? = null,
+    /**
+     * Added in v1.3.11 — spec §3.1 "ยืนยันเมื่อเริ่มเล่น" toggle. Optional so
+     * older backups still parse; missing = AppSettings default (true).
+     */
+    @SerializedName("confirm_media_start") val confirmMediaStart: Boolean? = null,
     val favorites: List<Favorite>,
     @SerializedName("last_station") val lastStation: LastStation?,
 ) {
@@ -87,6 +92,7 @@ data class SettingsBackup(
                 onboardingComplete = s.onboardingComplete,
                 listenPaceSeconds = s.listenPaceSeconds,
                 followupEnabled = s.followupEnabled,
+                confirmMediaStart = s.confirmMediaStart,
                 favorites = fav,
                 lastStation = station,
             )
@@ -128,6 +134,7 @@ data class SettingsBackup(
             s.onboardingComplete = backup.onboardingComplete
             backup.listenPaceSeconds?.let { s.listenPaceSeconds = it }
             backup.followupEnabled?.let { s.followupEnabled = it }
+            backup.confirmMediaStart?.let { s.confirmMediaStart = it }
 
             val favStore = FavoritesStore(context)
             favStore.clear()

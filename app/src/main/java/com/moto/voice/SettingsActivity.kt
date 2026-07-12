@@ -71,6 +71,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.tvTtsRateValue.text = formatRate(settings.ttsSpeechRate)
         binding.switchResumeAfterCall.isChecked = settings.resumeAfterCall
         binding.switchFollowup.isChecked = settings.followupEnabled
+        binding.switchConfirmMediaStart.isChecked = settings.confirmMediaStart
         binding.sliderAssistantVolume.value = settings.assistantVolume
         binding.tvAssistantVolumeValue.text = formatRate(settings.assistantVolume)
         binding.sliderListenPace.value = settings.listenPaceSeconds
@@ -122,6 +123,7 @@ class SettingsActivity : AppCompatActivity() {
         }
         binding.switchResumeAfterCall.setOnCheckedChangeListener { _, v -> settings.resumeAfterCall = v }
         binding.switchFollowup.setOnCheckedChangeListener { _, v -> settings.followupEnabled = v }
+        binding.switchConfirmMediaStart.setOnCheckedChangeListener { _, v -> settings.confirmMediaStart = v }
         binding.btnPreviewTts.setOnClickListener { previewSpeech() }
 
         binding.btnTestConnection.setOnClickListener { testConnection() }

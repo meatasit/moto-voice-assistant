@@ -170,6 +170,17 @@ class AppSettings(context: Context) {
         set(v) { prefs.edit().putBoolean("followup_enabled", v).apply() }
 
     /**
+     * Spec v1.3.11 §3.1 — "ยืนยันเมื่อเริ่มเล่น". After the YouTube deep-link fires
+     * and the [com.moto.voice.media.MediaSessions] controller reports STATE_PLAYING,
+     * the pipeline speaks a short "เล่นแล้วค่ะ" so the rider on a helmet (who can't
+     * glance at the screen) knows playback actually started. Default ON per rider
+     * approval. Only affects YouTube — FM's stream audio is its own confirmation.
+     */
+    var confirmMediaStart: Boolean
+        get() = prefs.getBoolean("confirm_media_start", true)
+        set(v) { prefs.edit().putBoolean("confirm_media_start", v).apply() }
+
+    /**
      * Spec v1.3.9 §2.3 — how many more question-answer prompts still get the
      * "ตอบหลังเสียงติ๊งนะคะ" teaching hint. Starts at [TEACHING_MODE_BUDGET] on install
      * and decrements per prompt that fires. Clamps at 0. Intentionally not part of

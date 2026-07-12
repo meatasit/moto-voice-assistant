@@ -130,6 +130,32 @@ data class DebugEntry(
      * phone-mic mode is not eligible for barge-in and stays false there.
      */
     var bargeInAnswer: Boolean = false,
+
+    /**
+     * v1.3.11 §3.3 — true when this interaction used a MediaController from
+     * [com.moto.voice.media.MediaSessions] instead of falling back to
+     * KEYCODE_MEDIA_* dispatch. Set by the YouTube nudge (playback confirmation),
+     * the stop path (controller.pause), and the seek path (controller.seekTo).
+     * Requires the rider to have granted Notification listener access.
+     */
+    var mediaCtrlUsed: Boolean = false,
+
+    /**
+     * v1.3.11 §3.3 — human-readable [android.media.session.PlaybackState.getState]
+     * of the controller the pipeline observed (playing / paused / buffering / etc).
+     * Populated by the nudge upgrade and the stop path. Null when no controller
+     * was available (no permission, no active session).
+     */
+    var playbackState: String? = null,
+
+    /**
+     * v1.3.11 §1 — when the nudge upgrade wanted YouTube's MediaController but
+     * couldn't find one, this lists the packages that DID have active sessions.
+     * Helps future field logs surface variants (com.google.android.apps.youtube.music,
+     * side-loaded Vanced, etc) so we can add them to [MediaSessions.YOUTUBE_PKG]
+     * matching over time.
+     */
+    var mediaCtrlPkgMiss: String? = null,
 ) {
     fun time(): String = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date(timestamp))
 
@@ -152,6 +178,9 @@ data class DebugEntry(
         if (slotFilled) append("  slot:filled")
         if (followupUsed) append("  followup:used")
         if (bargeInAnswer) append("  bargeIn:answer")
+        if (mediaCtrlUsed) append("  mediaCtrl:used")
+        if (playbackState != null) append("  playback:${playbackState}")
+        if (mediaCtrlPkgMiss != null) append("  pkgMiss:${mediaCtrlPkgMiss}")
         if (finishReason != null) append("  end:${finishReason}")
         if (error != null) append("  ⚠️ $error")
     }
