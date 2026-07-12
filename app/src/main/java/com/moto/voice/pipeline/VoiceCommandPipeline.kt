@@ -529,9 +529,22 @@ class VoiceCommandPipeline(
             entry.playbackState = com.moto.voice.media.MediaSessions.stateName(controller.playbackState?.state)
             runCatching { controller.transportControls.seekTo(target) }
                 .onFailure { Log.w(TAG, "controller.seekTo failed", it) }
+            // v1.3.12 bug fix — if the video was paused (rider paused earlier or
+            // it was auto-paused by an ad ending), seekTo only changes the position;
+            // the rider still had to say "play" to resume. Unconditional play() after
+            // seek matches expected behaviour "skip and keep watching". Idempotent
+            // when already playing.
+            runCatching { controller.transportControls.play() }
+                .onFailure { Log.w(TAG, "controller.play after seek failed", it) }
             speakAndRemember(if (deltaSeconds >= 0) "เลื่อนไปข้างหน้าให้แล้ว" else "ย้อนกลับให้แล้ว")
         } else {
             MediaStopper.dispatchMediaSeek(context, forward = deltaSeconds >= 0)
+            // v1.3.12 bug fix (fallback path) — KEYCODE_MEDIA_FAST_FORWARD/REWIND
+            // is a no-op on paused sessions for some apps. Dispatch MEDIA_PLAY
+            // right after so the rider gets the same "skip and keep watching"
+            // experience regardless of controller permission.
+            delay(200L)
+            MediaStopper.dispatchMediaPlay(context)
             speakAndRemember(ErrorSpeech.SEEK_ATTEMPTED)
         }
     }
