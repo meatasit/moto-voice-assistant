@@ -1233,12 +1233,22 @@ class VoiceCommandPipeline(
                 handler.postDelayed(poll, YOUTUBE_NUDGE_POLL_INTERVAL_MS)
                 return@Runnable
             }
-            // No YouTube controller found — log what IS available, then fall back
-            // to the media-key path so the rider still gets a nudge.
-            val available = com.moto.voice.media.MediaSessions.activePackagesForDebug(appCtx)
-            entry.mediaCtrlPkgMiss = if (available.isEmpty()) "none" else available.joinToString(",")
-            Log.w(TAG, "youtube nudge: no controller for ${com.moto.voice.media.MediaSessions.YOUTUBE_PKG} — falling back. available=$available")
-            scheduleYoutubeNudgeFallback(appCtx, handler, entry)
+            // v1.3.15 bug fix — the previous version fell back to media-key path on
+            // the FIRST poll tick if YouTube's MediaController hadn't registered yet.
+            // Cold-start of YouTube from a deep-link routinely takes > 800ms to
+            // register the session, so field log 1783876501024 showed BOTH YouTube
+            // opens with mediaCtrlPkgMiss="none" + video not playing. Fix: keep
+            // polling until pollWindowEndAt is truly reached, only THEN fall back.
+            if (System.currentTimeMillis() >= pollWindowEndAt) {
+                val available = com.moto.voice.media.MediaSessions.activePackagesForDebug(appCtx)
+                entry.mediaCtrlPkgMiss = if (available.isEmpty()) "none" else available.joinToString(",")
+                Log.w(TAG, "youtube nudge: no controller for ${com.moto.voice.media.MediaSessions.YOUTUBE_PKG} after full poll window — falling back. available=$available")
+                scheduleYoutubeNudgeFallback(appCtx, handler, entry)
+                return@Runnable
+            }
+            // Still inside the window — YouTube may register its session on the
+            // next tick. Reschedule and keep looking.
+            handler.postDelayed(poll, YOUTUBE_NUDGE_POLL_INTERVAL_MS)
         }
         handler.postDelayed(poll, YOUTUBE_NUDGE_INITIAL_DELAY_MS)
     }

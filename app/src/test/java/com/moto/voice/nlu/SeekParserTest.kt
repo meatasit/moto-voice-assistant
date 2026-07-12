@@ -94,4 +94,28 @@ class SeekParserTest {
         // should not fall through to forward and return +10.
         assertEquals(-10, SeekParser.parse("ย้อนกลับเลื่อน 10 วิ")?.deltaSeconds)
     }
+
+    // ─── v1.3.15 STT-mishearing alias — เดือน ⇢ เลื่อน ────────────────────
+
+    @Test fun realFieldMishearingFullSentence() {
+        // Log 1783876501024: rider said "เลื่อนหน้า 3 นาที" but Google STT
+        // captured "เดือนหน้า 3 นาที". Must resolve to forward 180 seconds.
+        assertEquals(180, SeekParser.parse("เดือนหน้า 3 นาที")?.deltaSeconds)
+    }
+
+    @Test fun realFieldMishearingWithPaiPrefix() {
+        assertEquals(30, SeekParser.parse("เดือนไปข้างหน้า 30 วิ")?.deltaSeconds)
+    }
+
+    @Test fun realFieldMishearingDefault() {
+        assertEquals(SeekParser.DEFAULT_SECONDS, SeekParser.parse("เดือนหน้า")?.deltaSeconds)
+    }
+
+    @Test fun mishearingAliasStillForwardOnly() {
+        // "เดือน" only fires the FORWARD path — a rider who says something
+        // unrelated that starts with "เดือน" shouldn't false-positive into a seek.
+        // "เดือน กรกฎาคม" isn't a seek pattern (no digit + no forward/back keyword).
+        // The parser MUST return null.
+        assertNull(SeekParser.parse("เดือน กรกฎาคม"))
+    }
 }
