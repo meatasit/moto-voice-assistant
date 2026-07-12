@@ -52,24 +52,17 @@ object Earcon {
     }
 
     /**
-     * Signal: "interaction finished, mic is closed."
-     *
-     * v1.3.13 field feedback — the previous single low tone was too subtle,
-     * riders on the highway couldn't tell whether the assistant had actually
-     * stopped listening or was still waiting. Changed to a descending two-tone
-     * motif (mid → low, ~280ms total) so "mic closed" is unambiguously
-     * different from [ready]'s single rising beep and [answerListen]'s dual
-     * SAME-tone pings. The DOWN direction is the audible metaphor for "done":
-     * pitch dropping = motion ending.
-     *
-     * Fires on OK / cancelled / timeout / error / slot_filled / followup /
-     * watchdog_reset exits. Skipped when a media action (youtube_play, fm) will
+     * Signal: "interaction finished, mic is closed." Single low short tone —
+     * intentionally NOT the same as [ready]'s rising beep, so the rider can tell
+     * "assistant is now silent" from "assistant just started listening" without
+     * looking. Fires on OK / cancelled / timeout / error / slot_filled / followup
+     * / watchdog_reset exits. Skipped when a media action (youtube_play, fm) will
      * play immediately after — the media sound itself signals "we're done".
+     *
+     * v1.3.14 — reverted from the descending 2-tone motif that shipped in v1.3.13.
+     * Rider feedback: "แย่กว่าเดิม". Back to the original single tone.
      */
-    suspend fun endInteraction() {
-        play(ToneGenerator.TONE_DTMF_5, 110, tailMs = 130)
-        play(ToneGenerator.TONE_DTMF_2, 130, tailMs = 150)
-    }
+    suspend fun endInteraction() = play(ToneGenerator.TONE_DTMF_2, 140, tailMs = 160)
 
     /** Signal: "that didn't work." Short low buzz. */
     suspend fun error() = play(ToneGenerator.TONE_PROP_NACK, 200, tailMs = 240)

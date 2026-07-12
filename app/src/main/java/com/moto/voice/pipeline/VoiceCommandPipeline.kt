@@ -112,19 +112,13 @@ private const val STT_RECREATE_THRESHOLD = 2
 private const val INTERACTION_WATCHDOG_MS = 45_000L
 /**
  * Spec v1.3.8 B2 — how long the follow-up window listens for a follow-up command.
- * Short — the rider is on a bike. Trimmed 4000 → 3000 in v1.3.13 after rider
- * feedback that 4 seconds of silence feels awkwardly long compared to natural
- * conversation cadence.
+ * Short — the rider is on a bike.
+ *
+ * v1.3.14 — restored to 4000ms after rider feedback that v1.3.13's 3000 + mid-
+ * window ping combo felt worse. Need targeted follow-up on what specifically
+ * felt off before adjusting timings again.
  */
-private const val FOLLOWUP_LISTEN_MS = 3_000L
-
-/**
- * v1.3.13 — pause between the end of the assistant's TTS reply and the
- * follow-up window's answerListen beep. Field feedback: opening the follow-up
- * window immediately after TTS felt rushed. 400ms gives the rider a beat to
- * process what was said before deciding whether to reply.
- */
-private const val FOLLOWUP_PRE_LISTEN_BREATHE_MS = 400L
+private const val FOLLOWUP_LISTEN_MS = 4_000L
 
 class VoiceCommandPipeline(
     private val context: Context,
@@ -701,25 +695,16 @@ class VoiceCommandPipeline(
      * would let the assistant chatter until the rider silences it manually).
      */
     private suspend fun runFollowUpWindow(entry: DebugEntry) {
-        // v1.3.13 — natural pause between TTS ending and the "your turn" beep so
-        // the follow-up doesn't feel like the assistant is stepping on the rider's
-        // heels. Long enough that the rider hears the end of TTS distinctly; short
-        // enough that the flow still feels responsive.
-        delay(FOLLOWUP_PRE_LISTEN_BREATHE_MS)
         // Spec v1.3.9 §1.2 — the follow-up window is exactly the "waiting for your
         // reply" state, so it gets the dual-beep answerListen, not the ready tone
         // that would signal "new interaction start".
         Earcon.answerListen()
         delay(Earcon.MIC_OPEN_GAP_MS)  // spec §1.4 — don't let the tail hit the mic
         PipelineState.setListening()  // spec v1.3.9 §4
-        // v1.3.13 — mid-window "still listening" ping if no partial has arrived.
-        // Riders reported the 3-second silence felt like the mic had already
-        // closed. withRemainingReminder fires answerListen once at (window −
-        // ANSWER_LISTEN_REMINDER_MS = 2s), i.e. 1 second in, cancelled if the
-        // listen returns first.
-        val text = withRemainingReminder(FOLLOWUP_LISTEN_MS, enabled = true) {
-            listenOnce(entry, minListenMs = FOLLOWUP_LISTEN_MS)
-        }
+        // v1.3.14 — reverted v1.3.13's pre-listen breathe + mid-window ping +
+        // shortened window. Back to a plain listenOnce over the full 4s window
+        // per rider feedback that the v1.3.13 changes felt worse than v1.3.12.
+        val text = listenOnce(entry, minListenMs = FOLLOWUP_LISTEN_MS)
         PipelineState.setThinking()
         if (text.isBlank()) {
             // Spec §1.3 — silent-timeout is a real interaction exit; fire the
