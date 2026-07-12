@@ -50,6 +50,7 @@ import com.moto.voice.nlu.SlotFiller
 import com.moto.voice.nlu.VoiceCommand
 import com.moto.voice.tts.ThaiTTS
 import com.moto.voice.tts.TtsRecentSpeech
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -234,9 +235,18 @@ class VoiceCommandPipeline(
                 runCatching { Earcon.cancel() }
             }
         } catch (t: Throwable) {
-            // Spec §1.1 — unexpected throw must NOT leave SCO holding the audio route.
-            // Log the reason so the field can tell that finally saved us and it wasn't
-            // a normal exit. finally block below runs cleanup unconditionally.
+            // v1.3.11 — CancellationException MUST propagate unmarked. It is
+            // structured-concurrency's "the parent scope is winding down" signal,
+            // not an error. Every field log from v1.3.9 onward showed the noise
+            // "runPipeline_threw:JobCancellationException" on every successful
+            // interaction because cleanup() → scope.cancel() triggers it at the
+            // withTimeoutOrNull boundary. Rethrow directly so the finally still
+            // runs but the debug entry stays clean.
+            if (t is CancellationException) throw t
+            // Spec §1.1 — unexpected non-cancellation throw must NOT leave SCO holding
+            // the audio route. Log the reason so the field can tell that finally saved
+            // us and it wasn't a normal exit. finally block below runs cleanup
+            // unconditionally.
             Log.e(TAG, "runPipeline threw — running finally cleanup", t)
             entry.error = ((entry.error ?: "") + " runPipeline_threw:${t.javaClass.simpleName}").trim()
             throw t

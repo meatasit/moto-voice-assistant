@@ -15,6 +15,7 @@ import android.provider.Settings
 import androidx.core.content.ContextCompat
 import com.moto.voice.data.AppSettings
 import com.moto.voice.data.NetworkState
+import com.moto.voice.media.MediaSessions
 import com.moto.voice.network.WebhookClient
 import com.moto.voice.tts.AzureTtsState
 
@@ -36,7 +37,7 @@ data class StatusRow(
     /** Intent to launch when the rider taps this row to fix it. null = row has no fixup. */
     val fixIntent: Intent? = null,
 ) {
-    enum class Kind { DefaultAssistant, Permissions, Battery, Helmet, Webhook, Tts, Internet }
+    enum class Kind { DefaultAssistant, Permissions, Battery, Helmet, Webhook, Tts, Internet, MediaCtrl }
     enum class State { Green, Red, Yellow, Pending }
 }
 
@@ -49,6 +50,7 @@ class SystemStatusChecker(private val context: Context) {
         checkBattery(),
         checkHelmet(),
         checkInternet(),
+        checkMediaCtrl(),
         // Placeholders for async rows so the UI can render them as Pending while the tests run.
         StatusRow(StatusRow.Kind.Webhook, "Webhook", StatusRow.State.Pending, "กำลังทดสอบ..."),
         StatusRow(StatusRow.Kind.Tts, "TTS", StatusRow.State.Pending, "กำลังทดสอบ..."),
@@ -207,6 +209,24 @@ class SystemStatusChecker(private val context: Context) {
             StatusRow.Kind.Internet, "อินเทอร์เน็ต",
             if (online) StatusRow.State.Green else StatusRow.State.Red,
             detail = if (online) "ออนไลน์" else "ออฟไลน์",
+        )
+    }
+
+    /**
+     * v1.3.11 §1 — notification-listener access. Yellow (not Red) when denied
+     * because it's OPTIONAL — every code path has a media-key fallback. Tapping
+     * the row opens the OS "Notification access" settings.
+     */
+    private fun checkMediaCtrl(): StatusRow {
+        val granted = MediaSessions.hasPermission(context)
+        val fix = runCatching { Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS) }
+            .getOrNull()?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return StatusRow(
+            StatusRow.Kind.MediaCtrl, "ควบคุมสื่อ (ทางเลือก)",
+            if (granted) StatusRow.State.Green else StatusRow.State.Yellow,
+            detail = if (granted) "อนุญาตแล้ว — ยืนยันการเล่น + เลื่อนได้แม่นยำ"
+                     else "ยังไม่ได้อนุญาต — ใช้ปุ่มสื่อแทน (บางแอปอาจไม่รองรับ)",
+            fixIntent = if (granted) null else fix,
         )
     }
 }

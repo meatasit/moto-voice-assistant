@@ -149,6 +149,26 @@
             android:permission="android.permission.BIND_VOICE_INTERACTION_SERVICE"
             android:exported="true" />
 
+        <!--
+            v1.3.11 §1.1 — presence-only NotificationListenerService. Required for
+            android.media.session.MediaSessionManager.getActiveSessions(), which is
+            what lets us READ playbackState from YouTube/Spotify/etc and control
+            them via MediaController.transportControls (play/pause/seek). We don't
+            consume notification callbacks at all — the service body is empty. The
+            user grants "Notification access" in Settings; every code path falls
+            back to media-key dispatch when the permission is denied so nothing
+            breaks.
+        -->
+        <service
+            android:name=".bt.MotoMediaNotificationListener"
+            android:label="Moto Voice Media Access"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <!-- Preflight-on-boot notification so the rider knows before the first BVRA press -->
         <receiver
             android:name=".bt.BootReceiver"

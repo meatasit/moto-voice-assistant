@@ -89,6 +89,7 @@ class OnboardingActivity : AppCompatActivity() {
         stepDefaultAssistant(),
         stepBattery(),
         stepWebhook(),
+        stepMediaCtrl(),
     )
 
     private fun stepPermissions(): Step {
@@ -129,6 +130,33 @@ class OnboardingActivity : AppCompatActivity() {
             actionLabel = if (!exempt) "ตั้งเลย" else null,
             action = if (!exempt) ({ requestBatteryExemption() }) else null,
         )
+    }
+
+    /**
+     * v1.3.11 §1 — optional step. Explains the notification-listener rationale in
+     * Thai. Tapping "ตั้งเลย" opens the OS "Notification access" list where the
+     * rider grants Moto Voice access. Done state is checked via [MediaSessions],
+     * but the step is OPTIONAL: the finish CTA doesn't require it, matching the
+     * spec that all media commands still work via media-key fallback when denied.
+     */
+    private fun stepMediaCtrl(): Step {
+        val granted = com.moto.voice.media.MediaSessions.hasPermission(this)
+        return Step(
+            title = "5. อนุญาต ควบคุมสื่อ (ทางเลือก)",
+            reason = "อ่านสถานะเพลง/วิดีโอและควบคุมได้แม่นยำขึ้น — ยืนยันการเล่น + เลื่อนเป็นวินาที",
+            done = granted,
+            actionLabel = if (!granted) "ตั้งเลย" else null,
+            action = if (!granted) ({ openNotificationListenerSettings() }) else null,
+        )
+    }
+
+    private fun openNotificationListenerSettings() {
+        runCatching {
+            startActivity(
+                Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
     }
 
     private fun stepWebhook(): Step {
