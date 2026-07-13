@@ -1146,29 +1146,36 @@ class VoiceCommandPipeline(
     }
 
     /**
-     * v1.3.17 — direct-controller stop for YouTube. Called before firing a new
-     * deep-link so YouTube's session is cleared and the intent isn't interpreted
-     * as "resume the current video". No-op if:
-     *   * user hasn't granted notification-listener access (no controller),
-     *   * YouTube app has no active session (already stopped),
-     *   * YouTube's session is already STATE_STOPPED / STATE_NONE.
+     * v1.3.18 — direct-controller PAUSE for YouTube (was stop() in v1.3.17).
      *
-     * `runCatching` guards the call — if the controller has become stale between
-     * our lookup and the transportControls.stop() call, we ignore and move on;
-     * the deep-link will still fire, just without the guarantee that YouTube
-     * was cleared first.
+     * Field log 1783943626214 traced the regression: transportControls.stop()
+     * destroyed YouTube's session, so our nudge poll couldn't find a
+     * MediaController for YouTube (mediaCtrlPkgMiss=com.spotify.music on
+     * EVERY entry). The fallback then dispatched MEDIA_PLAY blindly, waking
+     * Spotify instead of YouTube — Spotify grabbed audio focus, everything
+     * silent, force-stopping our app was the only recovery.
+     *
+     * Now uses pause(): the YouTube session STAYS registered so subsequent
+     * controllerFor() calls succeed and the deep-link is routed through
+     * YouTube's existing session (which handles the new video correctly).
+     * Also gates the pause on state — no-op if already paused so we don't
+     * churn the session state.
+     *
+     * Rule locked in CLAUDE.md v1.3.19: NEVER call transportControls.stop()
+     * on another app's MediaController. pause() only.
      */
     private fun stopYoutubeControllerIfActive() {
         val ctrl = com.moto.voice.media.MediaSessions.controllerFor(
             context, com.moto.voice.media.MediaSessions.YOUTUBE_PKG,
         ) ?: return
         val state = ctrl.playbackState?.state ?: return
-        val isActive = state == android.media.session.PlaybackState.STATE_PLAYING ||
-                       state == android.media.session.PlaybackState.STATE_PAUSED ||
-                       state == android.media.session.PlaybackState.STATE_BUFFERING
-        if (!isActive) return
-        Log.d(TAG, "openYoutube: stopping existing YouTube session (state=${com.moto.voice.media.MediaSessions.stateName(state)}) before deep link")
-        runCatching { ctrl.transportControls.stop() }
+        // Only pause when actually playing/buffering. PAUSED is already what
+        // we'd get; touching a PAUSED session again just wastes a call.
+        val shouldPause = state == android.media.session.PlaybackState.STATE_PLAYING ||
+                          state == android.media.session.PlaybackState.STATE_BUFFERING
+        if (!shouldPause) return
+        Log.d(TAG, "openYoutube: pausing existing YouTube session (state=${com.moto.voice.media.MediaSessions.stateName(state)}) before deep link")
+        runCatching { ctrl.transportControls.pause() }
     }
 
     /**
@@ -1358,7 +1365,21 @@ class VoiceCommandPipeline(
         tts.speak(text) { runCatching { tts.stop() } }
     }
 
-    /** v1.3.11 §3.1 fallback path — preserves v1.3.6/§2 nudge behaviour verbatim. */
+    /**
+     * v1.3.18 fallback path — was "dispatch MEDIA_PLAY unconditionally" in v1.3.11.
+     *
+     * Root cause traced by field log 1783943626214: dispatching MEDIA_PLAY when
+     * YouTube's session hadn't registered yet routed the key to whatever
+     * session WAS active — in that log, Spotify. Spotify woke up, grabbed audio
+     * focus, blocked YouTube from playing. Everything silent.
+     *
+     * New rule: verify YouTube is actually in the active sessions list BEFORE
+     * dispatching MEDIA_PLAY. If YouTube isn't there, dispatching would wake
+     * the wrong app — so we skip the dispatch and speak MEDIA_OPENED_NOT_PLAYING
+     * instead, telling the rider to tap the phone. This deliberately trades
+     * the "sometimes YouTube gets a nudge that works" case for "never wake
+     * the wrong app". Rule locked in CLAUDE.md v1.3.19.
+     */
     private fun scheduleYoutubeNudgeFallback(
         appCtx: Context, handler: Handler, entry: DebugEntry,
     ) {
@@ -1368,13 +1389,18 @@ class VoiceCommandPipeline(
                 Log.d(TAG, "youtube nudge check: music active — no nudge")
                 return@postDelayed
             }
-            Log.w(TAG, "youtube nudge: music inactive 3s after open — yielding + dispatching MEDIA_PLAY")
-            runCatching {
-                appCtx.startService(
-                    Intent(appCtx, FmPlayerService::class.java)
-                        .setAction(FmPlayerService.ACTION_YIELD_SESSION)
-                )
+            // v1.3.18 — verify YouTube is in the active session list before dispatching.
+            // If it's not, MEDIA_PLAY would wake whichever other app IS registered
+            // (Spotify in the field-log case) → wrong app grabs focus → silent.
+            val activePkgs = com.moto.voice.media.MediaSessions.activePackagesForDebug(appCtx)
+            val youtubeActive = activePkgs.contains(com.moto.voice.media.MediaSessions.YOUTUBE_PKG)
+            entry.mediaCtrlPkgMiss = if (activePkgs.isEmpty()) "none" else activePkgs.joinToString(",")
+            if (!youtubeActive) {
+                Log.w(TAG, "youtube nudge fallback: YouTube session NOT in active list; dispatching would wake wrong app. active=$activePkgs")
+                speakOutOfPipeline(appCtx, ErrorSpeech.MEDIA_OPENED_NOT_PLAYING)
+                return@postDelayed
             }
+            Log.w(TAG, "youtube nudge: music inactive 3s after open, YouTube session present — dispatching MEDIA_PLAY")
             handler.postDelayed({
                 MediaStopper.dispatchMediaPlay(appCtx)
                 entry.youtubeNudged = true

@@ -49,28 +49,30 @@ class FmPlayerService : MediaSessionService() {
         const val ACTION_PAUSE = "com.moto.voice.FM_PAUSE"
         const val ACTION_RESUME = "com.moto.voice.FM_RESUME"
         /**
-         * Yield our MediaSession's active state for the YouTube nudge (v1.3.7).
+         * Yield our MediaSession for the YouTube nudge.
          *
-         * v1.3.6 sent ACTION_STOP here which killed the service — the rider could
-         * still voice-resume via [com.moto.voice.nlu.LocalIntercept.ResumeLastRadio]
-         * because `AppMemory.lastStationUrl` is set independently, but the notification
-         * disappeared and any next play required a fresh service start.
+         * Version history:
+         *   v1.3.6 — the nudge path sent ACTION_STOP which fully killed the service.
+         *   v1.3.7 — introduced this action as a "lighter" alternative that kept the
+         *     service alive with STATE_IDLE so [ACTION_RESUME] could re-prepare
+         *     instantly.
+         *   v1.3.18 — REVERSED THE v1.3.7 DESIGN. Field log 1783943626214 proved that
+         *     keeping the service+MediaSession alive at STATE_IDLE created a system-
+         *     level registry contamination: our zombie session competed with YouTube
+         *     and Spotify for media-button routing and audio focus, producing the
+         *     "everything silent" symptom that required force-stopping our app to
+         *     recover.
          *
-         * ACTION_YIELD_SESSION takes a lighter touch: [Player.stop] transitions the
-         * player to STATE_IDLE, which the framework reports as PlaybackState.STATE_STOPPED —
-         * dropping us out of the media button routing chain so KEYCODE_MEDIA_PLAY
-         * dispatched next lands on YouTube's session. The service stays alive and the
-         * foreground notification stays visible; a subsequent [ACTION_RESUME] detects
-         * the STATE_IDLE, re-prepares the same [currentUrl], and playback resumes.
+         * Current behaviour (v1.3.18): `player.stop()` immediately, then a 500ms
+         * grace-period handler invokes `stopPlayback()` which releases the
+         * MediaSession, tears down the foreground notification, and stopSelf()s.
+         * The grace period lets media-key routing settle before we vanish.
          *
-         * Common flow this enables — rider swaps radio ↔ YouTube on the highway:
-         *   1. "เปิดวิทยุ 106"     → FM playing
-         *   2. "เปิด YouTube ..."  → SCO teardown, YouTube intent, 3s later nudge
-         *                              → we YIELD, YouTube receives MEDIA_PLAY
-         *   3. Rider watches video → FM notification still visible (not "หยุด")
-         *   4. "เปิดวิทยุ"          → ResumeLastRadio → ACTION_PLAY → same URL,
-         *                              resume from cold — the notification never left,
-         *                              the service was never respawned.
+         * Resume path: rider says "เปิดวิทยุ" → [com.moto.voice.nlu.LocalIntercept.ResumeLastRadio]
+         * reads from [com.moto.voice.data.AppMemory] (URL persisted independently
+         * of this service) and issues a fresh ACTION_PLAY. Slightly slower than the
+         * hot-resume the v1.3.7 design promised, but no zombie session in the
+         * registry.
          */
         const val ACTION_YIELD_SESSION = "com.moto.voice.FM_YIELD_SESSION"
         const val EXTRA_STREAM_URL = "stream_url"
@@ -78,6 +80,13 @@ class FmPlayerService : MediaSessionService() {
         private const val TAG = "FmPlayerService"
         private const val NOTIF_ID = 43
         private const val MAX_RETRIES = 2
+        /**
+         * v1.3.18 — brief grace between ACTION_YIELD_SESSION receiving `player.stop()`
+         * and the service tearing itself down. Gives the media-key routing chain a
+         * beat to notice STATE_IDLE so a dispatched MEDIA_PLAY doesn't land on us
+         * during teardown.
+         */
+        private const val YIELD_GRACE_MS = 500L
     }
 
     private var mediaSession: MediaSession? = null
@@ -142,11 +151,29 @@ class FmPlayerService : MediaSessionService() {
             }
             ACTION_YIELD_SESSION -> {
                 Log.d(TAG, "yield-session requested (YouTube nudge)")
-                // Player.stop() → STATE_IDLE → session becomes ineligible for media
-                // button routing. Service + notification stay alive so ACTION_PLAY /
-                // ACTION_RESUME can revive from currentUrl. See ACTION_YIELD_SESSION kdoc.
+                // v1.3.18 root-cause fix — the old design kept the service AND
+                // MediaSession alive after yield, on the theory that ACTION_RESUME
+                // could re-prepare the same URL instantly. Field log 1783943626214
+                // proved this created a system-level regression: our yielded
+                // MediaSession stayed in MediaSessionManager's registry, competing
+                // with YouTube/Spotify for media button routing and audio focus,
+                // making the "everything silent" symptom persist until force-stop.
+                //
+                // New behaviour: player.stop() + FmPlaybackState + then stopPlayback()
+                // via handler after a 500ms grace period. stopPlayback() releases the
+                // MediaSession, tears down the foreground notification, and stopSelf()s.
+                // Rider can still resume via LocalIntercept.ResumeLastRadio because
+                // the URL + label + frequency are persisted in AppMemory.rememberStation
+                // (called in VoiceCommandPipeline.startFm before the service ever ran).
+                //
+                // Rule locked in CLAUDE.md v1.3.19: NEVER leave a foreground service
+                // idle-but-alive with a registered MediaSession.
                 mediaSession?.player?.stop()
                 FmPlaybackState.setPlaying(false)
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    Log.d(TAG, "yield-session grace period elapsed — releasing service")
+                    stopPlayback()
+                }, YIELD_GRACE_MS)
             }
             ACTION_RESUME -> {
                 Log.d(TAG, "resume requested")
