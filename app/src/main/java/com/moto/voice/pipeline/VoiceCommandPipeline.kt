@@ -1108,6 +1108,16 @@ class VoiceCommandPipeline(
         // remained paused. Pre-pausing before the intent gives the nudge check a clean
         // "silent → active" transition to measure.
         prepauseIfMusicActive(entry)
+        // v1.3.17 — field log 1783910343077 showed the "switch to another YouTube video"
+        // path silently keeping the OLD video playing: user says "เปิด YouTube X" while
+        // video A is playing, deep link for X fires, but YouTube's session stays on A.
+        // The nudge poll sees STATE_PLAYING and declares success (playbackState="playing",
+        // mediaCtrlUsed=true) without noticing it's the wrong video. Root cause: KEYCODE_MEDIA_PAUSE
+        // from prepause is ignorable — some apps interpret "pause then deep link" as
+        // "resume current video". Stopping YouTube's controller directly is a method call
+        // that can't be swallowed and clears the session so the deep link is treated as
+        // "load fresh video X" rather than "resume A".
+        stopYoutubeControllerIfActive()
 
         fun view(uri: Uri) = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val pm = context.packageManager
@@ -1132,7 +1142,33 @@ class VoiceCommandPipeline(
                 if (!it) entry.error = "youtube search failed"
             }
         }
-        if (launched) scheduleYoutubeNudge(entry)
+        if (launched) scheduleYoutubeNudge(entry, expectedVideoId = videoId)
+    }
+
+    /**
+     * v1.3.17 — direct-controller stop for YouTube. Called before firing a new
+     * deep-link so YouTube's session is cleared and the intent isn't interpreted
+     * as "resume the current video". No-op if:
+     *   * user hasn't granted notification-listener access (no controller),
+     *   * YouTube app has no active session (already stopped),
+     *   * YouTube's session is already STATE_STOPPED / STATE_NONE.
+     *
+     * `runCatching` guards the call — if the controller has become stale between
+     * our lookup and the transportControls.stop() call, we ignore and move on;
+     * the deep-link will still fire, just without the guarantee that YouTube
+     * was cleared first.
+     */
+    private fun stopYoutubeControllerIfActive() {
+        val ctrl = com.moto.voice.media.MediaSessions.controllerFor(
+            context, com.moto.voice.media.MediaSessions.YOUTUBE_PKG,
+        ) ?: return
+        val state = ctrl.playbackState?.state ?: return
+        val isActive = state == android.media.session.PlaybackState.STATE_PLAYING ||
+                       state == android.media.session.PlaybackState.STATE_PAUSED ||
+                       state == android.media.session.PlaybackState.STATE_BUFFERING
+        if (!isActive) return
+        Log.d(TAG, "openYoutube: stopping existing YouTube session (state=${com.moto.voice.media.MediaSessions.stateName(state)}) before deep link")
+        runCatching { ctrl.transportControls.stop() }
     }
 
     /**
@@ -1185,19 +1221,19 @@ class VoiceCommandPipeline(
      * Uses a [Handler] because the pipeline's scope is torn down as soon as finish()
      * runs — this task needs to outlive the interaction.
      */
-    private fun scheduleYoutubeNudge(entry: DebugEntry) {
+    private fun scheduleYoutubeNudge(entry: DebugEntry, expectedVideoId: String? = null) {
         val appCtx = context.applicationContext
         val handler = Handler(Looper.getMainLooper())
         // Fork by permission: presence of listener permission gates the polling path.
         if (com.moto.voice.media.MediaSessions.hasPermission(appCtx)) {
-            scheduleYoutubeNudgeWithController(appCtx, handler, entry)
+            scheduleYoutubeNudgeWithController(appCtx, handler, entry, expectedVideoId)
         } else {
             scheduleYoutubeNudgeFallback(appCtx, handler, entry)
         }
     }
 
     private fun scheduleYoutubeNudgeWithController(
-        appCtx: Context, handler: Handler, entry: DebugEntry,
+        appCtx: Context, handler: Handler, entry: DebugEntry, expectedVideoId: String?,
     ) {
         val pollStartAt = System.currentTimeMillis() + YOUTUBE_NUDGE_INITIAL_DELAY_MS
         val pollWindowEndAt = pollStartAt + YOUTUBE_NUDGE_POLL_WINDOW_MS
@@ -1211,8 +1247,27 @@ class VoiceCommandPipeline(
                 entry.playbackState = com.moto.voice.media.MediaSessions.stateName(state)
                 entry.mediaCtrlUsed = true
                 if (state == android.media.session.PlaybackState.STATE_PLAYING) {
-                    Log.d(TAG, "youtube nudge: controller reports STATE_PLAYING — confirmed")
-                    maybeSpeakPlayConfirmed(appCtx)
+                    // v1.3.17 — verify metadata references the expected videoId
+                    // before declaring victory. Field log 1783910343077 showed
+                    // "same video keeps playing" because we accepted STATE_PLAYING
+                    // as sufficient — but it was the OLD video, not the newly
+                    // deep-linked one. If mediaId mismatches, keep polling; YouTube
+                    // may still be swapping in the new video.
+                    if (isCorrectVideo(controller, expectedVideoId)) {
+                        Log.d(TAG, "youtube nudge: controller reports STATE_PLAYING with matching videoId — confirmed")
+                        maybeSpeakPlayConfirmed(appCtx)
+                        return@Runnable
+                    }
+                    if (System.currentTimeMillis() < pollWindowEndAt) {
+                        Log.d(TAG, "youtube nudge: STATE_PLAYING but wrong videoId — waiting for switch")
+                        handler.postDelayed(poll, YOUTUBE_NUDGE_POLL_INTERVAL_MS)
+                        return@Runnable
+                    }
+                    // Poll exhausted still on wrong video — tell the rider so they
+                    // know it didn't switch (better than silently confirming).
+                    Log.w(TAG, "youtube nudge: still playing wrong video after full poll window")
+                    entry.error = ((entry.error ?: "") + " wrong_video_playing").trim()
+                    speakOutOfPipeline(appCtx, ErrorSpeech.MEDIA_OPENED_NOT_PLAYING)
                     return@Runnable
                 }
                 if (System.currentTimeMillis() >= pollWindowEndAt) {
@@ -1251,6 +1306,30 @@ class VoiceCommandPipeline(
             handler.postDelayed(poll, YOUTUBE_NUDGE_POLL_INTERVAL_MS)
         }
         handler.postDelayed(poll, YOUTUBE_NUDGE_INITIAL_DELAY_MS)
+    }
+
+    /**
+     * v1.3.17 — verify the MediaController is playing the specific video the
+     * pipeline asked for, not the previous one YouTube was showing. Compares the
+     * [android.media.MediaMetadata.METADATA_KEY_MEDIA_ID] against [expectedVideoId]:
+     *
+     *   * null [expectedVideoId] (search-intent path, no known ID) → true (can't verify).
+     *   * no metadata OR blank mediaId → true (some YouTube states don't publish it
+     *     during transitions; be lenient rather than false-negative).
+     *   * mediaId contains [expectedVideoId] as a substring → true. YouTube typically
+     *     publishes a URI like "https://www.youtube.com/watch?v=XXX" so substring
+     *     match works whether the raw ID or the URI is exposed.
+     *   * mediaId is present and doesn't contain the ID → false (wrong video).
+     */
+    private fun isCorrectVideo(
+        controller: android.media.session.MediaController,
+        expectedVideoId: String?,
+    ): Boolean {
+        if (expectedVideoId.isNullOrBlank()) return true
+        val md = controller.metadata ?: return true
+        val id = md.getString(android.media.MediaMetadata.METADATA_KEY_MEDIA_ID)
+        if (id.isNullOrBlank()) return true
+        return id.contains(expectedVideoId, ignoreCase = true)
     }
 
     /**

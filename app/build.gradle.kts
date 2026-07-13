@@ -11,8 +11,8 @@ android {
         applicationId = "com.moto.voice"
         minSdk = 26
         targetSdk = 34
-        versionCode = 22
-        versionName = "1.3.16"
+        versionCode = 23
+        versionName = "1.3.17"
     }
 
     buildTypes {
