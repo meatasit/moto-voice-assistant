@@ -156,6 +156,29 @@ data class DebugEntry(
      * matching over time.
      */
     var mediaCtrlPkgMiss: String? = null,
+
+    /**
+     * v1.3.20 sprint rule #3 — the package name each media operation targeted.
+     * Populated by [com.moto.voice.media.MediaOrchestrator] on every op so the debug
+     * log can answer "who did we command, and what happened" without ambiguity.
+     */
+    var mediaTargetPkg: String? = null,
+
+    /**
+     * v1.3.20 sprint rule #3 — semicolon-separated list of operations MediaOrchestrator
+     * performed this interaction (e.g. "openYoutube→VID123;pauseTarget→com.spotify.music").
+     * Reads chronologically left→right so field logs can trace what actually happened.
+     */
+    var mediaOperations: String? = null,
+
+    /**
+     * v1.3.20 sprint part 2 — set true when the pipeline deep-linked into a target app
+     * but the app's MediaSession never appeared within the poll window (field log
+     * 1784028862496: mediaCtrlPkgMiss=com.spotify.music on every youtube_play, YouTube
+     * session never created — deep-link likely Background-Activity-Launch blocked while
+     * screen was locked). See FinishReason.LAUNCH_BLOCKED.
+     */
+    var launchBlocked: Boolean = false,
 ) {
     fun time(): String = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date(timestamp))
 
@@ -181,6 +204,9 @@ data class DebugEntry(
         if (mediaCtrlUsed) append("  mediaCtrl:used")
         if (playbackState != null) append("  playback:${playbackState}")
         if (mediaCtrlPkgMiss != null) append("  pkgMiss:${mediaCtrlPkgMiss}")
+        if (mediaTargetPkg != null) append("  target:${mediaTargetPkg}")
+        if (mediaOperations != null) append("  ops:${mediaOperations}")
+        if (launchBlocked) append("  launch:blocked")
         if (finishReason != null) append("  end:${finishReason}")
         if (error != null) append("  ⚠️ $error")
     }
@@ -291,6 +317,16 @@ object FinishReason {
      * later stages may overwrite as they process the follow-up command.
      */
     const val FOLLOWUP_COMMAND = "followup_command"
+    /**
+     * v1.3.20 sprint part 2 — the pipeline fired a deep-link intent (typically
+     * YouTube) but the target app's MediaSession never appeared within the poll
+     * window. Field log 1784028862496 evidence: mediaCtrlPkgMiss=com.spotify.music
+     * on every youtube_play attempt. Most likely Background Activity Launch
+     * restriction while the screen was locked. Pipeline speaks
+     * [com.moto.voice.nlu.ErrorSpeech.LAUNCH_BLOCKED_LOCKED] so the rider hears
+     * an honest answer instead of silence + a wrong-app nudge.
+     */
+    const val LAUNCH_BLOCKED = "launch_blocked"
 }
 
 object DebugLog {

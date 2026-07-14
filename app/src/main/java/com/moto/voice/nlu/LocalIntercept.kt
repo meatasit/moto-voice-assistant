@@ -50,6 +50,16 @@ object LocalIntercept {
          * KEYCODE_MEDIA_REWIND. Positive = forward, negative = backward.
          */
         data class Seek(val deltaSeconds: Int) : Intercept()
+
+        /**
+         * v1.3.20 sprint rule #2 — "เล่นต่อ" / "เล่น YouTube ต่อ" / "เล่น Spotify ต่อ".
+         * Caught locally BEFORE the webhook so the target-package decision is made by
+         * our code (which knows what WE opened), not by the LLM (which can't tell which
+         * app is active). appHint is the raw app name the rider said, or null if they
+         * said "เล่นต่อ" alone — in which case MediaOrchestrator falls back to
+         * MediaSessionMemory.lastOpenedApp.
+         */
+        data class PlayContinue(val appHint: String?) : Intercept()
     }
 
     fun match(text: String): Intercept {
@@ -73,6 +83,18 @@ object LocalIntercept {
         // rider says both in the same sentence.
         if (matchesAsPhrase(t, NEXT_VIDEO_PATTERNS)) return Intercept.NextVideo
         if (matchesAsPhrase(t, WHAT_IS_PLAYING_PATTERNS)) return Intercept.WhatIsPlaying
+
+        // v1.3.20 sprint — "เล่นต่อ" / "เล่น youtube ต่อ" / "กดเล่นต่อ" — caught
+        // locally so MediaOrchestrator picks the target from MediaSessionMemory
+        // instead of the LLM guessing which app should resume.
+        if (PLAY_CONTINUE_REGEX.containsMatchIn(t)) {
+            val hint = when {
+                YOUTUBE_HINT_REGEX.containsMatchIn(t) -> "youtube"
+                SPOTIFY_HINT_REGEX.containsMatchIn(t) -> "spotify"
+                else -> null
+            }
+            return Intercept.PlayContinue(hint)
+        }
 
         // v1.3.11 §2.3 — seek intercept. Runs LAST so any of the earlier command
         // families win first (e.g. "หยุดเลื่อน" is Stop, not Seek).
@@ -154,6 +176,17 @@ object LocalIntercept {
     private val WHAT_IS_PLAYING_PATTERNS = listOf(
         "เมื่อกี้อะไร", "เล่นอะไรอยู่", "อะไรอยู่", "นี่เพลงอะไร"
     )
+
+    /**
+     * v1.3.20 sprint rule #2 — "เล่นต่อ" and its variants. Requires เล่น|เปิด
+     * followed by (optional app name) then ต่อ so it does NOT collide with
+     * "อันต่อไป" (next-video) or bare "ต่อไป" — the latter has no เล่น/เปิด.
+     */
+    private val PLAY_CONTINUE_REGEX = Regex(
+        "(?:กด)?(?:เล่น|เปิด)\\s*(?:youtube|ยูทูป|ยูทูบ|spotify|สปอติฟาย)?\\s*ต่อ"
+    )
+    private val YOUTUBE_HINT_REGEX = Regex("(youtube|ยูทูป|ยูทูบ)")
+    private val SPOTIFY_HINT_REGEX = Regex("(spotify|สปอติฟาย)")
 
     /** Short help text spoken by TTS on Help intercept. */
     const val HELP_TEXT =

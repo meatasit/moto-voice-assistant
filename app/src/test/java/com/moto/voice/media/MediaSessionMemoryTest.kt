@@ -118,4 +118,39 @@ class MediaSessionMemoryTest {
         MediaSessionMemory.rememberYoutube(sample, playedId = "a", playedTitle = "title-a")
         assertTrue(MediaSessionMemory.hasContext())
     }
+
+    // ─── v1.3.20 sprint — lastOpenedApp + lastVideoId for MediaOrchestrator ───
+
+    @Test fun freshMemoryHasNoLastOpenedApp() {
+        assertNull(MediaSessionMemory.lastOpenedApp())
+        assertNull(MediaSessionMemory.lastVideoId())
+    }
+
+    @Test fun rememberYoutubeSetsLastOpenedAppAndVideoId() {
+        MediaSessionMemory.rememberYoutube(sample, playedId = "VID123", playedTitle = "title")
+        assertEquals(MediaSessions.YOUTUBE_PKG, MediaSessionMemory.lastOpenedApp())
+        assertEquals("VID123", MediaSessionMemory.lastVideoId())
+    }
+
+    @Test fun rememberFmClearsLastOpenedApp() {
+        MediaSessionMemory.rememberYoutube(sample, playedId = "VID123", playedTitle = "title")
+        MediaSessionMemory.rememberFm("FM 88")
+        // FM is our own service, not a deep-linkable app — refire target must be null.
+        assertNull(MediaSessionMemory.lastOpenedApp())
+        assertNull(MediaSessionMemory.lastVideoId())
+    }
+
+    @Test fun rememberOpenedAppRecordsArbitraryPackage() {
+        MediaSessionMemory.rememberOpenedApp(MediaOrchestrator.SPOTIFY_PKG, videoId = null)
+        assertEquals(MediaOrchestrator.SPOTIFY_PKG, MediaSessionMemory.lastOpenedApp())
+        assertNull(MediaSessionMemory.lastVideoId())
+    }
+
+    @Test fun rememberOpenedAppOverwritesPreviousYoutube() {
+        MediaSessionMemory.rememberYoutube(sample, playedId = "VID123", playedTitle = "title")
+        MediaSessionMemory.rememberOpenedApp(MediaOrchestrator.SPOTIFY_PKG, videoId = null)
+        assertEquals(MediaOrchestrator.SPOTIFY_PKG, MediaSessionMemory.lastOpenedApp())
+        // Rider switched apps — no YouTube videoId to refire anymore.
+        assertNull(MediaSessionMemory.lastVideoId())
+    }
 }

@@ -189,6 +189,18 @@ object ErrorSpeech {
         "เปิดหน้าวิดีโอให้แล้ว แต่ยังไม่เล่นครับ",
     )
 
+    /**
+     * v1.3.20 sprint part 2 — the deep-link intent was fired but the target app's
+     * MediaSession NEVER registered (not even in "opened not playing" state).
+     * Almost certainly a Background Activity Launch block while the screen was
+     * locked. Honest report to the rider so they know to unlock the phone rather
+     * than assume the assistant is broken.
+     */
+    val LAUNCH_BLOCKED_LOCKED: String get() = pick(
+        "เปิดไม่ได้ตอนจอล็อคค่ะ ลองปลดล็อคก่อนนะคะ",
+        "เปิดไม่ได้ตอนจอล็อคครับ ลองปลดล็อคก่อนนะครับ",
+    )
+
     /** All 21 lines, in a stable order — used by the pre-synthesize cache warmer. */
     fun allSystemLines(): List<String> = listOf(
         THINKING, ONE_MORE_MOMENT,
@@ -209,6 +221,7 @@ object ErrorSpeech {
         TEACHING_HINT,
         SERVER_UNAVAILABLE,
         SEEK_ATTEMPTED, MEDIA_PLAY_CONFIRMED, MEDIA_OPENED_NOT_PLAYING,
+        LAUNCH_BLOCKED_LOCKED,
     )
 
     private fun pick(feminine: String, masculine: String): String =

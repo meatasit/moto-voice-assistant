@@ -5,16 +5,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.media.AudioManager
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
 import androidx.core.content.ContextCompat
-import com.moto.voice.actions.MediaStopper
 import com.moto.voice.audio.AudioFocusRouter
 import com.moto.voice.audio.BluetoothAudioRouter
 import com.moto.voice.audio.CellularCheck
@@ -40,6 +36,7 @@ import com.moto.voice.debug.ScoState
 import com.moto.voice.nlu.ErrorSpeech
 import com.moto.voice.media.FmPlaybackState
 import com.moto.voice.media.FmPlayerService
+import com.moto.voice.media.MediaOrchestrator
 import com.moto.voice.network.WebhookClient
 import com.moto.voice.network.WebhookResponse
 import com.moto.voice.nlu.LocalIntercept
@@ -91,23 +88,8 @@ private const val CONFIRM_MIN_LISTEN_MS = 8_000L
 private const val ANSWER_LISTEN_REMINDER_MS = 2_000L
 /** Spoken slot number for voice-call favorites — matches order of FavoritesStore slots 0..4. */
 private val FAVORITE_SLOT_WORDS = listOf("หนึ่ง", "สอง", "สาม", "สี่", "ห้า")
-/** Delay before checking whether the YouTube intent actually resulted in playback. Spec v1.3.6 §2 (fallback path). */
-private const val YOUTUBE_NUDGE_DELAY_MS = 3_000L
-/** v1.3.11 §3.1 — wait this long before first PlaybackState poll (deep-link + splash render time). */
-private const val YOUTUBE_NUDGE_INITIAL_DELAY_MS = 800L
-/** v1.3.11 §3.1 — how often to poll playbackState after the initial delay. */
-private const val YOUTUBE_NUDGE_POLL_INTERVAL_MS = 500L
-/** v1.3.11 §3.1 — total observation window before we conclude "not playing, call play()". */
-private const val YOUTUBE_NUDGE_POLL_WINDOW_MS = 9_000L  // v1.3.19: widened from 5s so active play() attempts have room to take effect
-/** v1.3.11 §3.1 — after controller.play(), wait this long for STATE_PLAYING to take effect. */
-
-// v1.3.19 — active nudge: how long to let the deep link settle before the first
-// play() attempt, max number of attempts, and minimum spacing between attempts.
-// The poll window is extended so a play() fired late in the window still has time
-// to transition through BUFFERING before we give up.
-private const val YOUTUBE_NUDGE_SETTLE_MS = 2_000L
-private const val YOUTUBE_NUDGE_MAX_PLAY_ATTEMPTS = 3
-private const val YOUTUBE_NUDGE_PLAY_RETRY_SPACING_MS = 1_500L
+// v1.3.20 sprint — YouTube-nudge timing constants relocated into
+// [com.moto.voice.media.MediaOrchestrator] (single owner of media ops).
 /**
  * Spec v1.3.8 A2 — 2 consecutive non-silence STT errors is when we start suspecting
  * the platform recognizer service is degrading and force the throttle+recreate path.
@@ -516,50 +498,45 @@ class VoiceCommandPipeline(
             LocalIntercept.Intercept.NextVideo -> handleNextVideo(entry)
             LocalIntercept.Intercept.WhatIsPlaying -> handleWhatIsPlaying()
             is LocalIntercept.Intercept.Seek -> handleSeek(intercept.deltaSeconds, entry)
+            is LocalIntercept.Intercept.PlayContinue -> handlePlayContinue(intercept.appHint, entry)
             LocalIntercept.Intercept.None -> Unit  // handled in caller
         }
         finish()
     }
 
     /**
-     * v1.3.11 §2 — dispatch a signed-seconds seek through the best available
-     * mechanism.
-     *
-     *   1. [MediaSessions.controllerFor] on the YouTube package → precise
-     *      seekTo(currentPosition + deltaMs). Speak the webhook's speak or a
-     *      built-in confirmation.
-     *   2. Any other active controller → precise seekTo on it too.
-     *   3. No controller (permission denied or nothing playing) → dispatch
-     *      KEYCODE_MEDIA_FAST_FORWARD / KEYCODE_MEDIA_REWIND and speak the
-     *      non-committal [ErrorSpeech.SEEK_ATTEMPTED] line — we can't verify
-     *      the app honoured the seek.
+     * v1.3.20 sprint rule #2 — "เล่นต่อ" / "เล่น YouTube ต่อ". Delegates to
+     * [MediaOrchestrator] which picks the target from either [appHint] or
+     * [com.moto.voice.media.MediaSessionMemory.lastOpenedApp], and refires the
+     * deep link if the target has no session (no more blind media-key dispatch).
+     */
+    private suspend fun handlePlayContinue(appHint: String?, entry: DebugEntry) {
+        MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
+        val result = MediaOrchestrator.playContinue(context, appHint, entry)
+        when (result) {
+            is MediaOrchestrator.Result.NoTarget ->
+                speakAndRemember(ErrorSpeech.WHAT_IS_PLAYING_NONE)
+            is MediaOrchestrator.Result.Success -> {
+                // Refired deep link — nudge polls until STATE_PLAYING then speaks
+                // MEDIA_PLAY_CONFIRMED itself. Speaking here would double up.
+            }
+            else -> speakAndRemember(ErrorSpeech.MEDIA_PLAY_CONFIRMED)
+        }
+    }
+
+    /**
+     * v1.3.11 §2 — dispatch a signed-seconds seek. All routing (target lookup,
+     * media-key fallback rules, no-permission handling) lives in [MediaOrchestrator]
+     * as of v1.3.20 sprint rule #1.
      */
     private suspend fun handleSeek(deltaSeconds: Int, entry: DebugEntry) {
-        val controller = com.moto.voice.media.MediaSessions.activeControllers(context).firstOrNull()
-        if (controller != null) {
-            val pos = controller.playbackState?.position ?: 0L
-            val target = (pos + deltaSeconds * 1000L).coerceAtLeast(0L)
-            entry.mediaCtrlUsed = true
-            entry.playbackState = com.moto.voice.media.MediaSessions.stateName(controller.playbackState?.state)
-            runCatching { controller.transportControls.seekTo(target) }
-                .onFailure { Log.w(TAG, "controller.seekTo failed", it) }
-            // v1.3.12 bug fix — if the video was paused (rider paused earlier or
-            // it was auto-paused by an ad ending), seekTo only changes the position;
-            // the rider still had to say "play" to resume. Unconditional play() after
-            // seek matches expected behaviour "skip and keep watching". Idempotent
-            // when already playing.
-            runCatching { controller.transportControls.play() }
-                .onFailure { Log.w(TAG, "controller.play after seek failed", it) }
-            speakAndRemember(if (deltaSeconds >= 0) "เลื่อนไปข้างหน้าให้แล้ว" else "ย้อนกลับให้แล้ว")
-        } else {
-            MediaStopper.dispatchMediaSeek(context, forward = deltaSeconds >= 0)
-            // v1.3.12 bug fix (fallback path) — KEYCODE_MEDIA_FAST_FORWARD/REWIND
-            // is a no-op on paused sessions for some apps. Dispatch MEDIA_PLAY
-            // right after so the rider gets the same "skip and keep watching"
-            // experience regardless of controller permission.
-            delay(200L)
-            MediaStopper.dispatchMediaPlay(context)
-            speakAndRemember(ErrorSpeech.SEEK_ATTEMPTED)
+        val result = MediaOrchestrator.seek(context, deltaSeconds, appHint = null, entry = entry)
+        when (result) {
+            is MediaOrchestrator.Result.CommandDispatched ->
+                speakAndRemember(if (deltaSeconds >= 0) "เลื่อนไปข้างหน้าให้แล้ว" else "ย้อนกลับให้แล้ว")
+            is MediaOrchestrator.Result.MediaKeyFallback ->
+                speakAndRemember(ErrorSpeech.SEEK_ATTEMPTED)
+            else -> speakAndRemember(ErrorSpeech.WHAT_IS_PLAYING_NONE)
         }
     }
 
@@ -579,7 +556,8 @@ class VoiceCommandPipeline(
         speakAndRemember("กำลังเปิด $title")
         com.moto.voice.media.MediaSessionMemory.advanceTo(next)
         releaseScoBeforeMedia(entry)
-        openYoutube(next.id, null, entry)
+        MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
+        MediaOrchestrator.openYoutube(context, next.id, null, entry)
         recordHistory(HistoryAction.YoutubeOpen(next.id, next.title))
         mediaActionStarted = true  // spec v1.3.9 §1.3
     }
@@ -856,18 +834,21 @@ class VoiceCommandPipeline(
             "seek" -> {
                 // v1.3.11 §2 — reuse the existing `frequency` field for signed
                 // seconds (spec: "frequency = วินาที, บวก=หน้า ลบ=หลัง, 0=สั่งเล่น").
-                // Zero means "start playing the current media" via controller.play().
+                // v1.3.20 sprint — n==0 goes through the same rule-#2 path as the local
+                // "เล่นต่อ" intercept so the target-package decision (last-opened-app +
+                // refire deep link if no session) is unified.
                 val n = (resp.frequency ?: 0.0).toInt()
                 if (n == 0) {
-                    val controller = com.moto.voice.media.MediaSessions.activeControllers(context).firstOrNull()
-                    if (controller != null) {
-                        entry.mediaCtrlUsed = true
-                        entry.playbackState = com.moto.voice.media.MediaSessions.stateName(controller.playbackState?.state)
-                        runCatching { controller.transportControls.play() }
-                    } else {
-                        MediaStopper.dispatchMediaPlay(context)
+                    MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
+                    val result = MediaOrchestrator.playContinue(context, appHint = null, entry = entry)
+                    // Only speak here if the nudge WON'T also speak — i.e. we didn't
+                    // fire a fresh deep link. Result.Success means "deep link refired,
+                    // nudge will confirm on STATE_PLAYING" so double-speech is avoided.
+                    if (result !is MediaOrchestrator.Result.Success) {
+                        speakAndRemember(resp.speak.ifBlank { ErrorSpeech.MEDIA_PLAY_CONFIRMED })
+                    } else if (resp.speak.isNotBlank()) {
+                        speakAndRemember(resp.speak)
                     }
-                    speakAndRemember(resp.speak.ifBlank { "เล่นต่อค่ะ" })
                 } else {
                     handleSeek(n, entry)
                     if (resp.speak.isNotBlank()) speakAndRemember(resp.speak)
@@ -1032,7 +1013,8 @@ class VoiceCommandPipeline(
             }
             speakAndRememberWithOpener(spoken)
             releaseScoBeforeMedia(entry)
-            openYoutube(chosen.id, resp.query, entry)
+            MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
+            MediaOrchestrator.openYoutube(context, chosen.id, resp.query, entry)
             recordHistory(HistoryAction.YoutubeOpen(chosen.id, chosen.title))
             // Spec v1.3.8 B5 — remember the videos list so "อันต่อไป" can advance.
             com.moto.voice.media.MediaSessionMemory.rememberYoutube(candidates, chosen.id, chosen.title)
@@ -1107,340 +1089,10 @@ class VoiceCommandPipeline(
         return top.first()
     }
 
-    private suspend fun openYoutube(videoId: String?, query: String?, entry: DebugEntry) {
-        // Spec v1.3.8 A1 — field log 1783611077863 showed 3 consecutive "เปิดรายการเรื่องเล่าเช้านี้"
-        // where only the middle interaction ever nudged (youtubeNudged=true). Root cause:
-        // the previous YouTube video was still decoding when the new intent fired, so
-        // AudioManager.isMusicActive stayed true 3s later → nudge SKIPPED → new video
-        // remained paused. Pre-pausing before the intent gives the nudge check a clean
-        // "silent → active" transition to measure.
-        prepauseIfMusicActive(entry)
-        // v1.3.17 — field log 1783910343077 showed the "switch to another YouTube video"
-        // path silently keeping the OLD video playing: user says "เปิด YouTube X" while
-        // video A is playing, deep link for X fires, but YouTube's session stays on A.
-        // The nudge poll sees STATE_PLAYING and declares success (playbackState="playing",
-        // mediaCtrlUsed=true) without noticing it's the wrong video. Root cause: KEYCODE_MEDIA_PAUSE
-        // from prepause is ignorable — some apps interpret "pause then deep link" as
-        // "resume current video". Stopping YouTube's controller directly is a method call
-        // that can't be swallowed and clears the session so the deep link is treated as
-        // "load fresh video X" rather than "resume A".
-        stopYoutubeControllerIfActive()
-
-        fun view(uri: Uri) = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        val pm = context.packageManager
-
-        val launched = if (videoId != null) {
-            val app = view(Uri.parse("vnd.youtube:$videoId"))
-            val web = view(Uri.parse("https://www.youtube.com/watch?v=$videoId"))
-            val target = if (app.resolveActivity(pm) != null) app else web
-            runCatching { context.startActivity(target) }.isSuccess.also {
-                if (!it) entry.error = "youtube launch failed"
-            }
-        } else {
-            val q = query?.takeIf { it.isNotBlank() } ?: return
-            val search = Intent(Intent.ACTION_SEARCH).apply {
-                setPackage("com.google.android.youtube")
-                putExtra("query", q)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            val target = if (search.resolveActivity(pm) != null) search
-                else view(Uri.parse("https://www.youtube.com/results?search_query=${Uri.encode(q)}"))
-            runCatching { context.startActivity(target) }.isSuccess.also {
-                if (!it) entry.error = "youtube search failed"
-            }
-        }
-        if (launched) scheduleYoutubeNudge(entry, expectedVideoId = videoId)
-    }
-
-    /**
-     * v1.3.18 — direct-controller PAUSE for YouTube (was stop() in v1.3.17).
-     *
-     * Field log 1783943626214 traced the regression: transportControls.stop()
-     * destroyed YouTube's session, so our nudge poll couldn't find a
-     * MediaController for YouTube (mediaCtrlPkgMiss=com.spotify.music on
-     * EVERY entry). The fallback then dispatched MEDIA_PLAY blindly, waking
-     * Spotify instead of YouTube — Spotify grabbed audio focus, everything
-     * silent, force-stopping our app was the only recovery.
-     *
-     * Now uses pause(): the YouTube session STAYS registered so subsequent
-     * controllerFor() calls succeed and the deep-link is routed through
-     * YouTube's existing session (which handles the new video correctly).
-     * Also gates the pause on state — no-op if already paused so we don't
-     * churn the session state.
-     *
-     * Rule locked in CLAUDE.md v1.3.19: NEVER call transportControls.stop()
-     * on another app's MediaController. pause() only.
-     */
-    private fun stopYoutubeControllerIfActive() {
-        val ctrl = com.moto.voice.media.MediaSessions.controllerFor(
-            context, com.moto.voice.media.MediaSessions.YOUTUBE_PKG,
-        ) ?: return
-        val state = ctrl.playbackState?.state ?: return
-        // Only pause when actually playing/buffering. PAUSED is already what
-        // we'd get; touching a PAUSED session again just wastes a call.
-        val shouldPause = state == android.media.session.PlaybackState.STATE_PLAYING ||
-                          state == android.media.session.PlaybackState.STATE_BUFFERING
-        if (!shouldPause) return
-        Log.d(TAG, "openYoutube: pausing existing YouTube session (state=${com.moto.voice.media.MediaSessions.stateName(state)}) before deep link")
-        runCatching { ctrl.transportControls.pause() }
-    }
-
-    /**
-     * Pre-pause step for spec v1.3.8 A1 — described in [openYoutube] kdoc. Two things
-     * happen together so both music sources go quiet:
-     *
-     *   1. Yield our own FmPlayerService session (idempotent — no-op if we're not
-     *      running) so a subsequent MEDIA_PLAY key routes to YouTube's session.
-     *   2. Dispatch KEYCODE_MEDIA_PAUSE to whoever else holds media focus (previous
-     *      YouTube tab / Spotify / etc.).
-     *
-     * Then 400ms breathe for the pause to take effect, before the caller fires the
-     * deep-link intent. Only runs when [AudioManager.isMusicActive] is true — a fresh
-     * silent state doesn't need the treatment and would waste the 400ms delay.
-     */
-    private suspend fun prepauseIfMusicActive(entry: DebugEntry) {
-        val am = context.getSystemService(AudioManager::class.java) ?: return
-        if (!am.isMusicActive) return
-        Log.d(TAG, "youtube pre-pause: music currently active — quiescing before launch")
-        runCatching {
-            context.startService(
-                Intent(context, FmPlayerService::class.java)
-                    .setAction(FmPlayerService.ACTION_YIELD_SESSION)
-            )
-        }
-        MediaStopper.dispatchMediaPause(context)
-        delay(400L)
-        entry.youtubePrepaused = true
-    }
-
-    /**
-     * v1.3.11 §3.1 — controller-driven YouTube nudge, with fallback to the old
-     * isMusicActive + KEYCODE_MEDIA_PLAY dance when the notification-listener
-     * permission is denied.
-     *
-     * Flow when we HAVE controller access:
-     *   1. Poll YouTube's controller playbackState every 500ms up to 5s.
-     *   2. STATE_PLAYING observed → success. Speak MEDIA_PLAY_CONFIRMED (short
-     *      "เล่นแล้วค่ะ") if the rider hasn't disabled the confirm-media-start
-     *      setting AND the audio mode is MODE_NORMAL (spec approval note:
-     *      "never speak while audio route is mid-switch SCO→A2DP").
-     *   3. Not playing after the poll window → controller.play() + poll 1s more.
-     *   4. Still not → speak MEDIA_OPENED_NOT_PLAYING ("เปิดหน้าวิดีโอให้แล้ว
-     *      แต่ยังไม่เล่นค่ะ") so the rider knows to tap the phone.
-     *
-     * Flow without controller access (fallback — v1.3.6/§2 behaviour preserved):
-     *   * 3s isMusicActive check. If active → done. If not → yield FM session
-     *     + dispatchMediaPlay.
-     *
-     * Uses a [Handler] because the pipeline's scope is torn down as soon as finish()
-     * runs — this task needs to outlive the interaction.
-     */
-    private fun scheduleYoutubeNudge(entry: DebugEntry, expectedVideoId: String? = null) {
-        val appCtx = context.applicationContext
-        val handler = Handler(Looper.getMainLooper())
-        // Fork by permission: presence of listener permission gates the polling path.
-        if (com.moto.voice.media.MediaSessions.hasPermission(appCtx)) {
-            scheduleYoutubeNudgeWithController(appCtx, handler, entry, expectedVideoId)
-        } else {
-            scheduleYoutubeNudgeFallback(appCtx, handler, entry)
-        }
-    }
-
-    private fun scheduleYoutubeNudgeWithController(
-        appCtx: Context, handler: Handler, entry: DebugEntry, expectedVideoId: String?,
-    ) {
-        val pollStartAt = System.currentTimeMillis() + YOUTUBE_NUDGE_INITIAL_DELAY_MS
-        val pollWindowEndAt = pollStartAt + YOUTUBE_NUDGE_POLL_WINDOW_MS
-        var playAttempts = 0
-        var lastPlayAttemptAt = 0L
-        lateinit var poll: Runnable
-        poll = Runnable {
-            val controller = com.moto.voice.media.MediaSessions.controllerFor(
-                appCtx, com.moto.voice.media.MediaSessions.YOUTUBE_PKG,
-            )
-            if (controller != null) {
-                val state = controller.playbackState?.state
-                entry.playbackState = com.moto.voice.media.MediaSessions.stateName(state)
-                entry.mediaCtrlUsed = true
-                if (state == android.media.session.PlaybackState.STATE_PLAYING) {
-                    // v1.3.17 — verify metadata references the expected videoId
-                    // before declaring victory. Field log 1783910343077 showed
-                    // "same video keeps playing" because we accepted STATE_PLAYING
-                    // as sufficient — but it was the OLD video, not the newly
-                    // deep-linked one. If mediaId mismatches, keep polling; YouTube
-                    // may still be swapping in the new video.
-                    if (isCorrectVideo(controller, expectedVideoId)) {
-                        Log.d(TAG, "youtube nudge: controller reports STATE_PLAYING with matching videoId — confirmed")
-                        maybeSpeakPlayConfirmed(appCtx)
-                        return@Runnable
-                    }
-                    if (System.currentTimeMillis() < pollWindowEndAt) {
-                        Log.d(TAG, "youtube nudge: STATE_PLAYING but wrong videoId — waiting for switch")
-                        handler.postDelayed(poll, YOUTUBE_NUDGE_POLL_INTERVAL_MS)
-                        return@Runnable
-                    }
-                    // Poll exhausted still on wrong video — tell the rider so they
-                    // know it didn't switch (better than silently confirming).
-                    Log.w(TAG, "youtube nudge: still playing wrong video after full poll window")
-                    entry.error = ((entry.error ?: "") + " wrong_video_playing").trim()
-                    speakOutOfPipeline(appCtx, ErrorSpeech.MEDIA_OPENED_NOT_PLAYING)
-                    return@Runnable
-                }
-                // v1.3.19 — field log 1783995471690: videos routinely sit in STATE_ERROR
-                // or STATE_PAUSED after the deep link, and the rider had to say "เล่นต่อ"
-                // (the seek-0 path, which calls controller.play()) to get sound EVERY
-                // time. Pre-v1.3.19 the poll watched passively for 5s then tried play()
-                // once at the very end with a single 1s re-check — a normal
-                // ERROR → BUFFERING → PLAYING transition couldn't satisfy that timing.
-                //
-                // Fix (behavior in [NudgeDecider]): once settled, if the session reports
-                // stuck (PAUSED / STOPPED / ERROR / NONE / null) → play() now. Up to
-                // YOUTUBE_NUDGE_MAX_PLAY_ATTEMPTS attempts, spaced by
-                // YOUTUBE_NUDGE_PLAY_RETRY_SPACING_MS. BUFFERING (and other transitional
-                // states) counts as progress — keep polling, don't re-nudge.
-                val decision = NudgeDecider.decide(
-                    state = state,
-                    nowMs = System.currentTimeMillis(),
-                    pollStartAt = pollStartAt,
-                    pollWindowEndAt = pollWindowEndAt,
-                    playAttempts = playAttempts,
-                    lastPlayAttemptAt = lastPlayAttemptAt,
-                    maxAttempts = YOUTUBE_NUDGE_MAX_PLAY_ATTEMPTS,
-                    settleMs = YOUTUBE_NUDGE_SETTLE_MS,
-                    retrySpacingMs = YOUTUBE_NUDGE_PLAY_RETRY_SPACING_MS,
-                )
-                when (decision) {
-                    NudgeDecider.Action.PlayNow -> {
-                        playAttempts++
-                        lastPlayAttemptAt = System.currentTimeMillis()
-                        entry.youtubeNudged = true
-                        Log.w(TAG, "youtube nudge: state=${com.moto.voice.media.MediaSessions.stateName(state)} — controller.play() attempt $playAttempts/$YOUTUBE_NUDGE_MAX_PLAY_ATTEMPTS")
-                        runCatching { controller.transportControls.play() }
-                        handler.postDelayed(poll, YOUTUBE_NUDGE_POLL_INTERVAL_MS)
-                    }
-                    NudgeDecider.Action.GiveUp -> {
-                        entry.playbackState = com.moto.voice.media.MediaSessions.stateName(state)
-                        Log.w(TAG, "youtube nudge: still not playing after ${YOUTUBE_NUDGE_POLL_WINDOW_MS}ms and $playAttempts play attempts")
-                        speakOutOfPipeline(appCtx, ErrorSpeech.MEDIA_OPENED_NOT_PLAYING)
-                    }
-                    NudgeDecider.Action.KeepPolling -> {
-                        handler.postDelayed(poll, YOUTUBE_NUDGE_POLL_INTERVAL_MS)
-                    }
-                }
-                return@Runnable
-            }
-            // v1.3.15 bug fix — the previous version fell back to media-key path on
-            // the FIRST poll tick if YouTube's MediaController hadn't registered yet.
-            // Cold-start of YouTube from a deep-link routinely takes > 800ms to
-            // register the session, so field log 1783876501024 showed BOTH YouTube
-            // opens with mediaCtrlPkgMiss="none" + video not playing. Fix: keep
-            // polling until pollWindowEndAt is truly reached, only THEN fall back.
-            if (System.currentTimeMillis() >= pollWindowEndAt) {
-                val available = com.moto.voice.media.MediaSessions.activePackagesForDebug(appCtx)
-                entry.mediaCtrlPkgMiss = if (available.isEmpty()) "none" else available.joinToString(",")
-                Log.w(TAG, "youtube nudge: no controller for ${com.moto.voice.media.MediaSessions.YOUTUBE_PKG} after full poll window — falling back. available=$available")
-                scheduleYoutubeNudgeFallback(appCtx, handler, entry)
-                return@Runnable
-            }
-            // Still inside the window — YouTube may register its session on the
-            // next tick. Reschedule and keep looking.
-            handler.postDelayed(poll, YOUTUBE_NUDGE_POLL_INTERVAL_MS)
-        }
-        handler.postDelayed(poll, YOUTUBE_NUDGE_INITIAL_DELAY_MS)
-    }
-
-    /**
-     * v1.3.17 — verify the MediaController is playing the specific video the
-     * pipeline asked for, not the previous one YouTube was showing. Compares the
-     * [android.media.MediaMetadata.METADATA_KEY_MEDIA_ID] against [expectedVideoId]:
-     *
-     *   * null [expectedVideoId] (search-intent path, no known ID) → true (can't verify).
-     *   * no metadata OR blank mediaId → true (some YouTube states don't publish it
-     *     during transitions; be lenient rather than false-negative).
-     *   * mediaId contains [expectedVideoId] as a substring → true. YouTube typically
-     *     publishes a URI like "https://www.youtube.com/watch?v=XXX" so substring
-     *     match works whether the raw ID or the URI is exposed.
-     *   * mediaId is present and doesn't contain the ID → false (wrong video).
-     */
-    private fun isCorrectVideo(
-        controller: android.media.session.MediaController,
-        expectedVideoId: String?,
-    ): Boolean {
-        if (expectedVideoId.isNullOrBlank()) return true
-        val md = controller.metadata ?: return true
-        val id = md.getString(android.media.MediaMetadata.METADATA_KEY_MEDIA_ID)
-        if (id.isNullOrBlank()) return true
-        return id.contains(expectedVideoId, ignoreCase = true)
-    }
-
-    /**
-     * v1.3.11 §3.1 — spoken only after STATE_PLAYING is observed AND the audio
-     * routing is settled (MODE_NORMAL). Approval note: "never speak while audio
-     * route is mid-switch SCO→A2DP". Also gated on the [AppSettings.confirmMediaStart]
-     * toggle so riders who prefer silence can turn it off.
-     */
-    private fun maybeSpeakPlayConfirmed(appCtx: Context) {
-        if (!settings.confirmMediaStart) return
-        val am = appCtx.getSystemService(AudioManager::class.java)
-        if (am != null && am.mode != AudioManager.MODE_NORMAL) {
-            Log.d(TAG, "play-confirmed: audio mode=${am.mode} !=NORMAL — skip TTS to avoid mid-switch clash")
-            return
-        }
-        speakOutOfPipeline(appCtx, ErrorSpeech.MEDIA_PLAY_CONFIRMED)
-    }
-
-    /**
-     * Spawn a short-lived [ThaiTTS] to speak a line AFTER the pipeline's own
-     * scope is dead. Used by the nudge polling task which runs on a Handler
-     * post-finish. Never blocks; TTS is fire-and-forget.
-     */
-    private fun speakOutOfPipeline(appCtx: Context, text: String) {
-        val tts = ThaiTTS(appCtx)
-        tts.speak(text) { runCatching { tts.stop() } }
-    }
-
-    /**
-     * v1.3.18 fallback path — was "dispatch MEDIA_PLAY unconditionally" in v1.3.11.
-     *
-     * Root cause traced by field log 1783943626214: dispatching MEDIA_PLAY when
-     * YouTube's session hadn't registered yet routed the key to whatever
-     * session WAS active — in that log, Spotify. Spotify woke up, grabbed audio
-     * focus, blocked YouTube from playing. Everything silent.
-     *
-     * New rule: verify YouTube is actually in the active sessions list BEFORE
-     * dispatching MEDIA_PLAY. If YouTube isn't there, dispatching would wake
-     * the wrong app — so we skip the dispatch and speak MEDIA_OPENED_NOT_PLAYING
-     * instead, telling the rider to tap the phone. This deliberately trades
-     * the "sometimes YouTube gets a nudge that works" case for "never wake
-     * the wrong app". Rule locked in CLAUDE.md v1.3.19.
-     */
-    private fun scheduleYoutubeNudgeFallback(
-        appCtx: Context, handler: Handler, entry: DebugEntry,
-    ) {
-        handler.postDelayed({
-            val am = appCtx.getSystemService(AudioManager::class.java) ?: return@postDelayed
-            if (am.isMusicActive) {
-                Log.d(TAG, "youtube nudge check: music active — no nudge")
-                return@postDelayed
-            }
-            // v1.3.18 — verify YouTube is in the active session list before dispatching.
-            // If it's not, MEDIA_PLAY would wake whichever other app IS registered
-            // (Spotify in the field-log case) → wrong app grabs focus → silent.
-            val activePkgs = com.moto.voice.media.MediaSessions.activePackagesForDebug(appCtx)
-            val youtubeActive = activePkgs.contains(com.moto.voice.media.MediaSessions.YOUTUBE_PKG)
-            entry.mediaCtrlPkgMiss = if (activePkgs.isEmpty()) "none" else activePkgs.joinToString(",")
-            if (!youtubeActive) {
-                Log.w(TAG, "youtube nudge fallback: YouTube session NOT in active list; dispatching would wake wrong app. active=$activePkgs")
-                speakOutOfPipeline(appCtx, ErrorSpeech.MEDIA_OPENED_NOT_PLAYING)
-                return@postDelayed
-            }
-            Log.w(TAG, "youtube nudge: music inactive 3s after open, YouTube session present — dispatching MEDIA_PLAY")
-            handler.postDelayed({
-                MediaStopper.dispatchMediaPlay(appCtx)
-                entry.youtubeNudged = true
-            }, 250L)
-        }, YOUTUBE_NUDGE_DELAY_MS)
-    }
+    // v1.3.20 sprint — openYoutube / prepauseIfMusicActive / stopYoutubeControllerIfActive /
+    // scheduleYoutubeNudge* / isCorrectVideo / maybeSpeakPlayConfirmed / speakOutOfPipeline
+    // consolidated into [com.moto.voice.media.MediaOrchestrator] (single owner of media ops).
+    // See CLAUDE.md iron rules #1–#3.
 
     // ─── FM radio ────────────────────────────────────────────────────────────
 
@@ -1499,43 +1151,13 @@ class VoiceCommandPipeline(
         sendToFm(FmPlayerService.ACTION_STOP)
         delay(300)  // let our MediaSession release
 
-        // v1.3.11 §3.2 — prefer MediaController.transportControls.pause() over
-        // KEYCODE_MEDIA_PAUSE because some OEMs intercept media keys before they
-        // reach the target session. Controller call is a direct method invocation
-        // and can't be swallowed. Fall back to media-key if no controller (missing
-        // notification-listener permission or no active session).
-        // v1.3.19 — field log 1783995471690: "ปิด YouTube" repeatedly did nothing while a
-        // YouTube music compilation kept playing. Root cause: this block paused only the
-        // FIRST controller whose state == STATE_PLAYING. YouTube's session was sitting in
-        // STATE_ERROR (stale state while audio still flowing), so it never matched; the
-        // media-key fallback then routed to the most-recently-active session — Spotify —
-        // pausing the wrong app. Fix: "stop" means EVERYTHING stops. Pause every active
-        // controller regardless of reported state (pause() on an already-paused/stopped
-        // session is a harmless no-op), and only fall back to the untargeted media key
-        // when there are no controllers at all (no notification-listener permission).
-        val controllers = com.moto.voice.media.MediaSessions.activeControllers(context)
-        // v1.3.19 — filter through [StopSequenceTargets.shouldPauseAtState] (identity)
-        // so the "pause every state" invariant is anchored in a helper with unit-test
-        // coverage. A future edit that tries to smuggle a state filter back in has to
-        // modify the helper AND break the tests, not just add a .filter { } clause here.
-        val targets = controllers.filter {
-            StopSequenceTargets.shouldPauseAtState(it.playbackState?.state)
-        }
-        if (targets.isNotEmpty()) {
-            entry?.mediaCtrlUsed = true
-            entry?.playbackState = targets.joinToString(",") {
-                "${it.packageName.substringAfterLast('.')}=" +
-                    com.moto.voice.media.MediaSessions.stateName(it.playbackState?.state)
-            }
-            targets.forEach { ctrl ->
-                Log.d(TAG, "stop: pausing via MediaController for ${ctrl.packageName} (state=${com.moto.voice.media.MediaSessions.stateName(ctrl.playbackState?.state)})")
-                runCatching { ctrl.transportControls.pause() }
-                    .onFailure { Log.w(TAG, "controller.pause failed for ${ctrl.packageName}", it) }
-            }
-        } else {
-            Log.d(TAG, "stop: no controllers at all — dispatching KEYCODE_MEDIA_PAUSE")
-            MediaStopper.dispatchExternalPauseOnly(context)
-        }
+        // v1.3.20 sprint rule #1 — controller pause loop lives in MediaOrchestrator
+        // (single owner of media ops). Orchestrator applies StopSequenceTargets +
+        // the "media key only when no permission" rule internally. Rule #3 op-log
+        // fields require a non-null DebugEntry, so we synthesise a throwaway one if
+        // the caller doesn't have one — the throwaway is NOT added to DebugLog.
+        val opEntry = entry ?: DebugEntry()
+        MediaOrchestrator.pauseAll(context, opEntry)
         delay(200)  // let the target session process
     }
 
