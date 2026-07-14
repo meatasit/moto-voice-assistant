@@ -98,9 +98,16 @@ private const val YOUTUBE_NUDGE_INITIAL_DELAY_MS = 800L
 /** v1.3.11 §3.1 — how often to poll playbackState after the initial delay. */
 private const val YOUTUBE_NUDGE_POLL_INTERVAL_MS = 500L
 /** v1.3.11 §3.1 — total observation window before we conclude "not playing, call play()". */
-private const val YOUTUBE_NUDGE_POLL_WINDOW_MS = 5_000L
+private const val YOUTUBE_NUDGE_POLL_WINDOW_MS = 9_000L  // v1.3.19: widened from 5s so active play() attempts have room to take effect
 /** v1.3.11 §3.1 — after controller.play(), wait this long for STATE_PLAYING to take effect. */
-private const val YOUTUBE_NUDGE_POST_PLAY_DELAY_MS = 1_000L
+
+// v1.3.19 — active nudge: how long to let the deep link settle before the first
+// play() attempt, max number of attempts, and minimum spacing between attempts.
+// The poll window is extended so a play() fired late in the window still has time
+// to transition through BUFFERING before we give up.
+private const val YOUTUBE_NUDGE_SETTLE_MS = 2_000L
+private const val YOUTUBE_NUDGE_MAX_PLAY_ATTEMPTS = 3
+private const val YOUTUBE_NUDGE_PLAY_RETRY_SPACING_MS = 1_500L
 /**
  * Spec v1.3.8 A2 — 2 consecutive non-silence STT errors is when we start suspecting
  * the platform recognizer service is degrading and force the throttle+recreate path.
@@ -1244,6 +1251,8 @@ class VoiceCommandPipeline(
     ) {
         val pollStartAt = System.currentTimeMillis() + YOUTUBE_NUDGE_INITIAL_DELAY_MS
         val pollWindowEndAt = pollStartAt + YOUTUBE_NUDGE_POLL_WINDOW_MS
+        var playAttempts = 0
+        var lastPlayAttemptAt = 0L
         lateinit var poll: Runnable
         poll = Runnable {
             val controller = com.moto.voice.media.MediaSessions.controllerFor(
@@ -1277,22 +1286,47 @@ class VoiceCommandPipeline(
                     speakOutOfPipeline(appCtx, ErrorSpeech.MEDIA_OPENED_NOT_PLAYING)
                     return@Runnable
                 }
-                if (System.currentTimeMillis() >= pollWindowEndAt) {
-                    // Poll window exhausted — try controller.play() then check once more.
-                    Log.w(TAG, "youtube nudge: not playing after ${YOUTUBE_NUDGE_POLL_WINDOW_MS}ms — controller.play()")
-                    runCatching { controller.transportControls.play() }
-                    handler.postDelayed({
-                        val finalState = controller.playbackState?.state
-                        entry.playbackState = com.moto.voice.media.MediaSessions.stateName(finalState)
-                        if (finalState == android.media.session.PlaybackState.STATE_PLAYING) {
-                            maybeSpeakPlayConfirmed(appCtx)
-                        } else {
-                            speakOutOfPipeline(appCtx, ErrorSpeech.MEDIA_OPENED_NOT_PLAYING)
-                        }
-                    }, YOUTUBE_NUDGE_POST_PLAY_DELAY_MS)
-                    return@Runnable
+                // v1.3.19 — field log 1783995471690: videos routinely sit in STATE_ERROR
+                // or STATE_PAUSED after the deep link, and the rider had to say "เล่นต่อ"
+                // (the seek-0 path, which calls controller.play()) to get sound EVERY
+                // time. Pre-v1.3.19 the poll watched passively for 5s then tried play()
+                // once at the very end with a single 1s re-check — a normal
+                // ERROR → BUFFERING → PLAYING transition couldn't satisfy that timing.
+                //
+                // Fix (behavior in [NudgeDecider]): once settled, if the session reports
+                // stuck (PAUSED / STOPPED / ERROR / NONE / null) → play() now. Up to
+                // YOUTUBE_NUDGE_MAX_PLAY_ATTEMPTS attempts, spaced by
+                // YOUTUBE_NUDGE_PLAY_RETRY_SPACING_MS. BUFFERING (and other transitional
+                // states) counts as progress — keep polling, don't re-nudge.
+                val decision = NudgeDecider.decide(
+                    state = state,
+                    nowMs = System.currentTimeMillis(),
+                    pollStartAt = pollStartAt,
+                    pollWindowEndAt = pollWindowEndAt,
+                    playAttempts = playAttempts,
+                    lastPlayAttemptAt = lastPlayAttemptAt,
+                    maxAttempts = YOUTUBE_NUDGE_MAX_PLAY_ATTEMPTS,
+                    settleMs = YOUTUBE_NUDGE_SETTLE_MS,
+                    retrySpacingMs = YOUTUBE_NUDGE_PLAY_RETRY_SPACING_MS,
+                )
+                when (decision) {
+                    NudgeDecider.Action.PlayNow -> {
+                        playAttempts++
+                        lastPlayAttemptAt = System.currentTimeMillis()
+                        entry.youtubeNudged = true
+                        Log.w(TAG, "youtube nudge: state=${com.moto.voice.media.MediaSessions.stateName(state)} — controller.play() attempt $playAttempts/$YOUTUBE_NUDGE_MAX_PLAY_ATTEMPTS")
+                        runCatching { controller.transportControls.play() }
+                        handler.postDelayed(poll, YOUTUBE_NUDGE_POLL_INTERVAL_MS)
+                    }
+                    NudgeDecider.Action.GiveUp -> {
+                        entry.playbackState = com.moto.voice.media.MediaSessions.stateName(state)
+                        Log.w(TAG, "youtube nudge: still not playing after ${YOUTUBE_NUDGE_POLL_WINDOW_MS}ms and $playAttempts play attempts")
+                        speakOutOfPipeline(appCtx, ErrorSpeech.MEDIA_OPENED_NOT_PLAYING)
+                    }
+                    NudgeDecider.Action.KeepPolling -> {
+                        handler.postDelayed(poll, YOUTUBE_NUDGE_POLL_INTERVAL_MS)
+                    }
                 }
-                handler.postDelayed(poll, YOUTUBE_NUDGE_POLL_INTERVAL_MS)
                 return@Runnable
             }
             // v1.3.15 bug fix — the previous version fell back to media-key path on
@@ -1470,21 +1504,36 @@ class VoiceCommandPipeline(
         // reach the target session. Controller call is a direct method invocation
         // and can't be swallowed. Fall back to media-key if no controller (missing
         // notification-listener permission or no active session).
-        val playingCtrl = com.moto.voice.media.MediaSessions.activeControllers(context)
-            .firstOrNull { it.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING }
-        if (playingCtrl != null) {
-            Log.d(TAG, "stop: pausing via MediaController for ${playingCtrl.packageName}")
+        // v1.3.19 — field log 1783995471690: "ปิด YouTube" repeatedly did nothing while a
+        // YouTube music compilation kept playing. Root cause: this block paused only the
+        // FIRST controller whose state == STATE_PLAYING. YouTube's session was sitting in
+        // STATE_ERROR (stale state while audio still flowing), so it never matched; the
+        // media-key fallback then routed to the most-recently-active session — Spotify —
+        // pausing the wrong app. Fix: "stop" means EVERYTHING stops. Pause every active
+        // controller regardless of reported state (pause() on an already-paused/stopped
+        // session is a harmless no-op), and only fall back to the untargeted media key
+        // when there are no controllers at all (no notification-listener permission).
+        val controllers = com.moto.voice.media.MediaSessions.activeControllers(context)
+        // v1.3.19 — filter through [StopSequenceTargets.shouldPauseAtState] (identity)
+        // so the "pause every state" invariant is anchored in a helper with unit-test
+        // coverage. A future edit that tries to smuggle a state filter back in has to
+        // modify the helper AND break the tests, not just add a .filter { } clause here.
+        val targets = controllers.filter {
+            StopSequenceTargets.shouldPauseAtState(it.playbackState?.state)
+        }
+        if (targets.isNotEmpty()) {
             entry?.mediaCtrlUsed = true
-            entry?.playbackState = com.moto.voice.media.MediaSessions.stateName(
-                playingCtrl.playbackState?.state,
-            )
-            runCatching { playingCtrl.transportControls.pause() }
-                .onFailure {
-                    Log.w(TAG, "controller.pause failed, falling back to media key", it)
-                    MediaStopper.dispatchExternalPauseOnly(context)
-                }
+            entry?.playbackState = targets.joinToString(",") {
+                "${it.packageName.substringAfterLast('.')}=" +
+                    com.moto.voice.media.MediaSessions.stateName(it.playbackState?.state)
+            }
+            targets.forEach { ctrl ->
+                Log.d(TAG, "stop: pausing via MediaController for ${ctrl.packageName} (state=${com.moto.voice.media.MediaSessions.stateName(ctrl.playbackState?.state)})")
+                runCatching { ctrl.transportControls.pause() }
+                    .onFailure { Log.w(TAG, "controller.pause failed for ${ctrl.packageName}", it) }
+            }
         } else {
-            Log.d(TAG, "stop: no playing controller — dispatching KEYCODE_MEDIA_PAUSE")
+            Log.d(TAG, "stop: no controllers at all — dispatching KEYCODE_MEDIA_PAUSE")
             MediaStopper.dispatchExternalPauseOnly(context)
         }
         delay(200)  // let the target session process
