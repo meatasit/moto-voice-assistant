@@ -48,18 +48,41 @@ Preconditions: Spotify is playing something. Screen locked.
 
 ## C — Launch blocked (BAL while locked)
 
-Preconditions: phone locked; deep-link is refused by BAL (repeat by keeping
-the phone locked for 30+ seconds before triggering).
+Two variants — the v1.3.21 fix (field log 1784074856214) targets **C2**, where a
+YouTube session already exists so the old "no session" detector never fired.
 
-1. Press BVRA.
-2. Say "เปิด youtube [query]".
-3. Listen for `เปิดไม่ได้ตอนจอล็อคค่ะ ลองปลดล็อคก่อนนะคะ` (LAUNCH_BLOCKED_LOCKED).
+### C1 — no YouTube session at all
+Preconditions: phone locked, nothing playing; keep locked 30+ s before triggering.
+
+1. Press BVRA → "เปิด youtube [query]".
+2. Listen for `เปิดไม่ได้ตอนจอล็อคค่ะ ลองปลดล็อคก่อนนะคะ` (LAUNCH_BLOCKED_LOCKED).
 
 **Pass criteria**
-- `launchBlocked = true`
-- `finishReason = launch_blocked`
-- `mediaCtrlPkgMiss` reflects who WAS active (or `none`).
+- `launchBlocked = true`, `finishReason = launch_blocked`, `screenLocked = true`
+- `mediaOperations` ends with `nudge→launchBlocked(noSession)`
 - Rider hears the honest error — **never silent, never Spotify**.
+
+### C2 — switch video while YouTube is already open (the reported bug)
+Preconditions: open video A (via A), then **lock the screen**. YouTube session
+stays alive playing A.
+
+1. Press BVRA → "เปิด youtube [a DIFFERENT query → video B]".
+2. Verify the video does **not** switch (stays on A) AND the rider is told so.
+
+**Pass criteria**
+- `launchBlocked = true`, `finishReason = launch_blocked`, `screenLocked = true`
+- `mediaOperations` ends with `nudge→launchBlocked(stillPrior)` — **must NOT** contain
+  `nudge→play#N` or `nudge→confirmed` (the old bug resumed video A and faked success).
+- `want:"<title B>"` ≠ `got:"<title A>"` in the log line proves the switch didn't land.
+- Rider hears `เปิดไม่ได้ตอนจอล็อคค่ะ`; video A is **not** resumed into a fake success.
+
+### C3 — same test UNLOCKED must still switch (no regression)
+1. Unlock, repeat C2 step 1.
+2. Verify video B actually plays.
+
+**Pass criteria**
+- `launchBlocked = false`, `finishReason = ok`, `screenLocked = false`
+- `mediaOperations` shows `nudge→confirmed`; `got:` matches `want:` (video B).
 
 ## D — "เล่นต่อ" after locked YouTube
 

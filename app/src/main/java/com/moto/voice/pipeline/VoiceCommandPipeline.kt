@@ -557,7 +557,7 @@ class VoiceCommandPipeline(
         com.moto.voice.media.MediaSessionMemory.advanceTo(next)
         releaseScoBeforeMedia(entry)
         MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
-        MediaOrchestrator.openYoutube(context, next.id, null, entry)
+        MediaOrchestrator.openYoutube(context, next.id, null, entry, expectedTitle = next.title)
         recordHistory(HistoryAction.YoutubeOpen(next.id, next.title))
         mediaActionStarted = true  // spec v1.3.9 §1.3
     }
@@ -1014,7 +1014,7 @@ class VoiceCommandPipeline(
             speakAndRememberWithOpener(spoken)
             releaseScoBeforeMedia(entry)
             MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
-            MediaOrchestrator.openYoutube(context, chosen.id, resp.query, entry)
+            MediaOrchestrator.openYoutube(context, chosen.id, resp.query, entry, expectedTitle = chosen.title)
             recordHistory(HistoryAction.YoutubeOpen(chosen.id, chosen.title))
             // Spec v1.3.8 B5 — remember the videos list so "อันต่อไป" can advance.
             com.moto.voice.media.MediaSessionMemory.rememberYoutube(candidates, chosen.id, chosen.title)

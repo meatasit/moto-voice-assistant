@@ -111,9 +111,18 @@ object MediaOrchestrator {
      */
     suspend fun openYoutube(
         context: Context, videoId: String?, query: String?, entry: DebugEntry,
+        expectedTitle: String? = null,
     ): Result = mutex.withLock {
         cancelPendingNudge()
         logOp(entry, "openYoutube:${videoId ?: query.orEmpty()}", MediaSessions.YOUTUBE_PKG)
+        entry.mediaExpectedTitle = expectedTitle
+        entry.screenLocked = isScreenLocked(context)
+
+        // v1.3.21 — capture what YouTube is playing BEFORE we fire the intent. If the
+        // session still shows this same title after the poll window, the switch never
+        // happened (Background-Activity-Launch block while locked, per field log
+        // 1784074856214) and we must NOT resume it — that masked the failure as success.
+        val priorTitle = sessionTitle(MediaSessions.controllerFor(context, MediaSessions.YOUTUBE_PKG))
 
         // Rule #1: pre-clean via targeted controller.pause() (NOT media key which
         // would go to Spotify per field-log evidence). Only for YouTube — leaves
@@ -126,7 +135,7 @@ object MediaOrchestrator {
         // Remember what we opened for rule #2 lookups.
         MediaSessionMemory.rememberOpenedApp(MediaSessions.YOUTUBE_PKG, videoId)
 
-        scheduleTargetedNudge(context, MediaSessions.YOUTUBE_PKG, videoId, entry)
+        scheduleTargetedNudge(context, MediaSessions.YOUTUBE_PKG, expectedTitle, priorTitle, entry)
         Result.Success
     }
 
@@ -160,8 +169,13 @@ object MediaOrchestrator {
                 val lastVideo = MediaSessionMemory.lastVideoId()
                 if (!lastVideo.isNullOrBlank()) {
                     logOp(entry, "playContinue→refireDeeplink", target)
+                    val expectedTitle = MediaSessionMemory.currentTitle().ifBlank { null }
+                    entry.mediaExpectedTitle = expectedTitle
+                    entry.screenLocked = isScreenLocked(context)
                     fireYoutubeIntent(context, lastVideo, null, entry)
-                    scheduleTargetedNudge(context, target, lastVideo, entry)
+                    // priorTitle = null: we only reach here because YouTube had no active
+                    // session, so there's no old video to guard against.
+                    scheduleTargetedNudge(context, target, expectedTitle, priorTitle = null, entry = entry)
                     Result.Success
                 } else {
                     Result.NoTarget
@@ -323,7 +337,8 @@ object MediaOrchestrator {
      * ever appears, mark [DebugEntry.launchBlocked] and speak the honest TTS.
      */
     private fun scheduleTargetedNudge(
-        context: Context, targetPkg: String, expectedVideoId: String?, entry: DebugEntry,
+        context: Context, targetPkg: String,
+        expectedTitle: String?, priorTitle: String?, entry: DebugEntry,
     ) {
         val appCtx = context.applicationContext
         val pollStartAt = System.currentTimeMillis() + POLL_INITIAL_DELAY_MS
@@ -338,17 +353,7 @@ object MediaOrchestrator {
                 // dispatching MEDIA_PLAY would wake Spotify (per field log 1784028862496).
                 // If the poll window has elapsed with no controller, mark launch_blocked.
                 if (System.currentTimeMillis() >= pollWindowEndAt) {
-                    val available = MediaSessions.activePackagesForDebug(appCtx)
-                    entry.mediaCtrlPkgMiss = if (available.isEmpty()) "none" else available.joinToString(",")
-                    entry.launchBlocked = true
-                    // Overwrite whatever finishReason the pipeline set — LAUNCH_BLOCKED
-                    // is more informative than "ok" for this outcome. Field-log exports
-                    // key off finishReason to categorize failures.
-                    entry.finishReason = FinishReason.LAUNCH_BLOCKED
-                    logOp(entry, "nudge→launchBlocked", targetPkg)
-                    Log.w(TAG, "nudge: $targetPkg session never appeared. available=$available")
-                    speakOutOfPipeline(appCtx, ErrorSpeech.LAUNCH_BLOCKED_LOCKED)
-                    pendingNudge = null
+                    declareLaunchBlocked(appCtx, targetPkg, entry, reason = "noSession")
                     return@Runnable
                 }
                 handler.postDelayed(poll, POLL_INTERVAL_MS)
@@ -357,24 +362,42 @@ object MediaOrchestrator {
             val state = ctrl.playbackState?.state
             entry.playbackState = MediaSessions.stateName(state)
             entry.mediaCtrlUsed = true
+
+            // v1.3.21 — verify by TITLE, not mediaId (YouTube leaves mediaId blank). The
+            // decisive signal is whether the title moved away from what was playing before
+            // we fired the intent. STILL_PRIOR after the window = the switch was blocked.
+            val currentTitle = sessionTitle(ctrl)
+            entry.mediaActualTitle = currentTitle
+            val verdict = YoutubeVerify.classify(currentTitle, priorTitle, expectedTitle)
+            val windowExhausted = System.currentTimeMillis() >= pollWindowEndAt
+
+            if (verdict == YoutubeVerify.Verdict.STILL_PRIOR) {
+                // The session is still showing the OLD video — the requested switch did not
+                // land. Do NOT play() it (that would resume the wrong video and fake success).
+                // Give it until the window ends in case the new video is still loading; then
+                // speak the honest "can't open while locked" instead.
+                if (windowExhausted) {
+                    declareLaunchBlocked(appCtx, targetPkg, entry, reason = "stillPrior")
+                    return@Runnable
+                }
+                handler.postDelayed(poll, POLL_INTERVAL_MS)
+                return@Runnable
+            }
+
             if (state == PlaybackState.STATE_PLAYING) {
-                if (isCorrectVideo(ctrl, expectedVideoId)) {
+                // CONFIRMED_TARGET or SWITCHED (title changed to a new video) → genuine success.
+                // UNKNOWN (no title yet) but playing: keep waiting for the title, then accept
+                // at the window edge rather than false-block something that IS playing.
+                if (verdict != YoutubeVerify.Verdict.UNKNOWN || windowExhausted) {
                     logOp(entry, "nudge→confirmed", targetPkg)
-                    Log.d(TAG, "nudge: $targetPkg reports STATE_PLAYING with matching mediaId — confirmed")
+                    Log.d(TAG, "nudge: $targetPkg playing, verdict=$verdict title=\"$currentTitle\" — confirmed")
                     if (speakPlayConfirmed && audioIsSettled(appCtx)) {
                         speakOutOfPipeline(appCtx, ErrorSpeech.MEDIA_PLAY_CONFIRMED)
                     }
                     pendingNudge = null
                     return@Runnable
                 }
-                if (System.currentTimeMillis() < pollWindowEndAt) {
-                    handler.postDelayed(poll, POLL_INTERVAL_MS)
-                    return@Runnable
-                }
-                logOp(entry, "nudge→wrongVideo", targetPkg)
-                entry.error = ((entry.error ?: "") + " wrong_video_playing").trim()
-                speakOutOfPipeline(appCtx, ErrorSpeech.MEDIA_OPENED_NOT_PLAYING)
-                pendingNudge = null
+                handler.postDelayed(poll, POLL_INTERVAL_MS)
                 return@Runnable
             }
             when (NudgeDecider.decide(
@@ -412,16 +435,41 @@ object MediaOrchestrator {
         handler.postDelayed(poll, POLL_INITIAL_DELAY_MS)
     }
 
-    /** v1.3.17 — verify controller.metadata.mediaId references the expectedVideoId. */
-    private fun isCorrectVideo(
-        controller: android.media.session.MediaController,
-        expectedVideoId: String?,
-    ): Boolean {
-        if (expectedVideoId.isNullOrBlank()) return true
-        val md = controller.metadata ?: return true
-        val id = md.getString(android.media.MediaMetadata.METADATA_KEY_MEDIA_ID)
-        if (id.isNullOrBlank()) return true
-        return id.contains(expectedVideoId, ignoreCase = true)
+    /**
+     * v1.3.21 — the title the target session reports, our only reliable verification
+     * signal (YouTube leaves METADATA_KEY_MEDIA_ID blank). Null when there is no
+     * controller / no metadata / blank title.
+     */
+    private fun sessionTitle(controller: android.media.session.MediaController?): String? {
+        val md = controller?.metadata ?: return null
+        return md.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)?.takeIf { it.isNotBlank() }
+    }
+
+    /** KeyguardManager.isKeyguardLocked, or null when the service is unavailable. */
+    private fun isScreenLocked(context: Context): Boolean? {
+        val km = context.getSystemService(android.app.KeyguardManager::class.java) ?: return null
+        return runCatching { km.isKeyguardLocked }.getOrNull()
+    }
+
+    /**
+     * Mark the interaction launch-blocked, speak the honest error, stop polling.
+     * Two ways in: the target session never appeared at all (`noSession`), or it
+     * appeared but kept playing the previous video (`stillPrior`, the locked-switch case
+     * from field log 1784074856214). Either way: never silent, never a wrong-app nudge.
+     */
+    private fun declareLaunchBlocked(
+        appCtx: Context, targetPkg: String, entry: DebugEntry, reason: String,
+    ) {
+        val available = MediaSessions.activePackagesForDebug(appCtx)
+        entry.mediaCtrlPkgMiss = if (available.isEmpty()) "none" else available.joinToString(",")
+        entry.launchBlocked = true
+        // Overwrite whatever finishReason the pipeline set — LAUNCH_BLOCKED is more
+        // informative than "ok". Field-log exports key off finishReason to categorize.
+        entry.finishReason = FinishReason.LAUNCH_BLOCKED
+        logOp(entry, "nudge→launchBlocked($reason)", targetPkg)
+        Log.w(TAG, "nudge: $targetPkg launch blocked ($reason). available=$available")
+        speakOutOfPipeline(appCtx, ErrorSpeech.LAUNCH_BLOCKED_LOCKED)
+        pendingNudge = null
     }
 
     private fun cancelPendingNudge() {

@@ -179,6 +179,27 @@ data class DebugEntry(
      * screen was locked). See FinishReason.LAUNCH_BLOCKED.
      */
     var launchBlocked: Boolean = false,
+
+    /**
+     * v1.3.21 — was the phone screen locked (KeyguardManager.isKeyguardLocked) at the
+     * moment we fired a media deep-link? Field log 1784074856214 proved YouTube "change
+     * video" silently failed ONLY when locked (Background Activity Launch block) — every
+     * entry still logged nudge→confirmed / ok. Logging lock state lets a field log
+     * correlate the failure directly instead of guessing. Null for non-media actions.
+     */
+    var screenLocked: Boolean? = null,
+
+    /**
+     * v1.3.21 — the title the target MediaSession actually reported during the nudge.
+     * YouTube does NOT populate a usable METADATA_KEY_MEDIA_ID (the old isCorrectVideo
+     * check escape-hatched to "true" and confirmed the WRONG video), so title is our
+     * only reliable verification signal. Compared against [mediaExpectedTitle] and the
+     * title playing before we fired the intent to prove the switch really happened.
+     */
+    var mediaActualTitle: String? = null,
+
+    /** v1.3.21 — the video title we asked the target app to open (from the webhook). */
+    var mediaExpectedTitle: String? = null,
 ) {
     fun time(): String = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date(timestamp))
 
@@ -206,6 +227,9 @@ data class DebugEntry(
         if (mediaCtrlPkgMiss != null) append("  pkgMiss:${mediaCtrlPkgMiss}")
         if (mediaTargetPkg != null) append("  target:${mediaTargetPkg}")
         if (mediaOperations != null) append("  ops:${mediaOperations}")
+        if (screenLocked == true) append("  🔒locked")
+        if (mediaExpectedTitle != null) append("  want:\"${mediaExpectedTitle}\"")
+        if (mediaActualTitle != null) append("  got:\"${mediaActualTitle}\"")
         if (launchBlocked) append("  launch:blocked")
         if (finishReason != null) append("  end:${finishReason}")
         if (error != null) append("  ⚠️ $error")
