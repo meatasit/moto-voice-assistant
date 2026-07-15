@@ -299,29 +299,57 @@ object MediaOrchestrator {
         delay(300L)
     }
 
-    private fun fireYoutubeIntent(
-        context: Context, videoId: String?, query: String?, entry: DebugEntry,
-    ): Boolean {
+    /**
+     * Build the best YouTube Intent for [videoId] or [query] (app deep link → web
+     * fallback; search intent → web results). Returns null when there's nothing to open.
+     * Split out of [fireYoutubeIntent] so both the direct-launch and over-lock-screen
+     * paths choose the exact same target.
+     */
+    private fun buildYoutubeIntent(context: Context, videoId: String?, query: String?): Intent? {
         fun view(uri: Uri) = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val pm = context.packageManager
         if (videoId != null) {
             val app = view(Uri.parse("vnd.youtube:$videoId"))
             val web = view(Uri.parse("https://www.youtube.com/watch?v=$videoId"))
-            val target = if (app.resolveActivity(pm) != null) app else web
-            return runCatching { context.startActivity(target) }.isSuccess.also {
-                if (!it) entry.error = ((entry.error ?: "") + " youtube_launch_failed").trim()
-            }
+            return if (app.resolveActivity(pm) != null) app else web
         }
-        val q = query?.takeIf { it.isNotBlank() } ?: return false
+        val q = query?.takeIf { it.isNotBlank() } ?: return null
         val search = Intent(Intent.ACTION_SEARCH).apply {
             setPackage(MediaSessions.YOUTUBE_PKG)
             putExtra("query", q)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        val target = if (search.resolveActivity(pm) != null) search
+        return if (search.resolveActivity(pm) != null) search
         else view(Uri.parse("https://www.youtube.com/results?search_query=${Uri.encode(q)}"))
+    }
+
+    /**
+     * Fire the YouTube launch. When the screen is LOCKED and we hold USE_FULL_SCREEN_INTENT,
+     * route through [LockScreenLauncher] so the deep link isn't silently BAL-dropped (field
+     * logs 1784078976959 / 1784082476746). Otherwise start it directly.
+     */
+    private fun fireYoutubeIntent(
+        context: Context, videoId: String?, query: String?, entry: DebugEntry,
+    ): Boolean {
+        val target = buildYoutubeIntent(context, videoId, query) ?: run {
+            entry.error = ((entry.error ?: "") + " youtube_launch_failed").trim()
+            return false
+        }
+        val locked = isScreenLocked(context) == true
+        if (locked && LockScreenLauncher.canUseFullScreenIntent(context)) {
+            logOp(entry, "launch→fullScreenIntent", MediaSessions.YOUTUBE_PKG)
+            val posted = LockScreenLauncher.launchOverLockScreen(context, target)
+            if (!posted) entry.error = ((entry.error ?: "") + " fsi_notify_failed").trim()
+            return posted
+        }
+        if (locked) {
+            // Locked but no full-screen-intent permission → the direct start will likely be
+            // BAL-dropped; mark it so the log + rider know to grant the permission.
+            logOp(entry, "launch→startActivity(lockedNoFsiPerm)", MediaSessions.YOUTUBE_PKG)
+            entry.error = ((entry.error ?: "") + " no_fsi_permission").trim()
+        }
         return runCatching { context.startActivity(target) }.isSuccess.also {
-            if (!it) entry.error = ((entry.error ?: "") + " youtube_search_failed").trim()
+            if (!it) entry.error = ((entry.error ?: "") + " youtube_launch_failed").trim()
         }
     }
 

@@ -70,6 +70,8 @@ class MotoVoiceApplication : Application() {
     companion object {
         const val CH_LISTENING = "moto_voice_listening"
         const val CH_RADIO = "moto_voice_fm"
+        /** v1.3.24 — high-importance channel for the over-lock-screen launch (full-screen intent). */
+        const val CH_LAUNCH = "moto_voice_launch"
         private const val TAG = "MotoVoiceApplication"
     }
 
@@ -84,6 +86,12 @@ class MotoVoiceApplication : Application() {
         nm.createNotificationChannel(
             NotificationChannel(CH_RADIO, "Moto Voice Radio", NotificationManager.IMPORTANCE_LOW).apply {
                 setSound(null, null); enableLights(false); enableVibration(false)
+            }
+        )
+        // Full-screen-intent needs a HIGH-importance channel or the OS demotes the launch.
+        nm.createNotificationChannel(
+            NotificationChannel(CH_LAUNCH, "Moto Voice — เปิดสื่อตอนจอล็อค", NotificationManager.IMPORTANCE_HIGH).apply {
+                setSound(null, null); enableVibration(false)
             }
         )
     }

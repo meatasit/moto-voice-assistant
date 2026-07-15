@@ -46,43 +46,55 @@ Preconditions: Spotify is playing something. Screen locked.
 - Spotify is paused; YouTube is playing the new video.
 - No "everything silent" state.
 
-## C — Launch blocked (BAL while locked)
+## C — Opening media while the screen is locked
 
-Two variants — the v1.3.21 fix (field log 1784074856214) targets **C2**, where a
-YouTube session already exists so the old "no session" detector never fired.
+v1.3.24 adds a full-screen-intent launch path so a locked "open YouTube" can actually
+SUCCEED (the riding case), instead of only failing honestly. Behaviour now depends on
+the **"เปิดสื่อตอนจอล็อค"** permission (System Status row / USE_FULL_SCREEN_INTENT).
 
-### C1 — no YouTube session at all
-Preconditions: phone locked, nothing playing; keep locked 30+ s before triggering.
+### Precondition for C-with-permission: grant it first
+System Status → "เปิดสื่อตอนจอล็อค" must be 🟢. On Android 14 tap the row → grant.
+
+### C-ok — locked open SUCCEEDS (permission granted)
+Preconditions: phone locked; "เปิดสื่อตอนจอล็อค" granted.
 
 1. Press BVRA → "เปิด youtube [query]".
-2. Listen for `เปิดไม่ได้ตอนจอล็อคค่ะ ลองปลดล็อคก่อนนะคะ` (LAUNCH_BLOCKED_LOCKED).
+2. Verify YouTube actually opens over the lock screen and audio plays.
+
+**Pass criteria**
+- `screenLocked = true`, `mediaOperations` contains `launch→fullScreenIntent`
+- ends with `nudge→confirmed`, `finishReason = ok`, `launchBlocked = false`
+- Rider hears the video — screen may show YouTube over the keyguard (or play behind a
+  secure lock). No "unlock first" error.
+
+### C-switch — switch to a different video while locked (permission granted)
+Preconditions: video A open, screen locked, permission granted.
+
+1. Press BVRA → "เปิด youtube [DIFFERENT query → video B]".
+2. Verify it switches to B.
+
+**Pass criteria**
+- `launch→fullScreenIntent`, then `nudge→confirmed`, `got:` matches `want:` (B).
+- If B genuinely can't load, `nudge→launchBlocked(stillPrior)` — but with the permission
+  the switch should now land.
+
+### C-denied — permission OFF must still be honest (fallback)
+Preconditions: phone locked; "เปิดสื่อตอนจอล็อค" NOT granted.
+
+1. Press BVRA → "เปิด youtube [query]".
+2. Listen for `เปิดไม่ได้ตอนจอล็อคค่ะ ลองปลดล็อคก่อนนะคะ`.
 
 **Pass criteria**
 - `launchBlocked = true`, `finishReason = launch_blocked`, `screenLocked = true`
-- `mediaOperations` ends with `nudge→launchBlocked(noSession)`
-- Rider hears the honest error — **never silent, never Spotify**.
+- `mediaOperations` shows `launch→startActivity(lockedNoFsiPerm)` then
+  `nudge→launchBlocked(noSession|stillPrior)`; error includes `no_fsi_permission`.
+- Rider hears the honest error — **never silent, never the wrong app**.
 
-### C2 — switch video while YouTube is already open (the reported bug)
-Preconditions: open video A (via A), then **lock the screen**. YouTube session
-stays alive playing A.
-
-1. Press BVRA → "เปิด youtube [a DIFFERENT query → video B]".
-2. Verify the video does **not** switch (stays on A) AND the rider is told so.
+### C-unlocked — no regression
+1. Unlock, "เปิด youtube [query B]" → B plays.
 
 **Pass criteria**
-- `launchBlocked = true`, `finishReason = launch_blocked`, `screenLocked = true`
-- `mediaOperations` ends with `nudge→launchBlocked(stillPrior)` — **must NOT** contain
-  `nudge→play#N` or `nudge→confirmed` (the old bug resumed video A and faked success).
-- `want:"<title B>"` ≠ `got:"<title A>"` in the log line proves the switch didn't land.
-- Rider hears `เปิดไม่ได้ตอนจอล็อคค่ะ`; video A is **not** resumed into a fake success.
-
-### C3 — same test UNLOCKED must still switch (no regression)
-1. Unlock, repeat C2 step 1.
-2. Verify video B actually plays.
-
-**Pass criteria**
-- `launchBlocked = false`, `finishReason = ok`, `screenLocked = false`
-- `mediaOperations` shows `nudge→confirmed`; `got:` matches `want:` (video B).
+- `screenLocked = false`, `launch→startActivity`, `nudge→confirmed`, `finishReason = ok`.
 
 ## D — "เล่นต่อ" after locked YouTube
 

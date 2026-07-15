@@ -37,7 +37,7 @@ data class StatusRow(
     /** Intent to launch when the rider taps this row to fix it. null = row has no fixup. */
     val fixIntent: Intent? = null,
 ) {
-    enum class Kind { DefaultAssistant, Permissions, Battery, Helmet, Webhook, Tts, Internet, MediaCtrl }
+    enum class Kind { DefaultAssistant, Permissions, Battery, Helmet, Webhook, Tts, Internet, MediaCtrl, LockScreenLaunch }
     enum class State { Green, Red, Yellow, Pending }
 }
 
@@ -51,6 +51,7 @@ class SystemStatusChecker(private val context: Context) {
         checkHelmet(),
         checkInternet(),
         checkMediaCtrl(),
+        checkLockScreenLaunch(),
         // Placeholders for async rows so the UI can render them as Pending while the tests run.
         StatusRow(StatusRow.Kind.Webhook, "Webhook", StatusRow.State.Pending, "กำลังทดสอบ..."),
         StatusRow(StatusRow.Kind.Tts, "TTS", StatusRow.State.Pending, "กำลังทดสอบ..."),
@@ -200,6 +201,36 @@ class SystemStatusChecker(private val context: Context) {
             StatusRow.Kind.Helmet, "หมวก / Bluetooth",
             if (connected) StatusRow.State.Green else StatusRow.State.Yellow,
             detail = if (connected) "เชื่อมต่อแล้ว (HFP)" else "ยังไม่เชื่อม",
+        )
+    }
+
+    /**
+     * v1.3.24 — USE_FULL_SCREEN_INTENT: lets Moto Voice open YouTube/media OVER the lock
+     * screen (the riding case). Auto-granted below Android 14; on 14+ the rider must grant
+     * it. Red when missing because without it a locked "open" is silently BAL-dropped and
+     * the rider can only be told to unlock — useless while riding.
+     */
+    private fun checkLockScreenLaunch(): StatusRow {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            return StatusRow(
+                StatusRow.Kind.LockScreenLaunch, "เปิดสื่อตอนจอล็อค",
+                StatusRow.State.Green, detail = "รองรับอัตโนมัติ (Android < 14)",
+            )
+        }
+        val nm = context.getSystemService(android.app.NotificationManager::class.java)
+        val ok = runCatching { nm?.canUseFullScreenIntent() == true }.getOrDefault(false)
+        val fix = runCatching {
+            Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                data = Uri.fromParts("package", context.packageName, null)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        }.getOrNull()
+        return StatusRow(
+            StatusRow.Kind.LockScreenLaunch, "เปิดสื่อตอนจอล็อค",
+            if (ok) StatusRow.State.Green else StatusRow.State.Red,
+            detail = if (ok) "อนุญาตแล้ว — เปิด YouTube ตอนจอล็อคได้"
+                     else "ยังไม่อนุญาต — จอล็อคจะเปิดสื่อไม่ได้ (แตะเพื่อเปิดสิทธิ์)",
+            fixIntent = if (ok) null else fix,
         )
     }
 
