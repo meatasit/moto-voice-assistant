@@ -11,8 +11,22 @@ android {
         applicationId = "com.moto.voice"
         minSdk = 26
         targetSdk = 34
-        versionCode = 28
-        versionName = "1.3.22"
+        versionCode = 29
+        versionName = "1.3.23"
+    }
+
+    signingConfigs {
+        // Committed, stable debug key so every CI build (and every dev machine) signs with
+        // the SAME certificate. Without this, GitHub Actions generates a fresh ~/.android/
+        // debug.keystore per run → each Release has a different signature → the phone forces
+        // an uninstall+reinstall on every update, wiping app data (Azure key + Default
+        // Assistant role). Standard, non-secret debug credentials (password "android").
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
@@ -26,6 +40,7 @@ android {
         }
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
