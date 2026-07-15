@@ -22,15 +22,31 @@ class YoutubeVerifyTest {
     @Test fun caseAndWhitespaceInsensitive() =
         assertTrue(YoutubeVerify.titlesMatch("  Groove Riders - หยุด ", "groove riders - หยุด"))
 
-    @Test fun truncatedWebhookTitleStillMatchesViaSubstring() {
-        // Webhook titles are sometimes cut short; the session reports the full title.
+    @Test fun truncatedWebhookTitleStillMatchesViaPrefix() {
+        // Webhook titles are sometimes cut short at the end; the session reports the full
+        // title. The truncation is a leading prefix covering most of the full string.
         assertTrue(
             YoutubeVerify.titlesMatch(
-                "ค่าธรรมเนียม eBay Paypal และการตั้งราคาขายสินค้าบน eBay July",
-                "ค่าธรรมเนียม eBay Paypal และการตั้งราคาขายสิน",
+                "รวมเพลงเพราะๆ ฟังสบายๆ ฟังทำงาน ร้านกาแฟ 2026 EP.237",
+                "รวมเพลงเพราะๆ ฟังสบายๆ ฟังทำงาน ร้านกาแฟ 2026 EP.2",
             )
         )
     }
+
+    @Test fun sameSeriesDifferentEpisodeDoesNotMatch() {
+        // THE REGRESSION (field log 1784078976959 ts …843956): different-date episodes of
+        // the same live show share a long boilerplate prefix but must NOT match, or a locked
+        // switch confirms the wrong (old) episode.
+        assertFalse(
+            YoutubeVerify.titlesMatch(
+                "ถ่ายทอดสด เรื่องเล่าเช้านี้ วันที่ 15 กรกฎาคม 2569",
+                "ถ่ายทอดสด เรื่องเล่าเช้านี้ วันที่ 9 กรกฎาคม 2569",
+            )
+        )
+    }
+
+    @Test fun sameSeriesDifferentEpisodeNumberDoesNotMatch() =
+        assertFalse(YoutubeVerify.titlesMatch("Minecraft 100 วัน EP.2", "Minecraft 100 วัน EP.15"))
 
     @Test fun differentVideosDoNotMatch() =
         assertFalse(YoutubeVerify.titlesMatch("เพลงชิวๆ ฟังสบาย", "Minecraft 100 วัน EP.2"))
@@ -86,6 +102,17 @@ class YoutubeVerifyTest {
             expectedTitle = "เรื่องเล่าเช้านี้ 15 ก.ค.",
         )
         assertEquals(Verdict.CONFIRMED_TARGET, v)
+    }
+
+    @Test fun lockedSwitchToOtherEpisodeOfSameSeries_isStillPrior() {
+        // The reported false-confirm: asked for วันที่ 9, session stuck on วันที่ 15. Must be
+        // STILL_PRIOR (→ launch blocked), NOT CONFIRMED_TARGET.
+        val v = YoutubeVerify.classify(
+            currentTitle = "ถ่ายทอดสด เรื่องเล่าเช้านี้ วันที่ 15 กรกฎาคม 2569",
+            priorTitle = "ถ่ายทอดสด เรื่องเล่าเช้านี้ วันที่ 15 กรกฎาคม 2569",
+            expectedTitle = "ถ่ายทอดสด เรื่องเล่าเช้านี้ วันที่ 9 กรกฎาคม 2569",
+        )
+        assertEquals(Verdict.STILL_PRIOR, v)
     }
 
     @Test fun coldOpenWithNoPriorTitle_isSwitched() {

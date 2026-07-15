@@ -19,18 +19,27 @@ package com.moto.voice.media
  */
 internal object YoutubeVerify {
 
-    /** Minimum shared-substring length before a containment match counts. */
-    const val MIN_SUBSTRING = 6
+    /** A prefix shorter than this can never stand in for a full title. */
+    const val MIN_PREFIX = 6
 
-    /** Minimum shared-prefix length before a prefix match counts (handles truncated titles). */
-    const val MIN_PREFIX = 12
+    /**
+     * A truncated title must still cover at least this fraction of the full one. Field log
+     * 1784078976959 (entry ts …843956): "…เรื่องเล่าเช้านี้ วันที่ 9…" vs "…วันที่ 15…" share
+     * a huge boilerplate prefix but are DIFFERENT episodes — a bare "long shared prefix" rule
+     * confirmed the wrong video. Requiring the prefix to cover most of the longer string, and
+     * matching only a true leading prefix (not a mid-string divergence), rejects them.
+     */
+    const val MIN_PREFIX_RATIO = 0.7
 
     fun normalize(s: String?): String = s?.trim()?.lowercase() ?: ""
 
     /**
-     * True when two titles plausibly refer to the same video. Handles exact equality,
-     * one being a substring of the other (webhook titles are sometimes truncated), and a
-     * long shared prefix (truncation mid-string). Blank vs anything is never a match.
+     * True when two titles plausibly refer to the SAME video. Two ways to match:
+     *   * exact (after normalize), or
+     *   * one is a leading prefix of the other AND covers ≥ [MIN_PREFIX_RATIO] of it —
+     *     this tolerates webhook titles truncated at the end, without letting two episodes
+     *     of the same series (which diverge at a date/number, not the length) match.
+     * Blank vs anything is never a match.
      */
     fun titlesMatch(a: String?, b: String?): Boolean {
         val na = normalize(a)
@@ -39,8 +48,9 @@ internal object YoutubeVerify {
         if (na == nb) return true
         val shorter = if (na.length <= nb.length) na else nb
         val longer = if (na.length <= nb.length) nb else na
-        if (shorter.length >= MIN_SUBSTRING && longer.contains(shorter)) return true
-        return na.commonPrefixWith(nb).length >= MIN_PREFIX
+        return shorter.length >= MIN_PREFIX &&
+            longer.startsWith(shorter) &&
+            shorter.length >= longer.length * MIN_PREFIX_RATIO
     }
 
     enum class Verdict {
