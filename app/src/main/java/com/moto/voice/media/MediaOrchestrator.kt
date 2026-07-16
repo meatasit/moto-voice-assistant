@@ -84,6 +84,39 @@ object MediaOrchestrator {
     @Volatile private var pendingNudge: Runnable? = null
 
     /**
+     * v1.3.25 diagnostic breadcrumb for the locked-screen FSI path. [LockLaunchActivity]
+     * (the trampoline) runs asynchronously after [openYoutube] returns and has no handle
+     * on the pipeline's [DebugEntry], so it can't log directly. It stamps this instead;
+     * the nudge reads it via [stampTrampoline] when the poll resolves. Ops are serialized
+     * by [mutex] and stale nudges cancelled, so only one launch is ever in flight.
+     */
+    private class TrampolineCrumb {
+        @Volatile var ran: Boolean = false
+        @Volatile var launchOk: Boolean = false
+    }
+    @Volatile private var trampolineCrumb: TrampolineCrumb? = null
+
+    /**
+     * Called by [LockLaunchActivity] the moment it runs, reporting whether it managed to
+     * startActivity the real YouTube deep link. Lets the next field log tell "FSI demoted,
+     * trampoline never ran" (ran stays false) apart from "trampoline ran but the deep link
+     * was BAL-dropped" (ran=true, launchOk=false).
+     */
+    fun onTrampolineResult(launchOk: Boolean) {
+        trampolineCrumb?.let {
+            it.ran = true
+            it.launchOk = launchOk
+        }
+    }
+
+    /** Copy the FSI trampoline breadcrumb onto [entry] as the nudge resolves. No-op off the FSI path. */
+    private fun stampTrampoline(entry: DebugEntry) {
+        val crumb = trampolineCrumb ?: return
+        entry.fsiTrampolineRan = crumb.ran
+        entry.fsiTrampolineLaunchOk = if (crumb.ran) crumb.launchOk else false
+    }
+
+    /**
      * Whether a successful nudge should speak [ErrorSpeech.MEDIA_PLAY_CONFIRMED].
      * Rider preference — [com.moto.voice.data.AppSettings.confirmMediaStart].
      * Pipeline sets this before each op; default true.
@@ -128,6 +161,13 @@ object MediaOrchestrator {
         // would go to Spotify per field-log evidence). Only for YouTube — leaves
         // other apps alone.
         prepauseTarget(context, MediaSessions.YOUTUBE_PKG)
+
+        // v1.3.25 — free audio focus before launching YouTube. Field log 1784173407858
+        // (morning session, after a BT reconnect) failed EVERY youtube_play with
+        // mediaCtrlPkgMiss=com.spotify.music: the helmet auto-resumed Spotify, and with
+        // Spotify holding focus YouTube never registered a session (noSession). Pause any
+        // foreign player explicitly (Rule #1: targeted controller, never a media key).
+        prepauseForeignPlayers(context, entry)
 
         val launched = fireYoutubeIntent(context, videoId, query, entry)
         if (!launched) return@withLock Result.NoTarget
@@ -288,6 +328,34 @@ object MediaOrchestrator {
         return MediaSessionMemory.lastOpenedApp()
     }
 
+    /**
+     * v1.3.25 — pause every OTHER app that is actively PLAYING/BUFFERING before we
+     * launch YouTube, so YouTube can take audio focus. The rider's helmet auto-resumes
+     * Spotify on every BT reconnect (field log 1784173407858), and a foreign player
+     * holding focus is the leading suspect for YouTube's session never appearing.
+     * Rule #1: each pause targets an explicit controller — never a media key. Records
+     * what we paused into [DebugEntry.mediaForeignPaused] to confirm the hypothesis in
+     * the next field log.
+     */
+    private suspend fun prepauseForeignPlayers(context: Context, entry: DebugEntry) {
+        val foreign = MediaSessions.activeControllers(context).filter {
+            it.packageName != MediaSessions.YOUTUBE_PKG &&
+                (it.playbackState?.state == PlaybackState.STATE_PLAYING ||
+                    it.playbackState?.state == PlaybackState.STATE_BUFFERING)
+        }
+        if (foreign.isEmpty()) return
+        entry.mediaForeignPaused = foreign.joinToString(",") {
+            "${it.packageName}=${MediaSessions.stateName(it.playbackState?.state)}"
+        }
+        foreign.forEach { ctrl ->
+            logOp(entry, "prepauseForeign", ctrl.packageName)
+            Log.d(TAG, "prepauseForeignPlayers: pausing ${ctrl.packageName} to free focus for YouTube")
+            runCatching { ctrl.transportControls.pause() }
+                .onFailure { Log.w(TAG, "prepauseForeignPlayers: pause() failed for ${ctrl.packageName}", it) }
+        }
+        delay(300L)
+    }
+
     /** Pause the [targetPkg] session directly. No-op if the controller doesn't exist. */
     private suspend fun prepauseTarget(context: Context, targetPkg: String) {
         val ctrl = MediaSessions.controllerFor(context, targetPkg) ?: return
@@ -338,6 +406,10 @@ object MediaOrchestrator {
         val locked = isScreenLocked(context) == true
         if (locked && LockScreenLauncher.canUseFullScreenIntent(context)) {
             logOp(entry, "launch→fullScreenIntent", MediaSessions.YOUTUBE_PKG)
+            // v1.3.25 diagnostic — arm a fresh breadcrumb the trampoline will stamp when
+            // (if) the OS honors the FSI. Reset BEFORE posting so a demoted FSI leaves
+            // ran=false, which the nudge reads as "trampoline never launched".
+            trampolineCrumb = TrampolineCrumb()
             val posted = LockScreenLauncher.launchOverLockScreen(context, target)
             if (!posted) entry.error = ((entry.error ?: "") + " fsi_notify_failed").trim()
             return posted
@@ -417,6 +489,7 @@ object MediaOrchestrator {
                 // UNKNOWN (no title yet) but playing: keep waiting for the title, then accept
                 // at the window edge rather than false-block something that IS playing.
                 if (verdict != YoutubeVerify.Verdict.UNKNOWN || windowExhausted) {
+                    stampTrampoline(entry)
                     logOp(entry, "nudge→confirmed", targetPkg)
                     Log.d(TAG, "nudge: $targetPkg playing, verdict=$verdict title=\"$currentTitle\" — confirmed")
                     if (speakPlayConfirmed && audioIsSettled(appCtx)) {
@@ -488,6 +561,7 @@ object MediaOrchestrator {
     private fun declareLaunchBlocked(
         appCtx: Context, targetPkg: String, entry: DebugEntry, reason: String,
     ) {
+        stampTrampoline(entry)
         val available = MediaSessions.activePackagesForDebug(appCtx)
         entry.mediaCtrlPkgMiss = if (available.isEmpty()) "none" else available.joinToString(",")
         entry.launchBlocked = true
@@ -503,6 +577,10 @@ object MediaOrchestrator {
     private fun cancelPendingNudge() {
         pendingNudge?.let { handler.removeCallbacks(it) }
         pendingNudge = null
+        // Drop any stale FSI breadcrumb so a later non-FSI (unlocked) open can't be
+        // stamped with a previous locked launch's trampoline result. Every op calls
+        // this at its top; the FSI branch re-arms a fresh crumb when it fires.
+        trampolineCrumb = null
     }
 
     /**
