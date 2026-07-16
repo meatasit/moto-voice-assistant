@@ -200,6 +200,35 @@ data class DebugEntry(
 
     /** v1.3.21 — the video title we asked the target app to open (from the webhook). */
     var mediaExpectedTitle: String? = null,
+
+    /**
+     * v1.3.25 — any OTHER app's session that was PLAYING when we fired the YouTube
+     * intent and that we pre-paused to free audio focus (e.g. "com.spotify.music=playing").
+     * Field log 1784173407858 morning session: every youtube_play failed with
+     * mediaCtrlPkgMiss=com.spotify.music — the helmet auto-resumed Spotify on BT
+     * reconnect, and Spotify holding focus is the leading suspect for YouTube never
+     * registering a session (noSession). Null when nothing foreign was playing.
+     */
+    var mediaForeignPaused: String? = null,
+
+    /**
+     * v1.3.25 diagnostic — when the locked-screen full-screen-intent path was used,
+     * did [com.moto.voice.media.LockLaunchActivity] (the FSI trampoline) actually run?
+     * `false` after the poll window = the OS demoted the FSI to a tap-only heads-up
+     * notification and never launched our activity. `true` = FSI honored. Null = the
+     * FSI path wasn't taken (screen unlocked, or no USE_FULL_SCREEN_INTENT permission).
+     * Closes the blind spot where a working night session and a failing morning session
+     * both logged an identical `launch→fullScreenIntent`.
+     */
+    var fsiTrampolineRan: Boolean? = null,
+
+    /**
+     * v1.3.25 diagnostic — if [fsiTrampolineRan] is true, did the trampoline's
+     * startActivity(youtube deep link) succeed? Distinguishes "FSI honored but the
+     * YouTube deep link was Background-Activity-Launch dropped" from "FSI demoted".
+     * Null when the FSI path wasn't taken.
+     */
+    var fsiTrampolineLaunchOk: Boolean? = null,
 ) {
     fun time(): String = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date(timestamp))
 
@@ -230,6 +259,9 @@ data class DebugEntry(
         if (screenLocked == true) append("  🔒locked")
         if (mediaExpectedTitle != null) append("  want:\"${mediaExpectedTitle}\"")
         if (mediaActualTitle != null) append("  got:\"${mediaActualTitle}\"")
+        if (mediaForeignPaused != null) append("  fgPaused:${mediaForeignPaused}")
+        if (fsiTrampolineRan != null) append("  fsiRan:${fsiTrampolineRan}")
+        if (fsiTrampolineLaunchOk != null) append("  fsiLaunch:${fsiTrampolineLaunchOk}")
         if (launchBlocked) append("  launch:blocked")
         if (finishReason != null) append("  end:${finishReason}")
         if (error != null) append("  ⚠️ $error")

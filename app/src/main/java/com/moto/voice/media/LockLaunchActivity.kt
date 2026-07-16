@@ -47,10 +47,15 @@ class LockLaunchActivity : Activity() {
         val target: Intent? = intent?.getParcelableExtra(EXTRA_TARGET_INTENT)
         if (target != null) {
             target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            runCatching { startActivity(target) }
+            val launchOk = runCatching { startActivity(target) }
                 .onFailure { Log.w(TAG, "LockLaunchActivity: startActivity(target) failed", it) }
+                .isSuccess
+            // v1.3.25 diagnostic — tell the orchestrator we actually ran (i.e. the OS honored
+            // the full-screen intent rather than demoting it) and whether the deep link fired.
+            MediaOrchestrator.onTrampolineResult(launchOk)
         } else {
             Log.w(TAG, "LockLaunchActivity: no EXTRA_TARGET_INTENT — nothing to launch")
+            MediaOrchestrator.onTrampolineResult(false)
         }
         finish()
     }
