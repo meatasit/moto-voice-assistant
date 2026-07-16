@@ -70,6 +70,13 @@ object MediaOrchestrator {
     private const val POLL_INITIAL_DELAY_MS = 800L
     private const val POLL_INTERVAL_MS = 500L
     private const val POLL_WINDOW_MS = 9_000L
+    /**
+     * v1.3.26 (fix 1) — if the session is still on the PRIOR video this long after the poll
+     * started, re-fire the deep link ONCE. A locked YouTube→YouTube switch often ignores the
+     * first delivery (YouTube already the running task); the rider's manual retry lands it,
+     * so we automate one retry. Leaves ~6.5s of the 9s window for the re-fired switch to land.
+     */
+    private const val REFIRE_STILL_PRIOR_MS = 2_500L
     private const val NUDGE_SETTLE_MS = 2_000L
     private const val NUDGE_MAX_ATTEMPTS = 3
     private const val NUDGE_RETRY_SPACING_MS = 1_500L
@@ -160,7 +167,15 @@ object MediaOrchestrator {
         // Rule #1: pre-clean via targeted controller.pause() (NOT media key which
         // would go to Spotify per field-log evidence). Only for YouTube — leaves
         // other apps alone.
-        prepauseTarget(context, MediaSessions.YOUTUBE_PKG)
+        //
+        // v1.3.26 (fix 2) — but NOT when the screen is locked. Field log 1784203179701
+        // showed locked YouTube→YouTube switches frequently fail to navigate (stillPrior);
+        // having paused the current video A first left the rider in DEAD SILENCE. The
+        // title-based verify (not isMusicActive) no longer needs a paused baseline, and
+        // classify() checks the prior title first so a still-playing A can never
+        // false-confirm. Leaving A playing means a failed switch degrades to "old video
+        // keeps playing", not silence.
+        if (entry.screenLocked != true) prepauseTarget(context, MediaSessions.YOUTUBE_PKG)
 
         // v1.3.25 — free audio focus before launching YouTube. Field log 1784173407858
         // (morning session, after a BT reconnect) failed EVERY youtube_play with
@@ -175,7 +190,10 @@ object MediaOrchestrator {
         // Remember what we opened for rule #2 lookups.
         MediaSessionMemory.rememberOpenedApp(MediaSessions.YOUTUBE_PKG, videoId)
 
-        scheduleTargetedNudge(context, MediaSessions.YOUTUBE_PKG, expectedTitle, priorTitle, entry)
+        scheduleTargetedNudge(
+            context, MediaSessions.YOUTUBE_PKG, expectedTitle, priorTitle, entry,
+            videoId = videoId, query = query,
+        )
         Result.Success
     }
 
@@ -219,7 +237,10 @@ object MediaOrchestrator {
                     fireYoutubeIntent(context, lastVideo, null, entry)
                     // priorTitle = null: we only reach here because YouTube had no active
                     // session, so there's no old video to guard against.
-                    scheduleTargetedNudge(context, target, expectedTitle, priorTitle = null, entry = entry)
+                    scheduleTargetedNudge(
+                        context, target, expectedTitle, priorTitle = null, entry = entry,
+                        videoId = lastVideo, query = null,
+                    )
                     Result.Success
                 } else {
                     Result.NoTarget
@@ -443,12 +464,15 @@ object MediaOrchestrator {
     private fun scheduleTargetedNudge(
         context: Context, targetPkg: String,
         expectedTitle: String?, priorTitle: String?, entry: DebugEntry,
+        videoId: String?, query: String?,
     ) {
         val appCtx = context.applicationContext
         val pollStartAt = System.currentTimeMillis() + POLL_INITIAL_DELAY_MS
         val pollWindowEndAt = pollStartAt + POLL_WINDOW_MS
+        val refireAt = pollStartAt + REFIRE_STILL_PRIOR_MS
         var playAttempts = 0
         var lastPlayAttemptAt = 0L
+        var refiredSwitch = false
         lateinit var poll: Runnable
         poll = Runnable {
             val ctrl = MediaSessions.controllerFor(appCtx, targetPkg)
@@ -478,6 +502,20 @@ object MediaOrchestrator {
             if (verdict == YoutubeVerify.Verdict.STILL_PRIOR) {
                 // The session is still showing the OLD video — the requested switch did not
                 // land. Do NOT play() it (that would resume the wrong video and fake success).
+                //
+                // v1.3.26 (fix 1) — a locked YouTube→YouTube switch often doesn't navigate on
+                // the FIRST deep-link delivery: YouTube is already the running task and a bare
+                // vnd.youtube:VID (NEW_TASK) gets handed to it without a fresh navigation.
+                // Field log 1784203179701 proved the rider's manual "say it again" lands the
+                // switch — so re-fire the SAME deep link ONCE, mid-window, automating that.
+                if (!refiredSwitch && System.currentTimeMillis() >= refireAt &&
+                    (videoId != null || query != null)
+                ) {
+                    refiredSwitch = true
+                    logOp(entry, "nudge→refireSwitch", targetPkg)
+                    Log.w(TAG, "nudge: $targetPkg still on prior video — re-firing deep link once")
+                    fireYoutubeIntent(appCtx, videoId, query, entry)
+                }
                 // Give it until the window ends in case the new video is still loading; then
                 // speak the honest "can't open while locked" instead.
                 if (windowExhausted) {
