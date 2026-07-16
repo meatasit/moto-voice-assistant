@@ -212,6 +212,10 @@ object MediaOrchestrator {
                     val expectedTitle = MediaSessionMemory.currentTitle().ifBlank { null }
                     entry.mediaExpectedTitle = expectedTitle
                     entry.screenLocked = isScreenLocked(context)
+                    // v1.3.25 — same focus-steal guard as openYoutube: we only reach here
+                    // because YouTube had no session, so a foreign player (Spotify auto-resumed
+                    // on BT reconnect) may be holding audio focus. Pause it before refiring.
+                    prepauseForeignPlayers(context, entry)
                     fireYoutubeIntent(context, lastVideo, null, entry)
                     // priorTitle = null: we only reach here because YouTube had no active
                     // session, so there's no old video to guard against.
