@@ -5,7 +5,7 @@ Samsung Galaxy S24 Ultra + Vimoto V11X helmet with the phone screen locked
 (the field-log condition that exposed the Spotify hijack in v1.3.19).
 
 **Rules**
-- All seven scenarios (A–G) must pass **two rounds in a row** before merge.
+- All scenarios (A–H) must pass **two rounds in a row** before merge.
 - Every pass attaches the debug-log JSON export as evidence.
 - Screen must be **locked** for scenarios A–D unless noted — Background
   Activity Launch behaviour differs between locked / unlocked, and the field
@@ -192,6 +192,24 @@ Preconditions: YouTube is playing something with a duration ≥ 60 seconds.
 - Playback resumes automatically (v1.3.12 auto-resume rule).
 - No media-key fallback fires (unless notification-listener permission is
   denied on purpose for a control test).
+
+## H — Prompt / re-listen pacing (v1.3.27, by ear)
+
+Rider preference (2026-07-17): prompts and the "not heard, try again" re-listen pace
+**serially** — the assistant speaks the whole line, THEN a beep, THEN a clear ~0.3s
+gap, THEN the mic opens. No more speaking-over-the-beep pile-up on the helmet.
+
+Trigger both prompt moments on the helmet (SCO):
+1. **Re-listen:** press BVRA, stay silent (or mumble) so it says "ไม่ได้ยินเลย พูดอีกที"
+   → confirm you hear the full line, then the dual beep, then a beat of silence, THEN
+   it's your turn. The beep must NOT overlap the sentence.
+2. **Confirm question:** trigger a confirm (e.g. call with confirmation on) → same
+   pacing: full "…ใช่ไหมคะ", then beep, then gap, then your turn.
+
+**Pass criteria (by ear — no log field)**
+- The answer-listen beep lands AFTER the prompt finishes, never during it.
+- There's a clear short silence between the beep and needing to speak.
+- Nothing feels "ติดกัน / พูดหลังสัญญาณ".
 
 ---
 

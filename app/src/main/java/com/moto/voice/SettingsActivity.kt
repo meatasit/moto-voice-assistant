@@ -81,7 +81,21 @@ class SettingsActivity : AppCompatActivity() {
         binding.etAzureRegion.setText(settings.azureRegion)
         binding.etAzureKey.setText(settings.azureKey)
         binding.etAzureKey.transformationMethod = PasswordTransformationMethod.getInstance()
+        showAzureKeyStatus()
         loadVoiceDropdown()
+    }
+
+    /**
+     * Show at a glance whether a subscription key is already stored — the masked field
+     * alone made "not entered yet" indistinguishable from "entered and saved" (rider
+     * feedback 2026-07-16). Reports only that a key exists + its length, never the value.
+     */
+    private fun showAzureKeyStatus() {
+        binding.tvAzureResult.text = if (settings.azureKey.isBlank()) {
+            "⚪ ยังไม่ได้ใส่ key"
+        } else {
+            "🟢 มี key บันทึกไว้แล้ว (${settings.azureKey.length} ตัวอักษร)"
+        }
     }
 
     private fun loadVoiceDropdown() {
