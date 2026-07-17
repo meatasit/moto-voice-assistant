@@ -118,4 +118,53 @@ class SeekParserTest {
         // The parser MUST return null.
         assertNull(SeekParser.parse("เดือน กรกฎาคม"))
     }
+
+    // ─── v1.3.28 — negation must NOT force a reverse (field log 1784256366258) ───
+
+    @Test fun negatedBackwardWithForwardVerbIsForward() {
+        // Rider: "เลื่อนไปข้างหน้าไม่ใช่ถอยหลัง 3 นาที" — logged −180 before the fix
+        // because "ถอย" inside the NEGATION won the un-anchored backward match.
+        assertEquals(180, SeekParser.parse("เลื่อนไปข้างหน้าไม่ใช่ถอยหลัง 3 นาที")?.deltaSeconds)
+    }
+
+    @Test fun negatedBackwardNoVerbIsForward() {
+        // Rider: "วีดีโอไปข้างหน้า 3 นาทีไม่ใช่ถอย" — logged −10 before the fix.
+        assertEquals(180, SeekParser.parse("วีดีโอไปข้างหน้า 3 นาทีไม่ใช่ถอย")?.deltaSeconds)
+    }
+
+    @Test fun negationOnlyIsNull() {
+        // "ไม่ใช่ถอยหลัง" with nothing else — after stripping the negated phrase there is
+        // no seek content left, so it must NOT fire a (default) backward seek.
+        assertNull(SeekParser.parse("ไม่ใช่ถอยหลัง"))
+    }
+
+    @Test fun genuineBackwardWithNoNegationStillReverses() {
+        // Guard: the negation strip must not touch a real backward command.
+        assertEquals(-180, SeekParser.parse("ถอยหลัง 3 นาที")?.deltaSeconds)
+        assertEquals(-10, SeekParser.parse("ย้อนกลับเลื่อน 10 วิ")?.deltaSeconds)
+    }
+
+    // ─── v1.3.28 — filler words between direction and number ────────────────────
+
+    @Test fun fillerAeekForwardMinutes() {
+        // Rider: "เลื่อนไปข้างหน้าอีก 5 นาที" — logged 10 before the fix ("อีก" broke
+        // number capture, dropping to DEFAULT_SECONDS).
+        assertEquals(300, SeekParser.parse("เลื่อนไปข้างหน้าอีก 5 นาที")?.deltaSeconds)
+    }
+
+    @Test fun fillerSakForwardSeconds() =
+        assertEquals(30, SeekParser.parse("เลื่อนสัก 30 วิ")?.deltaSeconds)
+
+    // ─── v1.3.28 — bare directional forward (no seek verb) ──────────────────────
+
+    @Test fun bareDirectionalForwardMinutes() =
+        assertEquals(180, SeekParser.parse("ไปข้างหน้า 3 นาที")?.deltaSeconds)
+
+    @Test fun bareDirectionalForwardWithFiller() =
+        assertEquals(300, SeekParser.parse("ไปข้างหน้าอีก 5 นาที")?.deltaSeconds)
+
+    @Test fun bareDirectionalRequiresNumberAndUnit() {
+        // STRICT: no number → not a seek (avoid false-positives on ordinary "ข้างหน้า" talk).
+        assertNull(SeekParser.parse("รถข้างหน้าเยอะจัง"))
+    }
 }
