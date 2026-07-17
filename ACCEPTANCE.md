@@ -103,6 +103,19 @@ cold open, is the flaky case.
 - Grep the log: locked switches must NOT show `pauseTarget→com.google.android.youtube`
   before the `openYoutube` (fix 2 — we don't pause our own video when locked).
 
+**Pass criteria (v1.3.29 — rapid repeat / re-fire must not be demoted)**
+Do this round **fast**: back-to-back locked opens **within ~10s of each other**, which is
+the case field log 1784256366258 failed on. Until v1.3.29 every launch re-used one
+notification id, so a second open inside the notification's 12s lifetime was an *update*
+and the OS never fired the full-screen intent.
+- **`fsiRan = true` on EVERY locked open**, including the rapid repeats — not just the
+  first one after a quiet gap. A single `fsiRan=false` means the demote is NOT (only) the
+  stale-id bug and the rate-limiting hypothesis is back on the table.
+- When `nudge→refireSwitch` appears, the entry that follows it must show `fsiRan = true` —
+  the re-fire can now actually re-trigger the FSI instead of silently no-oping.
+- No stacking: at most one "กำลังเปิดสื่อให้ค่ะ" notification visible at a time (each
+  launch cancels the previous id before posting a fresh one).
+
 ### C-denied — permission OFF must still be honest (fallback)
 Preconditions: phone locked; "เปิดสื่อตอนจอล็อค" NOT granted.
 

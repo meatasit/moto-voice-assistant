@@ -24,7 +24,17 @@ import com.moto.voice.MotoVoiceApplication
 object LockScreenLauncher {
 
     private const val TAG = "LockScreenLauncher"
-    private const val NOTIF_ID = 0xB14E
+    private const val NOTIF_ID_BASE = 0xB14E
+
+    /**
+     * v1.3.29 — the id of the notification we last posted, so the next launch can cancel it.
+     * Ids ROTATE per launch: the OS only fires a full-screen intent when a notification is
+     * newly posted, so re-using a still-active id makes `notify` an update and the launch is
+     * silently demoted (field log 1784256366258: `fsiRan=false` on both the first fire and the
+     * 2.5s re-fire, well inside this notification's 12s lifetime).
+     */
+    private var lastNotifId: Int? = null
+    private var launchSeq = 0
 
     /** Whether we're allowed to fire full-screen intents (else the launch would be demoted). */
     fun canUseFullScreenIntent(context: Context): Boolean {
@@ -46,8 +56,16 @@ object LockScreenLauncher {
             putExtra(LockLaunchActivity.EXTRA_TARGET_INTENT, target)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
+        // Retire the previous launch notification first. While it is still posted, a notify()
+        // on its id is an update and the OS will not honor the full-screen intent again.
+        val nmc = NotificationManagerCompat.from(appCtx)
+        lastNotifId?.let { runCatching { nmc.cancel(it) } }
+        val notifId = NOTIF_ID_BASE + (launchSeq++ and 0xF)
+
+        // A rotating request code too, so the PendingIntent carries THIS launch's target
+        // rather than mutating the one the previous notification still holds.
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        val fullScreen = PendingIntent.getActivity(appCtx, REQ_CODE, trampoline, flags)
+        val fullScreen = PendingIntent.getActivity(appCtx, notifId, trampoline, flags)
 
         val notif = NotificationCompat.Builder(appCtx, MotoVoiceApplication.CH_LAUNCH)
             .setSmallIcon(appCtx.applicationInfo.icon)
@@ -61,13 +79,13 @@ object LockScreenLauncher {
             .build()
 
         return runCatching {
-            NotificationManagerCompat.from(appCtx).notify(NOTIF_ID, notif)
+            nmc.notify(notifId, notif)
+            lastNotifId = notifId
             true
         }.onFailure {
             Log.w(TAG, "launchOverLockScreen: notify failed (POST_NOTIFICATIONS denied?)", it)
         }.getOrDefault(false)
     }
 
-    private const val REQ_CODE = 0xB1
     private const val TIMEOUT_MS = 12_000L
 }
