@@ -69,6 +69,14 @@ private val YOUTUBE_ID_EXTRACT = Regex("([A-Za-z0-9_-]{11})")
 /** Default STT minimum-listen window (spec §4.2). */
 private const val DEFAULT_MIN_LISTEN_MS = 3_000L
 /**
+ * v1.3.27 — silence after a prompt's answer-listen beep before the mic opens. Rider
+ * preference (2026-07-17): prompts/re-listens pace SERIALLY — speak the whole prompt →
+ * beep → this clear gap → open mic — so TTS, earcon, and "your turn" don't pile up (the
+ * "ประโยคติดกัน / พูดหลังสัญญาณ" confusion). Longer than [com.moto.voice.audio.Earcon.MIC_OPEN_GAP_MS]
+ * (150ms, echo-tail guard) because this gap is a deliberate "your turn now" beat.
+ */
+private const val PROMPT_SETTLE_MS = 300L
+/**
  * Disambiguation (contact / YouTube picker) needs longer for the rider to hear + reply.
  * Bumped 6000 → 8000 in v1.3.9 §3 — field feedback that riders on the highway need
  * a beat longer to process "did she say หนึ่ง or สอง" before answering.
@@ -1486,16 +1494,15 @@ class VoiceCommandPipeline(
         minListenMs: Long = DEFAULT_MIN_LISTEN_MS,
         withReminder: Boolean = false,
     ): String {
-        // Spec v1.3.9 §2.2 — barge-in mode when on SCO (helmet mic + separate
-        // speaker channel = echo is manageable). Phone-mic mode keeps the safe
-        // serial "speak then listen" flow because acoustic bleed is too strong
-        // to filter reliably.
-        if (entry?.audioRoute == AudioRoute.SCO) {
-            return promptAndListenBargeIn(prompt, entry, minListenMs, withReminder)
-        }
+        // v1.3.27 — rider preference (2026-07-17): prompts pace SERIALLY on EVERY route.
+        // Speak the whole prompt → answer-listen beep → a clear PROMPT_SETTLE_MS gap →
+        // open the mic. Previously SCO used a barge-in path (promptAndListenBargeIn) that
+        // fired the beep + opened the mic 150ms into the TTS, piling speech + beep + "your
+        // turn" together — the rider found that confusing. The barge-in path is retained
+        // (unused) so it's easy to restore if the preference changes.
         speakAndRemember(prompt)
         Earcon.answerListen()
-        delay(Earcon.MIC_OPEN_GAP_MS)
+        delay(PROMPT_SETTLE_MS)
         PipelineState.setListening()  // spec v1.3.9 §4
         val result = withRemainingReminder(minListenMs, withReminder) {
             listenOnce(entry, minListenMs)
@@ -1522,7 +1529,11 @@ class VoiceCommandPipeline(
      * [minListenMs].
      *
      * Marks [DebugEntry.bargeInAnswer] on success.
+     *
+     * v1.3.27 — RETAINED but no longer dispatched: the rider chose serial prompt pacing
+     * (see [promptAndListen]). Kept intact so barge-in can be restored without a rewrite.
      */
+    @Suppress("unused")
     private suspend fun promptAndListenBargeIn(
         prompt: String,
         entry: DebugEntry?,
@@ -1629,7 +1640,7 @@ class VoiceCommandPipeline(
     private suspend fun promptAndListenDetailed(prompt: String, entry: DebugEntry): SttOutcome {
         speakAndRemember(prompt)
         Earcon.answerListen()
-        delay(Earcon.MIC_OPEN_GAP_MS)
+        delay(PROMPT_SETTLE_MS)  // v1.3.27 — clearer "your turn" beat (was MIC_OPEN_GAP_MS 150ms)
         val outcome = listenOnceDetailed(entry)
         if (TtsEchoFilter.isEcho(outcome.text, memory.lastSpoken)) {
             Log.w(TAG, "echo detected — treating as no-speech: '${outcome.text}'")
