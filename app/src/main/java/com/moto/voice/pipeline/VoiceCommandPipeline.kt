@@ -1,6 +1,7 @@
 package com.moto.voice.pipeline
 
 import android.Manifest
+import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -37,6 +38,7 @@ import com.moto.voice.nlu.ErrorSpeech
 import com.moto.voice.media.FmPlaybackState
 import com.moto.voice.media.FmPlayerService
 import com.moto.voice.media.MediaOrchestrator
+import com.moto.voice.media.LockScreenLauncher
 import com.moto.voice.network.WebhookClient
 import com.moto.voice.network.WebhookResponse
 import com.moto.voice.nlu.LocalIntercept
@@ -500,9 +502,9 @@ class VoiceCommandPipeline(
                 val number = memory.lastCallNumber
                 val name = memory.lastCallName ?: "เบอร์ล่าสุด"
                 if (number.isNullOrBlank()) speakAndRemember("ยังไม่มีเบอร์ล่าสุดในแอปนี้")
-                else confirmThenCall(ContactEntry(id = "last", displayName = name, phoneNumber = number), null)
+                else confirmThenCall(ContactEntry(id = "last", displayName = name, phoneNumber = number), null, entry)
             }
-            is LocalIntercept.Intercept.CallFavorite -> handleFavoriteCall(intercept.zeroBasedSlot)
+            is LocalIntercept.Intercept.CallFavorite -> handleFavoriteCall(intercept.zeroBasedSlot, entry)
             LocalIntercept.Intercept.NextVideo -> handleNextVideo(entry)
             LocalIntercept.Intercept.WhatIsPlaying -> handleWhatIsPlaying()
             is LocalIntercept.Intercept.Seek -> handleSeek(intercept.deltaSeconds, entry)
@@ -595,7 +597,7 @@ class VoiceCommandPipeline(
      *      IS still there, we just refuse to call because Contacts had drifted.
      *   4. Only after all three fail do we speak the "ไม่พบเบอร์" line.
      */
-    private suspend fun handleFavoriteCall(zeroBasedSlot: Int) {
+    private suspend fun handleFavoriteCall(zeroBasedSlot: Int, entry: DebugEntry) {
         val favs = com.moto.voice.data.FavoritesStore(context).list()
         val slotNumber = zeroBasedSlot + 1
         val slotWord = FAVORITE_SLOT_WORDS.getOrElse(zeroBasedSlot) { "$slotNumber" }
@@ -622,7 +624,7 @@ class VoiceCommandPipeline(
             speakAndRemember("ไม่พบเบอร์ของ ${fav.displayName} ในเครื่อง")
             return
         }
-        confirmThenCall(resolved, "จะโทรหา${resolved.displayName} รายการโปรดหมายเลข$slotWord ใช่ไหมคะ")
+        confirmThenCall(resolved, "จะโทรหา${resolved.displayName} รายการโปรดหมายเลข$slotWord ใช่ไหมคะ", entry)
     }
 
     // ─── Command processing ───────────────────────────────────────────────────
@@ -804,7 +806,7 @@ class VoiceCommandPipeline(
         when (action) {
             "call" -> {
                 val name = resp.contact?.takeIf { it.isNotBlank() } ?: resp.speak
-                handleCallByName(name, resp.speak)
+                handleCallByName(name, resp.speak, entry)
             }
             "youtube_play" -> handleYoutube(resp, entry)
             "fm" -> {
@@ -875,14 +877,14 @@ class VoiceCommandPipeline(
             finish(); return
         }
         when (cmd) {
-            is VoiceCommand.Call -> handleCallByName(cmd.name, null)
+            is VoiceCommand.Call -> handleCallByName(cmd.name, null, entry)
         }
         finish()
     }
 
     // ─── Call handling ────────────────────────────────────────────────────────
 
-    private suspend fun handleCallByName(name: String, speakOverride: String?) {
+    private suspend fun handleCallByName(name: String, speakOverride: String?, entry: DebugEntry) {
         if (!hasPerm(Manifest.permission.READ_CONTACTS)) {
             speakAndRemember(ErrorSpeech.PREFLIGHT_MISSING_CONTACTS); return
         }
@@ -890,17 +892,17 @@ class VoiceCommandPipeline(
         when {
             matches.isEmpty() -> speakAndRemember("ไม่พบ $name ในรายชื่อ")
             matches.size == 1 && matches[0].score >= HIGH_CONF ->
-                confirmThenCall(matches[0].contact, speakOverride)
+                confirmThenCall(matches[0].contact, speakOverride, entry)
             else -> {
                 val candidates = matches.take(3)
                 val choice = askDisambig(candidates)
                 if (choice < 0) speakAndRemember(ErrorSpeech.CANCELLED)
-                else confirmThenCall(candidates[choice].contact, null)
+                else confirmThenCall(candidates[choice].contact, null, entry)
             }
         }
     }
 
-    private suspend fun confirmThenCall(contact: ContactEntry, speakOverride: String?) {
+    private suspend fun confirmThenCall(contact: ContactEntry, speakOverride: String?, entry: DebugEntry) {
         // Spec v1.3.9 §2.1 — trim to the essence and END with the question word.
         // Old: "กำลังโทรหา แม่ พูด ยกเลิก เพื่อยกเลิก" — ended on the instruction, mid-
         // instruction is when riders start to talk over the assistant. New base line
@@ -910,7 +912,7 @@ class VoiceCommandPipeline(
             ?: "โทรหา${contact.displayName} ใช่ไหมคะ"
         if (!settings.confirmBeforeCall) {
             speakAndRemember(basePrompt)
-            makeCall(contact)
+            makeCall(contact, entry)
             return
         }
 
@@ -932,7 +934,7 @@ class VoiceCommandPipeline(
             // Spec v1.3.8 B2 — cancelled call is a natural pause; keep listening in case
             // the rider changes their mind or wants to dial someone else.
             followupEligible = true
-        } else makeCall(contact)
+        } else makeCall(contact, entry)
     }
 
     /**
@@ -974,7 +976,7 @@ class VoiceCommandPipeline(
         else -> (1..count).joinToString(" ") { "$it" }
     }
 
-    private fun makeCall(contact: ContactEntry) {
+    private fun makeCall(contact: ContactEntry, entry: DebugEntry) {
         if (!hasPerm(Manifest.permission.CALL_PHONE)) {
             scope.launch { speakAndRemember(ErrorSpeech.PREFLIGHT_MISSING_CALL) }
             return
@@ -991,17 +993,57 @@ class VoiceCommandPipeline(
             scope.launch { speakAndRemember(ErrorSpeech.NO_CELL_SIGNAL) }
             return
         }
-        runCatching {
-            context.startActivity(
-                Intent(Intent.ACTION_CALL, Uri.parse("tel:${Uri.encode(contact.phoneNumber)}"))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val callIntent = Intent(Intent.ACTION_CALL, Uri.parse("tel:${Uri.encode(contact.phoneNumber)}"))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+        // v1.3.30 — field log 1784551582120: "โทรหาคุณวดี" confirmed then SILENCE. The
+        // rider is locked (helmet, phone in pocket); a background startActivity(ACTION_CALL)
+        // is Background-Activity-Launch dropped exactly like the YouTube deep link was
+        // (LockLaunchActivity KDoc, field logs 1784078976959/1784082476746) — no exception,
+        // just nothing happens. Route the locked call through the same full-screen-intent
+        // trampoline so it launches from a foreground activity over the keyguard.
+        val locked = runCatching {
+            context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked
+        }.getOrNull() == true
+        entry.screenLocked = locked
+        entry.mediaTargetPkg = "tel"
+
+        if (locked && LockScreenLauncher.canUseFullScreenIntent(context)) {
+            val posted = LockScreenLauncher.launchOverLockScreen(
+                context, callIntent,
+                title = "กำลังโทรออกให้ค่ะ",
+                text = "โทรหา${contact.displayName}",
             )
+            appendCallOp(entry, if (posted) "call→fullScreenIntent" else "call→fsiNotifyFailed")
+            if (posted) {
+                memory.rememberCall(contact.phoneNumber, contact.displayName)
+                recordHistory(HistoryAction.Call(contact.displayName, contact.phoneNumber))
+                return
+            }
+            // FSI notification couldn't be posted (POST_NOTIFICATIONS denied?) — fall through
+            // to a direct start as a best effort rather than failing silently.
+        } else if (locked) {
+            // Locked but no USE_FULL_SCREEN_INTENT grant — the direct start below will
+            // likely be BAL-dropped; mark it so the field log + rider know to grant it.
+            entry.error = ((entry.error ?: "") + " call_no_fsi_permission").trim()
+        }
+
+        runCatching {
+            context.startActivity(callIntent)
+            appendCallOp(entry, if (locked) "call→startActivity(locked)" else "call→startActivity")
             memory.rememberCall(contact.phoneNumber, contact.displayName)
             recordHistory(HistoryAction.Call(contact.displayName, contact.phoneNumber))
         }.onFailure {
             Log.e(TAG, "call failed", it)
+            appendCallOp(entry, "call→startActivityFailed")
             scope.launch { speakAndRemember(ErrorSpeech.NO_CELL_SIGNAL) }
         }
+    }
+
+    /** Rule #3 — append a call launch op so the field log can reconstruct the path taken. */
+    private fun appendCallOp(entry: DebugEntry, op: String) {
+        val existing = entry.mediaOperations.orEmpty()
+        entry.mediaOperations = if (existing.isEmpty()) "$op[tel]" else "$existing;$op[tel]"
     }
 
     // ─── YouTube ──────────────────────────────────────────────────────────────

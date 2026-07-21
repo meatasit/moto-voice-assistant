@@ -99,9 +99,28 @@ cold open, is the flaky case.
   switch should land within the window without the rider repeating the command.
 - **No dead silence:** because we no longer pre-pause A while locked, if a switch still
   fails the PRIOR video keeps playing (not silence). A genuine failure still ends
-  `nudge→launchBlocked(stillPrior)` + honest TTS — but this should now be rare.
+  `nudge→launchBlocked(stillPrior)` — but this should now be rare.
+- **stillPrior TTS wording (v1.3.30):** when a switch ends `nudge→launchBlocked(stillPrior)`,
+  the rider must hear **`ยังเปลี่ยนคลิปไม่ทันค่ะ ลองสั่งเปลี่ยนอีกครั้งนะคะ`** — NOT the old
+  `เปิดไม่ได้ตอนจอล็อค…` line. Field log 1784551582120 proved the switch DID land shortly
+  after the window (the next command's `got:`/prior title is video B), so "can't open,
+  unlock first" contradicted the audio still playing. `noSession` blocks keep the
+  `เปิดไม่ได้ตอนจอล็อค…` line (nothing opened).
 - Grep the log: locked switches must NOT show `pauseTarget→com.google.android.youtube`
   before the `openYoutube` (fix 2 — we don't pause our own video when locked).
+
+**Pass criteria (v1.3.29 — rapid repeat / re-fire must not be demoted)**
+Do this round **fast**: back-to-back locked opens **within ~10s of each other**, which is
+the case field log 1784256366258 failed on. Until v1.3.29 every launch re-used one
+notification id, so a second open inside the notification's 12s lifetime was an *update*
+and the OS never fired the full-screen intent.
+- **`fsiRan = true` on EVERY locked open**, including the rapid repeats — not just the
+  first one after a quiet gap. A single `fsiRan=false` means the demote is NOT (only) the
+  stale-id bug and the rate-limiting hypothesis is back on the table.
+- When `nudge→refireSwitch` appears, the entry that follows it must show `fsiRan = true` —
+  the re-fire can now actually re-trigger the FSI instead of silently no-oping.
+- No stacking: at most one "กำลังเปิดสื่อให้ค่ะ" notification visible at a time (each
+  launch cancels the previous id before posting a fresh one).
 
 ### C-denied — permission OFF must still be honest (fallback)
 Preconditions: phone locked; "เปิดสื่อตอนจอล็อค" NOT granted.
@@ -210,6 +229,43 @@ Trigger both prompt moments on the helmet (SCO):
 - The answer-listen beep lands AFTER the prompt finishes, never during it.
 - There's a clear short silence between the beep and needing to speak.
 - Nothing feels "ติดกัน / พูดหลังสัญญาณ".
+
+## I — Call while the screen is LOCKED (v1.3.30)
+
+Field log 1784551582120: "โทรหาคุณวดี" → confirmed "…ใช่ไหมคะ" → **silence, no call**.
+A background `startActivity(ACTION_CALL)` is Background-Activity-Launch dropped while
+locked, exactly like the YouTube deep link was — no exception, just nothing. v1.3.30
+routes the locked call through the same full-screen-intent trampoline.
+
+### I-ok — locked call SUCCEEDS (permission granted)
+Preconditions: phone locked; "เปิดสื่อตอนจอล็อค" (USE_FULL_SCREEN_INTENT) granted; a
+contact that matches at high confidence; SIM present.
+
+1. Press BVRA → "โทรหา [ชื่อ]".
+2. Answer the confirm ("ใช่ไหมคะ") positively (or stay silent → it calls).
+3. Verify the dialer actually places the call over the lock screen.
+
+**Pass criteria**
+- `screenLocked = true`, `mediaTargetPkg = tel`
+- `mediaOperations` contains `call→fullScreenIntent[tel]`
+- The call connects — **no confirmed-then-silence**.
+
+### I-unlocked — no regression
+1. Unlock, "โทรหา [ชื่อ]" → confirm → call places.
+
+**Pass criteria**
+- `screenLocked = false`, `mediaOperations` contains `call→startActivity[tel]`.
+
+### I-denied — locked, FSI permission OFF
+Preconditions: phone locked; "เปิดสื่อตอนจอล็อค" NOT granted.
+
+1. Press BVRA → "โทรหา [ชื่อ]" → confirm.
+
+**Pass criteria**
+- `mediaOperations` contains `call→startActivity(locked)[tel]`; `error` includes
+  `call_no_fsi_permission`. (The call may still be BAL-dropped here — this row documents
+  that the log now SAYS so instead of leaving a blank; the fix for it is granting the
+  permission, same as media path C-denied.)
 
 ---
 

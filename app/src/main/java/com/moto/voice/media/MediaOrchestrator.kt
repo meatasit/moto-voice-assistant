@@ -612,7 +612,15 @@ object MediaOrchestrator {
         entry.finishReason = FinishReason.LAUNCH_BLOCKED
         logOp(entry, "nudge→launchBlocked($reason)", targetPkg)
         Log.w(TAG, "nudge: $targetPkg launch blocked ($reason). available=$available")
-        speakOutOfPipeline(appCtx, ErrorSpeech.LAUNCH_BLOCKED_LOCKED)
+        // v1.3.30 — split the honest line by WHY it blocked (field log 1784551582120):
+        //   noSession  → the app never came up: "can't open while locked, unlock first".
+        //   stillPrior → the app IS open and playing the old clip; the switch just didn't
+        //                land in-window. The old "can't open, unlock" line contradicted the
+        //                audio the rider could hear (the reported "confusing" TTS). Say the
+        //                clip hasn't switched yet and to try again — their retry lands it.
+        val line = if (reason == "stillPrior") ErrorSpeech.SWITCH_NOT_LANDED
+        else ErrorSpeech.LAUNCH_BLOCKED_LOCKED
+        speakOutOfPipeline(appCtx, line)
         pendingNudge = null
     }
 

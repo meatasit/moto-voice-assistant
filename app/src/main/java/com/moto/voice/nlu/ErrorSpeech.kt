@@ -201,7 +201,21 @@ object ErrorSpeech {
         "เปิดไม่ได้ตอนจอล็อคครับ ลองปลดล็อคก่อนนะครับ",
     )
 
-    /** All 21 lines, in a stable order — used by the pre-synthesize cache warmer. */
+    /**
+     * v1.3.30 — the `stillPrior` variant of a blocked switch. Field log 1784551582120:
+     * every launch_blocked entry was a locked YouTube→YouTube switch where YouTube was
+     * ALREADY open and playing the previous clip — the new clip just didn't navigate
+     * inside the 9s window (it landed a bit later; the next command's prior-title proves
+     * it). Speaking LAUNCH_BLOCKED_LOCKED ("can't open, unlock first") there contradicts
+     * what the rider hears (audio IS playing) — the reported "confusing" TTS. This is the
+     * honest line: it's still on the old clip, say it again (the manual retry lands it).
+     */
+    val SWITCH_NOT_LANDED: String get() = pick(
+        "ยังเปลี่ยนคลิปไม่ทันค่ะ ลองสั่งเปลี่ยนอีกครั้งนะคะ",
+        "ยังเปลี่ยนคลิปไม่ทันครับ ลองสั่งเปลี่ยนอีกครั้งนะครับ",
+    )
+
+    /** Every system line, in a stable order — used by the pre-synthesize cache warmer. */
     fun allSystemLines(): List<String> = listOf(
         THINKING, ONE_MORE_MOMENT,
         OFFLINE_LIMITED, TIMEOUT_WITH_FALLBACK, TIMEOUT_NO_FALLBACK,
@@ -221,7 +235,7 @@ object ErrorSpeech {
         TEACHING_HINT,
         SERVER_UNAVAILABLE,
         SEEK_ATTEMPTED, MEDIA_PLAY_CONFIRMED, MEDIA_OPENED_NOT_PLAYING,
-        LAUNCH_BLOCKED_LOCKED,
+        LAUNCH_BLOCKED_LOCKED, SWITCH_NOT_LANDED,
     )
 
     private fun pick(feminine: String, masculine: String): String =

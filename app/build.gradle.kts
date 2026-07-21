@@ -11,8 +11,8 @@ android {
         applicationId = "com.moto.voice"
         minSdk = 26
         targetSdk = 34
-        versionCode = 34
-        versionName = "1.3.28"
+        versionCode = 36
+        versionName = "1.3.30"
     }
 
     signingConfigs {
