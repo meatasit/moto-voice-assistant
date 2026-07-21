@@ -48,9 +48,19 @@ object LockScreenLauncher {
      * [LockLaunchActivity] carrying [target]. Returns true if the notification was posted
      * (best-effort — the OS decides whether to launch it full-screen based on lock state
      * and the permission). Caller should have checked [canUseFullScreenIntent] first.
+     *
+     * v1.3.30 — [title]/[text] are the notification copy. They default to the media wording
+     * but the call path (field log 1784551582120: `ACTION_CALL` BAL-dropped while locked,
+     * same silent-drop as the media deep link) passes call-specific copy so the heads-up
+     * fallback reads correctly if the OS demotes the FSI.
      */
     @SuppressLint("MissingPermission") // POST_NOTIFICATIONS is checked by the try/catch below.
-    fun launchOverLockScreen(context: Context, target: Intent): Boolean {
+    fun launchOverLockScreen(
+        context: Context,
+        target: Intent,
+        title: String = "กำลังเปิดสื่อให้ค่ะ",
+        text: String = "แตะเพื่อเปิดหน้าจอ",
+    ): Boolean {
         val appCtx = context.applicationContext
         val trampoline = Intent(appCtx, LockLaunchActivity::class.java).apply {
             putExtra(LockLaunchActivity.EXTRA_TARGET_INTENT, target)
@@ -69,8 +79,8 @@ object LockScreenLauncher {
 
         val notif = NotificationCompat.Builder(appCtx, MotoVoiceApplication.CH_LAUNCH)
             .setSmallIcon(appCtx.applicationInfo.icon)
-            .setContentTitle("กำลังเปิดสื่อให้ค่ะ")
-            .setContentText("แตะเพื่อเปิดหน้าจอ")
+            .setContentTitle(title)
+            .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(fullScreen)          // tap fallback if FSI is demoted
             .setFullScreenIntent(fullScreen, true) // the over-lockscreen launch
