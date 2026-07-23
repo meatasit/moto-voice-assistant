@@ -37,6 +37,15 @@ helmet auto-resumes Spotify when Bluetooth reconnects, Spotify grabs audio focus
 and every locked `เปิด youtube` then failed with `noSession` because YouTube could
 never take focus. v1.3.25 pre-pauses the foreign player first.
 
+**v1.3.31 note:** field log `moto_voice_debug_1784768501667` proved the v1.3.25
+pre-pause is a single snapshot at the launch instant and misses a Spotify that
+auto-resumes a beat *later* (the morning cluster failed `noSession` with Spotify
+active but `prepauseForeign` never firing). v1.3.31 adds a per-tick re-pause inside
+the 9s nudge window, logged `repauseForeign[com.spotify.music]`. So this scenario now
+passes on EITHER signal (see criteria below), and reproducing the race matters: if
+Spotify is only paused/spinning-up at the instant you say the command and resumes
+just after, expect `repauseForeign`, not `prepauseForeign`.
+
 Preconditions: **Power the helmet BT off, then on** (reproduces the reconnect
 auto-resume) so Spotify is actively playing. Screen locked. "เปิดสื่อตอนจอล็อค" granted.
 
@@ -47,10 +56,12 @@ auto-resume) so Spotify is actively playing. Screen locked. "เปิดสื�
 5. Verify YouTube plays the requested video and **Spotify has been paused**.
 
 **Pass criteria**
-- `mediaOperations` shows `prepauseForeign[com.spotify.music]` (targeted controller
-  pause), NOT a bare media-key dispatch.
+- `mediaOperations` shows `prepauseForeign[com.spotify.music]` **or**
+  `repauseForeign[com.spotify.music]` (targeted controller pause), NOT a bare media-key
+  dispatch. The `repauseForeign` variant means Spotify auto-resumed inside the nudge
+  window and the v1.3.31 per-tick guard caught it.
 - `mediaForeignPaused = com.spotify.music=playing` (or `=buffering`) — proves Spotify
-  was holding focus at launch, i.e. the field-bug condition was actually reproduced.
+  was holding focus, i.e. the field-bug condition was actually reproduced.
 - `mediaTargetPkg = com.google.android.youtube`, ends `nudge→confirmed`,
   `launchBlocked = false`.
 - On the locked FSI path, `fsiRan = true` (the OS honored the full-screen intent).
