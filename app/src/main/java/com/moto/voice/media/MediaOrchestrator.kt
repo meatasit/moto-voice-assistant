@@ -363,11 +363,7 @@ object MediaOrchestrator {
      * the next field log.
      */
     private suspend fun prepauseForeignPlayers(context: Context, entry: DebugEntry) {
-        val foreign = MediaSessions.activeControllers(context).filter {
-            it.packageName != MediaSessions.YOUTUBE_PKG &&
-                (it.playbackState?.state == PlaybackState.STATE_PLAYING ||
-                    it.playbackState?.state == PlaybackState.STATE_BUFFERING)
-        }
+        val foreign = foreignActivePlayers(context)
         if (foreign.isEmpty()) return
         entry.mediaForeignPaused = foreign.joinToString(",") {
             "${it.packageName}=${MediaSessions.stateName(it.playbackState?.state)}"
@@ -380,6 +376,20 @@ object MediaOrchestrator {
         }
         delay(300L)
     }
+
+    /**
+     * Non-YouTube sessions actively PLAYING/BUFFERING right now — the foreign players
+     * that can hold audio focus away from YouTube. Shared by the launch-instant
+     * [prepauseForeignPlayers] and the per-tick re-pause inside [scheduleTargetedNudge].
+     */
+    private fun foreignActivePlayers(
+        context: Context,
+    ): List<android.media.session.MediaController> =
+        MediaSessions.activeControllers(context).filter {
+            it.packageName != MediaSessions.YOUTUBE_PKG &&
+                (it.playbackState?.state == PlaybackState.STATE_PLAYING ||
+                    it.playbackState?.state == PlaybackState.STATE_BUFFERING)
+        }
 
     /** Pause the [targetPkg] session directly. No-op if the controller doesn't exist. */
     private suspend fun prepauseTarget(context: Context, targetPkg: String) {
@@ -473,8 +483,30 @@ object MediaOrchestrator {
         var playAttempts = 0
         var lastPlayAttemptAt = 0L
         var refiredSwitch = false
+        // v1.3.31 — packages we've already logged a mid-window re-pause for (log once each).
+        val foreignRepaused = mutableSetOf<String>()
         lateinit var poll: Runnable
         poll = Runnable {
+            // v1.3.31 — the launch-instant prepause is a single snapshot. Field log
+            // 1784768501667 proved Spotify auto-resumes AFTER that snapshot on a BT
+            // reconnect (the morning noSession cluster) so it was never caught —
+            // prepauseForeign never fired, yet Spotify held a session at block time and
+            // YouTube never registered one. Re-check every tick and pause any foreign
+            // player that (re)started so YouTube can take focus. Rule #1: targeted
+            // controller.pause(), never a media key. Log once per pkg; keep pausing while
+            // it keeps resuming. The 9s window bounds the pause-war; on window end the
+            // ctrl==null branch still declares noSession honestly.
+            for (fc in foreignActivePlayers(appCtx)) {
+                val pkg = fc.packageName
+                if (foreignRepaused.add(pkg)) {
+                    logOp(entry, "repauseForeign", pkg)
+                    entry.mediaForeignPaused =
+                        (entry.mediaForeignPaused?.let { "$it," } ?: "") +
+                            "$pkg=${MediaSessions.stateName(fc.playbackState?.state)}"
+                    Log.w(TAG, "nudge: foreign $pkg resumed mid-window — re-pausing to free focus for YouTube")
+                }
+                runCatching { fc.transportControls.pause() }
+            }
             val ctrl = MediaSessions.controllerFor(appCtx, targetPkg)
             if (ctrl == null) {
                 // Rule #1: NO media-key fallback here. If YouTube's session isn't there,
