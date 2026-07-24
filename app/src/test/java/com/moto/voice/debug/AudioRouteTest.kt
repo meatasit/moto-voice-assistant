@@ -31,4 +31,27 @@ class AudioRouteTest {
         val e = DebugEntry(sttFinal = "โทรหาแม่")
         assertEquals(false, e.summary().contains("route:"))
     }
+
+    // ─── v1.3.32 ready-cue routing instrumentation ───────────────────────────
+
+    @Test fun readyEarconRouteDefaultsNull() {
+        // A fresh entry must not claim the ready cue landed anywhere before it fired.
+        assertEquals(null, DebugEntry().readyEarconRoute)
+        assertEquals(null, DebugEntry().scoColdConnect)
+    }
+
+    @Test fun summaryShowsReadyCueRoute() {
+        val e = DebugEntry(sttFinal = "เปิด youtube").apply { readyEarconRoute = AudioRoute.PHONE }
+        assertEquals(true, e.summary().contains("ready→phone"))
+    }
+
+    @Test fun summaryFlagsColdConnect() {
+        val e = DebugEntry(sttFinal = "เปิด youtube").apply { scoColdConnect = true }
+        assertEquals(true, e.summary().contains("sco:cold"))
+    }
+
+    @Test fun summaryOmitsColdWhenWarm() {
+        val e = DebugEntry(sttFinal = "เปิด youtube").apply { scoColdConnect = false }
+        assertEquals(false, e.summary().contains("sco:cold"))
+    }
 }

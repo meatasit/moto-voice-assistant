@@ -34,6 +34,22 @@ data class DebugEntry(
      */
     var scoState: String? = null,
 
+    /**
+     * v1.3.32 — the audio route active at the instant [com.moto.voice.audio.Earcon.ready]
+     * fired ("sco" = helmet, "phone" = phone speaker). Field log 1784863894811: rider
+     * reported the first-press ready cue was inaudible, but the earcon path was
+     * uninstrumented so the log couldn't show WHERE the tone went. Null on non-main-STT
+     * paths that don't play the ready cue.
+     */
+    var readyEarconRoute: String? = null,
+
+    /**
+     * v1.3.32 — true when this interaction's SCO bring-up took the cold-start path (first
+     * connect since process start, which uses the longer cold settle). Correlates the
+     * rider's "กดครั้งแรก" (first press) symptom with the connect that was cold.
+     */
+    var scoColdConnect: Boolean? = null,
+
     // ─── TTS instrumentation (Sprint I §6) ───────────────────────────────────
     /** Which engine actually delivered the audio (azure / android / android_fallback). */
     var ttsEngine: String? = null,
@@ -237,6 +253,8 @@ data class DebugEntry(
         if (sttFinal.isNotBlank()) append("  STT: \"$sttFinal\"")
         if (audioRoute != null) append("  route:${audioRoute}")
         if (scoState != null) append("  sco:${scoState}")
+        if (readyEarconRoute != null) append("  ready→${readyEarconRoute}")
+        if (scoColdConnect == true) append("  sco:cold")
         if (scoTimeMs > 0) append("  SCO:${scoTimeMs}ms")
         if (scoTeardownMs > 0) append("  SCO⇩:${scoTeardownMs}ms")
         if (audioMode != null) append("  mode:${audioMode}")
