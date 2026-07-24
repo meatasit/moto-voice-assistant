@@ -38,25 +38,98 @@ class BluetoothAudioRouter(private val context: Context) {
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val btSco = am.availableCommunicationDevices
-                .firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
-            val ok = btSco != null && am.setCommunicationDevice(btSco)
-            if (!ok) {
-                fireOnce(false)
-                return
-            }
-            // setCommunicationDevice() returns true immediately even though the SCO link
-            // may take a moment to actually carry audio. Give it a beat before we start
-            // recording — otherwise the first ~200ms of speech gets recorded from the
-            // phone mic during the switchover. Empirically ~300ms is enough on the S24.
-            handler.postDelayed({ fireOnce(true) }, SCO_SETTLE_MS)
+            connectModern(am)
         } else {
             connectLegacy(am, timeoutMs)
         }
     }
 
+    /**
+     * API 31+ SCO bring-up via [AudioManager.setCommunicationDevice].
+     *
+     * Two cold-start hardenings, both from field log 1784863894811 (rider: "กดปุ่ม
+     * ครั้งแรกแล้วไม่มีเสียงสัญญาณ" — the [Earcon.ready] cue was inaudible on the very
+     * first press, audible on every press after):
+     *
+     *   1. **Cold retry** — on the first connect since process start the SCO device may
+     *      not yet be enumerated in [AudioManager.availableCommunicationDevices]. If the
+     *      first `setCommunicationDevice` fails on a cold stack, retry once after a short
+     *      beat instead of falling straight back to the phone mic (which sends the earcon
+     *      to the phone speaker the helmeted rider can't hear).
+     *   2. **Cold settle** — `setCommunicationDevice` returns true immediately, but the
+     *      SCO link needs longer than the warm ~300ms to actually carry audio on a cold
+     *      BT stack. The first connect gets [SCO_COLD_SETTLE_MS] so the ready cue (played
+     *      right after we fire ready) lands on the live helmet link, not into the
+     *      switchover gap. Subsequent connects keep the warm [SCO_SETTLE_MS].
+     */
+    private fun connectModern(am: AudioManager) {
+        val cold = !everConnectedThisProcess
+        lastConnectWasCold = cold
+
+        fun trySetDevice(): Boolean {
+            val btSco = am.availableCommunicationDevices
+                .firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+            return btSco != null && am.setCommunicationDevice(btSco)
+        }
+
+        fun settleThenFire() {
+            val settle = if (cold) SCO_COLD_SETTLE_MS else SCO_SETTLE_MS
+            handler.postDelayed({
+                everConnectedThisProcess = true
+                fireOnce(true)
+            }, settle)
+        }
+
+        if (trySetDevice()) {
+            settleThenFire()
+            return
+        }
+        if (!cold) {
+            fireOnce(false)
+            return
+        }
+        // Cold stack: SCO device may not be enumerated yet on the very first press.
+        handler.postDelayed({
+            if (callbackFired) return@postDelayed
+            if (trySetDevice()) settleThenFire() else fireOnce(false)
+        }, COLD_RETRY_MS)
+    }
+
     private companion object {
         const val SCO_SETTLE_MS = 300L
+        /** First connect after cold start needs longer for the link to carry audio. */
+        const val SCO_COLD_SETTLE_MS = 800L
+        /** Delay before the one retry of setCommunicationDevice on a cold stack. */
+        const val COLD_RETRY_MS = 250L
+
+        /** Process-global so it survives per-interaction router instances. */
+        @Volatile var everConnectedThisProcess = false
+    }
+
+    /** Set true while the most recent [connect] used the cold (first-since-boot) path. */
+    @Volatile private var lastConnectWasCold = false
+
+    /**
+     * Whether the most recent [connect] took the cold-start path (first SCO bring-up
+     * since process start). Logged as `scoColdConnect` so a field log can correlate the
+     * "first press" symptom with the connect that used the longer cold settle.
+     */
+    fun lastConnectWasCold(): Boolean = lastConnectWasCold
+
+    /**
+     * True if the platform's active communication device is the BT SCO link right now.
+     * Read the instant before [Earcon.ready] fires so the field log can PROVE whether the
+     * ready cue routed to the helmet (`sco`) or leaked to the phone speaker (`phone`) —
+     * the earcon path is otherwise uninstrumented (field log 1784863894811 could only
+     * show the rider reporting the symptom, never where the tone went).
+     */
+    fun communicationRouteIsSco(): Boolean {
+        val am = audioManager ?: return false
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            am.communicationDevice?.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+        } else {
+            @Suppress("DEPRECATION") am.isBluetoothScoOn
+        }
     }
 
     @Suppress("DEPRECATION")
