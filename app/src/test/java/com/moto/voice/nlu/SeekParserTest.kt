@@ -167,4 +167,27 @@ class SeekParserTest {
         // STRICT: no number → not a seek (avoid false-positives on ordinary "ข้างหน้า" talk).
         assertNull(SeekParser.parse("รถข้างหน้าเยอะจัง"))
     }
+
+    // ─── v1.3.33 — field log 1786010970975 ───────────────────────────────────────
+
+    @Test fun deinNaMinutesIsForward() {
+        // Rider: "เดินหน้า 20 นาที" fell through to the webhook pre-fix.
+        assertEquals(1200, SeekParser.parse("เดินหน้า 20 นาที")?.deltaSeconds)
+    }
+
+    @Test fun deinNaAloneDefaults() =
+        assertEquals(SeekParser.DEFAULT_SECONDS, SeekParser.parse("เดินหน้า")?.deltaSeconds)
+
+    @Test fun luatMishearingFullSentence() {
+        // Log 1786010970975: "เลือด 50 นาที" (STT mishearing of "เลื่อน") logged
+        // both −300 and +300 from the webhook for the identical phrase. Must
+        // resolve to forward, same as the bare "เลื่อน" default direction.
+        assertEquals(3000, SeekParser.parse("เลือด 50 นาที")?.deltaSeconds)
+    }
+
+    @Test fun luatMishearingStillForwardOnly() {
+        // "เลือด" without a number/unit or direction word shouldn't false-positive
+        // into a seek — real mentions of "blood" must stay untouched.
+        assertNull(SeekParser.parse("เลือดกำเดาไหล"))
+    }
 }

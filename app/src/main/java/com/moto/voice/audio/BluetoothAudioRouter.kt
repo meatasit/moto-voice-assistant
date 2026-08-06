@@ -10,8 +10,10 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.annotation.RequiresPermission
+import kotlinx.coroutines.delay
 
 private const val TAG = "BluetoothAudioRouter"
 
@@ -130,6 +132,27 @@ class BluetoothAudioRouter(private val context: Context) {
         } else {
             @Suppress("DEPRECATION") am.isBluetoothScoOn
         }
+    }
+
+    /**
+     * Poll [communicationRouteIsSco] until it flips true or [maxWaitMs] elapses.
+     *
+     * v1.3.33 — field log 1786010970975 proved the fixed settle delay ([SCO_SETTLE_MS] /
+     * [SCO_COLD_SETTLE_MS]) still races: every no_speech entry with `scoState=connected`
+     * showed `readyEarconRoute=phone` (including WARM reconnects, `scoColdConnect=false`),
+     * and the rider's own follow-up utterances ("เมื่อกี้ไม่ได้ยินสัญญาณที่ให้พูด...") confirm
+     * the ready cue was genuinely inaudible on the helmet. `AudioManager.communicationDevice`
+     * does not reliably flip within a single fixed delay, so poll for it instead of trusting
+     * one delayed read. Bounded so a helmet that never confirms SCO still gets the earcon
+     * (on the phone speaker, same as today) rather than hanging the interaction.
+     */
+    suspend fun awaitScoRouteSettled(maxWaitMs: Long, pollIntervalMs: Long = 60L): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + maxWaitMs
+        while (!communicationRouteIsSco()) {
+            if (SystemClock.elapsedRealtime() >= deadline) return false
+            delay(pollIntervalMs)
+        }
+        return true
     }
 
     @Suppress("DEPRECATION")

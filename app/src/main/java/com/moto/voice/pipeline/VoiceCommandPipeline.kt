@@ -71,6 +71,14 @@ private val YOUTUBE_ID_EXTRACT = Regex("([A-Za-z0-9_-]{11})")
 /** Default STT minimum-listen window (spec §4.2). */
 private const val DEFAULT_MIN_LISTEN_MS = 3_000L
 /**
+ * v1.3.33 — bound on how much longer than the settle delay we'll wait for
+ * [com.moto.voice.audio.BluetoothAudioRouter.communicationRouteIsSco] to flip true before
+ * giving up and playing the ready earcon wherever the route currently is. See
+ * [com.moto.voice.audio.BluetoothAudioRouter.awaitScoRouteSettled] kdoc for the evidence
+ * (field log 1786010970975).
+ */
+private const val EARCON_ROUTE_POLL_BUDGET_MS = 400L
+/**
  * v1.3.27 — silence after a prompt's answer-listen beep before the mic opens. Rider
  * preference (2026-07-17): prompts/re-listens pace SERIALLY — speak the whole prompt →
  * beep → this clear gap → open mic — so TTS, earcon, and "your turn" don't pile up (the
@@ -338,6 +346,14 @@ class VoiceCommandPipeline(
             speakAndRemember("อุปกรณ์ไม่รองรับการรับเสียง")
             return
         }
+
+        // v1.3.33 — field log 1786010970975: readyEarconRoute was STILL "phone" on every
+        // no_speech entry that had scoState=connected, warm reconnects included
+        // (scoColdConnect=false) — the fixed settle delay in connectSco() doesn't
+        // guarantee AudioManager has actually flipped the communication device by the
+        // time we read it. Poll for up to EARCON_ROUTE_POLL_BUDGET_MS beyond the settle
+        // delay before reading/playing, instead of trusting a single delayed read.
+        if (scoOk) btRouter.awaitScoRouteSettled(EARCON_ROUTE_POLL_BUDGET_MS)
 
         // v1.3.32 — prove where the ready cue lands. Field log 1784863894811: rider
         // reported the first-press cue was inaudible (helmet), but the earcon path had no
