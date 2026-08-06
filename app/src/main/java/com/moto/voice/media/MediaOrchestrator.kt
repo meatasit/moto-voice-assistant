@@ -645,13 +645,21 @@ object MediaOrchestrator {
         logOp(entry, "nudge→launchBlocked($reason)", targetPkg)
         Log.w(TAG, "nudge: $targetPkg launch blocked ($reason). available=$available")
         // v1.3.30 — split the honest line by WHY it blocked (field log 1784551582120):
-        //   noSession  → the app never came up: "can't open while locked, unlock first".
         //   stillPrior → the app IS open and playing the old clip; the switch just didn't
-        //                land in-window. The old "can't open, unlock" line contradicted the
-        //                audio the rider could hear (the reported "confusing" TTS). Say the
-        //                clip hasn't switched yet and to try again — their retry lands it.
-        val line = if (reason == "stillPrior") ErrorSpeech.SWITCH_NOT_LANDED
-        else ErrorSpeech.LAUNCH_BLOCKED_LOCKED
+        //                land in-window. Say the clip hasn't switched yet and to try again.
+        //   noSession  → the app never registered a session. This is a lock-screen BAL block
+        //                ONLY when the screen is actually locked. v1.3.34 (field log
+        //                1786018272868, entry 1786016733912): screenLocked=false yet the rider
+        //                heard "can't open while locked, unlock first" — a wrong instruction he
+        //                could see was false (screen was unlocked; YouTube just never loaded the
+        //                clip, likely weak signal). Re-check the LIVE lock state here — it's what
+        //                is true when the rider hears the line — and never tell an unlocked rider
+        //                to unlock.
+        val line = when {
+            reason == "stillPrior" -> ErrorSpeech.SWITCH_NOT_LANDED
+            isScreenLocked(appCtx) == true -> ErrorSpeech.LAUNCH_BLOCKED_LOCKED
+            else -> ErrorSpeech.LAUNCH_FAILED_NO_SESSION
+        }
         speakOutOfPipeline(appCtx, line)
         pendingNudge = null
     }
