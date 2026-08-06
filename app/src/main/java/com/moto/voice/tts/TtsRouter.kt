@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
 import com.moto.voice.data.AppSettings
+import com.moto.voice.debug.DebugEntry
 import com.moto.voice.debug.DebugLog
 import com.moto.voice.debug.EngineChoiceReason
 import java.util.concurrent.atomic.AtomicReference
@@ -38,6 +39,17 @@ class TtsRouter private constructor(private val app: Context) {
         val cfg = loadConfig()
         val online = isOnline()
 
+        // v1.3.33 — capture the entry THIS call belongs to right now, synchronously.
+        // Field log 1786010970975 caught entries with ttsSynthMs=5 (a cache hit — no
+        // synth happened) but azureError="synth failed after 601ms" — impossible unless
+        // that error came from a DIFFERENT interaction. markDebug used to re-resolve
+        // `DebugLog.entries().firstOrNull()` at each async callback; AzureTtsEngine.speak
+        // runs on a background Thread, so if a NEW DebugEntry had been created (rider
+        // pressed the button again) before that callback fired, it wrote onto the wrong
+        // entry. Threading the same reference through every callback of this one speak()
+        // call fixes that regardless of what else DebugLog.new()'s in the meantime.
+        val entry = DebugLog.entries().firstOrNull()
+
         // Route decision: Azure only when configured AND online. Everything else → Android.
         // Field log 1783477052378 showed every entry `ttsEngine=android` — we couldn't
         // tell whether the key was lost, the region was blank, or connectivity failed.
@@ -50,7 +62,7 @@ class TtsRouter private constructor(private val app: Context) {
         }
         if (androidReason != null) {
             android.speak(text, onStart, onDone, onError)
-            markDebug("android", reason = androidReason, error = null)
+            markDebug(entry, "android", reason = androidReason, error = null)
             return
         }
 
@@ -59,12 +71,12 @@ class TtsRouter private constructor(private val app: Context) {
             text,
             onStart = onStart,
             onDone = {
-                markDebug("azure", reason = EngineChoiceReason.AZURE_USED, error = null)
+                markDebug(entry, "azure", reason = EngineChoiceReason.AZURE_USED, error = null)
                 onDone?.invoke()
             },
             onError = { reason ->
                 Log.w(TAG, "azure failed: $reason — falling back to Android silently")
-                markDebug("azure_failed", reason = EngineChoiceReason.AZURE_FAILED_FALLBACK, error = reason)
+                markDebug(entry, "azure_failed", reason = EngineChoiceReason.AZURE_FAILED_FALLBACK, error = reason)
                 // Silent fallback per spec §1.3 — no user-facing announcement.
                 android.speak(
                     text,
@@ -73,11 +85,11 @@ class TtsRouter private constructor(private val app: Context) {
                         // Keep engineChoiceReason = azure_failed_fallback so the field
                         // log records that Azure was TRIED — don't overwrite with an
                         // Android success reason. Just refresh the timings.
-                        markDebug("android_fallback", reason = EngineChoiceReason.AZURE_FAILED_FALLBACK, error = null)
+                        markDebug(entry, "android_fallback", reason = EngineChoiceReason.AZURE_FAILED_FALLBACK, error = null)
                         onDone?.invoke()
                     },
                     onError = { androidReason2 ->
-                        markDebug("android_fallback_failed", reason = EngineChoiceReason.AZURE_FAILED_FALLBACK, error = androidReason2)
+                        markDebug(entry, "android_fallback_failed", reason = EngineChoiceReason.AZURE_FAILED_FALLBACK, error = androidReason2)
                         onError?.invoke(androidReason2)
                     },
                 )
@@ -91,17 +103,19 @@ class TtsRouter private constructor(private val app: Context) {
     }
 
     /**
-     * Attach the current TTS timing + engine choice to the most-recent DebugEntry.
-     * Timings are pulled from [AzureTtsState] so we can distinguish synth vs playback
-     * ms and know whether the cache served it. For pure-Android calls the timings
-     * remain zero — they were never synthesised via Azure.
+     * Attach the current TTS timing + engine choice to [entry] — the DebugEntry that was
+     * current when THIS [speak] call started (captured once by the caller, not re-resolved
+     * per callback; see the v1.3.33 comment at the [speak] call site). Timings are pulled
+     * from [AzureTtsState] so we can distinguish synth vs playback ms and know whether the
+     * cache served it. For pure-Android calls the timings remain zero — they were never
+     * synthesised via Azure.
      *
      * [reason] is the [EngineChoiceReason] constant explaining why THIS engine was
      * chosen — populates `engineChoiceReason` so field logs make the fallback path
      * legible (spec-round-3 bug 3, log 1783477052378).
      */
-    private fun markDebug(engine: String, reason: String, error: String?) {
-        val head = DebugLog.entries().firstOrNull() ?: return
+    private fun markDebug(entry: DebugEntry?, engine: String, reason: String, error: String?) {
+        val head = entry ?: return
         head.ttsEngine = engine
         head.engineChoiceReason = reason
         head.ttsSynthMs = AzureTtsState.synthMs().coerceAtLeast(0)

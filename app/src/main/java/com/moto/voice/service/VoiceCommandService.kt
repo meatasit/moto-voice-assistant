@@ -67,6 +67,8 @@ class VoiceCommandService : LifecycleService() {
         private const val IDLE_POLL_MS = 60_000L
         private const val WATCHDOG_PREFS = "moto_voice_watchdog"
         private const val KEY_LAST_CREATE = "last_create_ms"
+        /** v1.3.33 — dedupe key for [classifyPreviousExit]; see its kdoc. */
+        private const val KEY_LAST_EXIT_REPORTED = "last_exit_reported_ts"
     }
 
     private var pipeline: VoiceCommandPipeline? = null
@@ -237,6 +239,20 @@ class VoiceCommandService : LifecycleService() {
             am.getHistoricalProcessExitReasons(packageName, /*pid=*/0, /*maxNum=*/1)
         }.getOrNull() ?: return
         val last = infos.firstOrNull() ?: return
+
+        // v1.3.33 — field log 1786010970975: this service's process is long-lived (kdoc
+        // above — we stopped self-stopping the service per-interaction specifically to
+        // avoid restart noise), so getHistoricalProcessExitReasons keeps returning the
+        // SAME ~13-day-old exit event on every onCreate (the "age" field just grows).
+        // classifyPreviousExit's whole point is to flag a NEW kill since we last checked,
+        // but with no dedupe it re-logged that one old event on every cold Service
+        // restart, filling DebugLog slots with stale noise and burying real prev-exit
+        // signals field logs might actually need. Only log when the exit's own timestamp
+        // is newer than the last one we already reported.
+        val prefs = getSharedPreferences(WATCHDOG_PREFS, MODE_PRIVATE)
+        val alreadyReported = prefs.getLong(KEY_LAST_EXIT_REPORTED, -1L)
+        if (last.timestamp <= alreadyReported) return
+        prefs.edit().putLong(KEY_LAST_EXIT_REPORTED, last.timestamp).apply()
 
         val reasonName = when (last.reason) {
             ApplicationExitInfo.REASON_ANR -> "ANR"

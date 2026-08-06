@@ -19,6 +19,18 @@ package com.moto.voice.nlu
  *      and the number broke number capture, dropping to the default. Fixed by allowing
  *      filler words (อีก / สัก / ประมาณ) before the number.
  *
+ * v1.3.33 — field log 1786010970975 exposed two more gaps, both of which fell through
+ * to the (slower, less reliable) webhook instead of the local intercept:
+ *   4. "เดินหน้า 20 นาที" — "เดินหน้า" ("advance"/"drive forward") is a real Thai forward
+ *      synonym never in the loose-verb list, so this always missed the local intercept.
+ *      Added as another loose forward verb (same treatment as เลื่อน/ข้าม/skip/กรอ).
+ *   5. "เลือด 50 นาที" — logged TWICE with the exact same wording, and the webhook
+ *      guessed opposite directions each time (once −300s, once +300s) because "เลือด"
+ *      ("blood") carries no directional word for the LLM to anchor on. This is an
+ *      STT mishearing of "เลื่อน" (same phonetic-confusion class as the v1.3.15 เดือน
+ *      alias below) — treated the same way: forward, since bare "เลื่อน" with no
+ *      direction word already defaults to forward.
+ *
  * Runs as a [LocalIntercept] pattern so the seek command works offline (no
  * webhook round-trip required for something the pipeline already knows how to
  * dispatch via [android.media.session.MediaController.getTransportControls]
@@ -118,8 +130,9 @@ object SeekParser {
     //
     // Loose forward verb — any of these on its own maps to forward, no additional
     // context required (a rider saying "เลื่อน" alone still means forward the default N).
+    // v1.3.33 — "เดินหน้า" added (field log 1786010970975, kdoc bug #4 above).
     private val FORWARD_REGEX = Regex(
-        "(?:เลื่อน|ข้าม|skip|กรอ)\\s*(?:ไป)?\\s*(?:ข้างหน้า|หน้า)?\\s*$FILLER(\\d+)?\\s*(วินาที|วิ|นาที)?"
+        "(?:เลื่อน|ข้าม|skip|กรอ|เดินหน้า)\\s*(?:ไป)?\\s*(?:ข้างหน้า|หน้า)?\\s*$FILLER(\\d+)?\\s*(วินาที|วิ|นาที)?"
     )
 
     /**
@@ -140,12 +153,20 @@ object SeekParser {
      * guessed backward — user got a reverse seek. Catching this locally means the
      * right forward seek fires from the intercept, no webhook round-trip.
      *
-     * STRICTER than the main forward pattern: "เดือน" REQUIRES a directional word
-     * (หน้า / ข้างหน้า) OR a number + unit right after, so bare "เดือน กรกฎาคม"
-     * or other legitimate uses of the word month don't false-positive into a seek.
+     * v1.3.33 — "เลือด" ("blood") added as a second mishearing alias for "เลื่อน".
+     * Field log 1786010970975: rider said "เลือด 50 นาที" twice (identical wording)
+     * and, with no directional word to anchor on, the webhook guessed backward once
+     * and forward the other time — same input, opposite actions. Bare "เลื่อน" with
+     * no direction already defaults to forward (see FORWARD_REGEX kdoc), so this
+     * alias resolves both occurrences to forward consistently instead of leaving it
+     * to an LLM coin-flip.
+     *
+     * STRICTER than the main forward pattern: the alias word REQUIRES a directional
+     * word (หน้า / ข้างหน้า) OR a number + unit right after, so bare "เดือน กรกฎาคม" /
+     * other legitimate uses of "month" or "blood" don't false-positive into a seek.
      */
     private val FORWARD_MISHEARING_REGEX = Regex(
-        "เดือน\\s*(?:" +
+        "(?:เดือน|เลือด)\\s*(?:" +
             "(?:ไป)?\\s*(?:ข้างหน้า|หน้า)\\s*$FILLER(\\d+)?\\s*(วินาที|วิ|นาที)?" +  // "เดือนหน้า", "เดือนไปหน้า", w/ optional number
             "|$FILLER(\\d+)\\s*(วินาที|วิ|นาที)" +                                    // "เดือน 30 วิ" (no direction, number+unit required)
         ")"
