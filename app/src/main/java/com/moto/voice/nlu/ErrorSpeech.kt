@@ -202,6 +202,21 @@ object ErrorSpeech {
     )
 
     /**
+     * v1.3.34 — the `noSession` block while the screen is UNLOCKED. Field log
+     * 1786018272868 (entry 1786016733912): screenLocked=false, the deep link fired
+     * but YouTube's MediaSession never registered in the poll window (the clip never
+     * loaded — weak signal during the test). declareLaunchBlocked spoke
+     * LAUNCH_BLOCKED_LOCKED ("unlock first") — a wrong instruction the rider could SEE
+     * was false because the screen was unlocked in front of him. This is the honest
+     * unlocked line: it just didn't start, try again — never tell an unlocked rider to
+     * unlock.
+     */
+    val LAUNCH_FAILED_NO_SESSION: String get() = pick(
+        "เปิดยูทูบไม่สำเร็จค่ะ ลองสั่งใหม่อีกครั้งนะคะ",
+        "เปิดยูทูบไม่สำเร็จครับ ลองสั่งใหม่อีกครั้งนะครับ",
+    )
+
+    /**
      * v1.3.30 — the `stillPrior` variant of a blocked switch. Field log 1784551582120:
      * every launch_blocked entry was a locked YouTube→YouTube switch where YouTube was
      * ALREADY open and playing the previous clip — the new clip just didn't navigate
@@ -235,7 +250,7 @@ object ErrorSpeech {
         TEACHING_HINT,
         SERVER_UNAVAILABLE,
         SEEK_ATTEMPTED, MEDIA_PLAY_CONFIRMED, MEDIA_OPENED_NOT_PLAYING,
-        LAUNCH_BLOCKED_LOCKED, SWITCH_NOT_LANDED,
+        LAUNCH_BLOCKED_LOCKED, LAUNCH_FAILED_NO_SESSION, SWITCH_NOT_LANDED,
     )
 
     private fun pick(feminine: String, masculine: String): String =
