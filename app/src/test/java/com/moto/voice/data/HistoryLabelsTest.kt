@@ -17,7 +17,7 @@ class HistoryLabelsTest {
         HistoryEntry(timestamp = 0L, heard = heard, spoken = "", action = action)
 
     @Test fun callShowsContactName() {
-        assertEquals("โทรหาสมชาย", HistoryLabels.title(HistoryAction.Call("สมชาย", "0812345678")))
+        assertEquals("โทรหา สมชาย", HistoryLabels.title(HistoryAction.Call("สมชาย", "0812345678")))
         assertEquals("📞", HistoryLabels.icon(HistoryAction.Call("สมชาย", "0812345678")))
     }
 
@@ -27,7 +27,7 @@ class HistoryLabelsTest {
     }
 
     @Test fun fmShowsStationName() {
-        assertEquals("เปิดวิทยุสวพ. 91", HistoryLabels.title(HistoryAction.FmPlay("http://x", "สวพ. 91", 91.0)))
+        assertEquals("เปิดวิทยุ สวพ. 91", HistoryLabels.title(HistoryAction.FmPlay("http://x", "สวพ. 91", 91.0)))
     }
 
     @Test fun everyActionHasAnIcon() {
