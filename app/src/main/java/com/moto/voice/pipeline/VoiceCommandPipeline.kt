@@ -79,6 +79,21 @@ private const val DEFAULT_MIN_LISTEN_MS = 3_000L
  */
 private const val EARCON_ROUTE_POLL_BUDGET_MS = 400L
 /**
+ * v1.3.36 — the COLD budget. 400ms is enough once the BT stack is warm (every warm entry
+ * in field logs 1786072158662 / 1786104958601 shows `readyEarconRoute=sco`), but the FIRST
+ * press of a session still lands on the phone speaker: both logs' opening interaction has
+ * `scoColdConnect=true` + `readyEarconRoute=phone` + `finishReason=no_speech`, and the
+ * rider dictated the symptom into the log himself — *"สัญญาณให้พูดครั้งแรกไม่ได้ยิน"*,
+ * *"กดปุ่มครั้งแรกไม่มีสัญญาณให้เริ่มพูด"*.
+ *
+ * A cold connect already waits `SCO_COLD_SETTLE_MS` (800ms) inside the router, and the
+ * observed `scoTimeMs` is ~806 — so the OS flips `communicationDevice` somewhere past the
+ * ~1.2s that 800+400 allows. Give the cold path a much larger poll budget: it costs
+ * nothing when the route settles early (the poll returns the moment it flips) and it only
+ * ever applies to the first press after process start.
+ */
+private const val EARCON_ROUTE_POLL_BUDGET_COLD_MS = 2_000L
+/**
  * v1.3.27 — silence after a prompt's answer-listen beep before the mic opens. Rider
  * preference (2026-07-17): prompts/re-listens pace SERIALLY — speak the whole prompt →
  * beep → this clear gap → open mic — so TTS, earcon, and "your turn" don't pile up (the
@@ -353,7 +368,17 @@ class VoiceCommandPipeline(
         // guarantee AudioManager has actually flipped the communication device by the
         // time we read it. Poll for up to EARCON_ROUTE_POLL_BUDGET_MS beyond the settle
         // delay before reading/playing, instead of trusting a single delayed read.
-        if (scoOk) btRouter.awaitScoRouteSettled(EARCON_ROUTE_POLL_BUDGET_MS)
+        //
+        // v1.3.36 — the first press of a session needs far more than 400ms (see
+        // EARCON_ROUTE_POLL_BUDGET_COLD_MS): both recent field logs open with
+        // scoColdConnect=true + readyEarconRoute=phone, i.e. the rider never heard the cue
+        // that tells him to start talking, and the interaction died as no_speech.
+        if (scoOk) {
+            val budget =
+                if (btRouter.lastConnectWasCold()) EARCON_ROUTE_POLL_BUDGET_COLD_MS
+                else EARCON_ROUTE_POLL_BUDGET_MS
+            btRouter.awaitScoRouteSettled(budget)
+        }
 
         // v1.3.32 — prove where the ready cue lands. Field log 1784863894811: rider
         // reported the first-press cue was inaudible (helmet), but the earcon path had no
