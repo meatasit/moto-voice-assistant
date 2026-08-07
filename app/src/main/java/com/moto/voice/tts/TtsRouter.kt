@@ -30,11 +30,21 @@ class TtsRouter private constructor(private val app: Context) {
 
     private data class Config(val region: String, val key: String, val voice: String)
 
+    /**
+     * @param stampDebug whether this speak writes its engine/timings onto the current
+     *   [DebugEntry]. v1.3.36 — false for lines spoken OUTSIDE an interaction (the nudge's
+     *   launch-blocked announcement fires ~10s after the pipeline finished). Those resolved
+     *   `DebugLog.entries().firstOrNull()` to the already-finished interaction and overwrote
+     *   its TTS fields, producing the impossible rows in field log 1786104958601:
+     *   `cacheHit=true` + `ttsSynthMs=1` — served from cache, no synthesis — carrying an
+     *   `azureError="synth failed after 599ms"` that belonged to a different sentence.
+     */
     fun speak(
         text: String,
         onStart: (() -> Unit)?,
         onDone: (() -> Unit)?,
         onError: ((reason: String) -> Unit)?,
+        stampDebug: Boolean = true,
     ) {
         val cfg = loadConfig()
         val online = isOnline()
@@ -48,7 +58,7 @@ class TtsRouter private constructor(private val app: Context) {
         // pressed the button again) before that callback fired, it wrote onto the wrong
         // entry. Threading the same reference through every callback of this one speak()
         // call fixes that regardless of what else DebugLog.new()'s in the meantime.
-        val entry = DebugLog.entries().firstOrNull()
+        val entry = if (stampDebug) DebugLog.entries().firstOrNull() else null
 
         // Route decision: Azure only when configured AND online. Everything else → Android.
         // Field log 1783477052378 showed every entry `ttsEngine=android` — we couldn't
@@ -121,7 +131,14 @@ class TtsRouter private constructor(private val app: Context) {
         head.ttsSynthMs = AzureTtsState.synthMs().coerceAtLeast(0)
         head.ttsPlayMs = AzureTtsState.playMs().coerceAtLeast(0)
         head.cacheHit = AzureTtsState.cacheHit()
-        if (error != null) head.azureError = error
+        // v1.3.36 — assign unconditionally so azureError always describes the SAME speak as
+        // ttsEngine/engineChoiceReason next to it. Previously a failure was written and never
+        // cleared, so a later successful speak on the same entry left `engineChoiceReason=
+        // azure_used` sitting beside a stale `azureError` — a contradiction that cost a
+        // debugging session. The failure is still recorded by the azure_failed markDebug that
+        // precedes the Android fallback; it is only cleared when a LATER speak succeeded, in
+        // which case the entry's own engine fields say so too.
+        head.azureError = error
     }
 
     private fun azureFor(cfg: Config): AzureTtsEngine {

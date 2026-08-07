@@ -71,17 +71,43 @@ object MediaOrchestrator {
     private const val POLL_INTERVAL_MS = 500L
     private const val POLL_WINDOW_MS = 9_000L
     /**
+     * v1.3.36 — a COLD target (nothing playing when we fired, so no prior session) needs
+     * longer than a warm switch. Field logs 1786072158662 (entry 1786066108846) and
+     * 1786104958601 (entries 1786100870242 / 1786100948949) share one shape:
+     * `fsiTrampolineLaunchOk=true`, `mediaCtrlPkgMiss=none` — the launch fired, nothing
+     * else held focus, YouTube simply had not registered a session inside 9.8s, and the
+     * rider was told the open failed when it was only slow. Warm switches keep the tighter
+     * window so a genuine failure is still reported promptly.
+     */
+    private const val POLL_WINDOW_COLD_MS = 15_000L
+    /**
      * v1.3.26 (fix 1) — if the session is still on the PRIOR video this long after the poll
      * started, re-fire the deep link ONCE. A locked YouTube→YouTube switch often ignores the
      * first delivery (YouTube already the running task); the rider's manual retry lands it,
-     * so we automate one retry. Leaves ~6.5s of the 9s window for the re-fired switch to land.
+     * so we automate one retry.
+     *
+     * v1.3.36 — field log 1786104958601 disproved the "send the same link again" half of
+     * that fix: ELEVEN consecutive locked switches ended `launchBlocked(stillPrior)`, every
+     * one of them AFTER a `refireSwitch` — 22 deliveries of a `vnd.youtube:` VIEW intent,
+     * none of which navigated. `mediaActualTitle` sat on the same "crazy chill song
+     * playlist" for 12 minutes while the rider kept asking for other things. Re-sending an
+     * identical intent to a task that is already running IS the no-op, so the re-fire now
+     * escalates instead of repeating — see [fireYoutubeIntent]'s `forceRestart`.
      */
     private const val REFIRE_STILL_PRIOR_MS = 2_500L
     private const val NUDGE_SETTLE_MS = 2_000L
     private const val NUDGE_MAX_ATTEMPTS = 3
     private const val NUDGE_RETRY_SPACING_MS = 1_500L
-    /** After the poll window with no target session at all → launch was likely blocked. */
-    private const val LAUNCH_BLOCKED_THRESHOLD_MS = POLL_WINDOW_MS + POLL_INITIAL_DELAY_MS
+
+    /**
+     * How long to wait for the target's session before declaring the launch blocked.
+     * Pure so a JVM test can lock the cold/warm split without a Handler.
+     *
+     * @param priorTitle what the target was playing when we fired — null means nothing was
+     *   playing, i.e. the app is cold and has a whole startup ahead of it.
+     */
+    internal fun pollWindowMsFor(priorTitle: String?): Long =
+        if (priorTitle == null) POLL_WINDOW_COLD_MS else POLL_WINDOW_MS
 
     private val mutex = Mutex()
     // `lazy` so pure-JVM tests (which never schedule a nudge) don't trip on
@@ -408,8 +434,18 @@ object MediaOrchestrator {
      * Split out of [fireYoutubeIntent] so both the direct-launch and over-lock-screen
      * paths choose the exact same target.
      */
-    private fun buildYoutubeIntent(context: Context, videoId: String?, query: String?): Intent? {
-        fun view(uri: Uri) = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    private fun buildYoutubeIntent(
+        context: Context, videoId: String?, query: String?, forceRestart: Boolean = false,
+    ): Intent? {
+        // v1.3.36 — CLEAR_TASK (only legal alongside NEW_TASK) tears down YouTube's existing
+        // task and starts it fresh at the requested video. That is the difference between the
+        // re-fire and the first attempt: a plain NEW_TASK delivered to a task that is already
+        // running just brings that task forward — Android does not deliver the new intent, so
+        // the deep link is dropped on the floor while startActivity still returns normally.
+        // That is exactly the 11-in-a-row stillPrior signature in field log 1786104958601.
+        val restartFlag = if (forceRestart) Intent.FLAG_ACTIVITY_CLEAR_TASK else 0
+        fun view(uri: Uri) =
+            Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or restartFlag)
         val pm = context.packageManager
         if (videoId != null) {
             val app = view(Uri.parse("vnd.youtube:$videoId"))
@@ -420,7 +456,7 @@ object MediaOrchestrator {
         val search = Intent(Intent.ACTION_SEARCH).apply {
             setPackage(MediaSessions.YOUTUBE_PKG)
             putExtra("query", q)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or restartFlag)
         }
         return if (search.resolveActivity(pm) != null) search
         else view(Uri.parse("https://www.youtube.com/results?search_query=${Uri.encode(q)}"))
@@ -433,8 +469,9 @@ object MediaOrchestrator {
      */
     private fun fireYoutubeIntent(
         context: Context, videoId: String?, query: String?, entry: DebugEntry,
+        forceRestart: Boolean = false,
     ): Boolean {
-        val target = buildYoutubeIntent(context, videoId, query) ?: run {
+        val target = buildYoutubeIntent(context, videoId, query, forceRestart) ?: run {
             entry.error = ((entry.error ?: "") + " youtube_launch_failed").trim()
             return false
         }
@@ -478,7 +515,7 @@ object MediaOrchestrator {
     ) {
         val appCtx = context.applicationContext
         val pollStartAt = System.currentTimeMillis() + POLL_INITIAL_DELAY_MS
-        val pollWindowEndAt = pollStartAt + POLL_WINDOW_MS
+        val pollWindowEndAt = pollStartAt + pollWindowMsFor(priorTitle)
         val refireAt = pollStartAt + REFIRE_STILL_PRIOR_MS
         var playAttempts = 0
         var lastPlayAttemptAt = 0L
@@ -540,13 +577,20 @@ object MediaOrchestrator {
                 // vnd.youtube:VID (NEW_TASK) gets handed to it without a fresh navigation.
                 // Field log 1784203179701 proved the rider's manual "say it again" lands the
                 // switch — so re-fire the SAME deep link ONCE, mid-window, automating that.
+                //
+                // v1.3.36 — and the re-fire now ESCALATES. Repeating the same intent was
+                // proven useless (11/11 stillPrior in field log 1786104958601, each after a
+                // refireSwitch); this one adds CLEAR_TASK so YouTube's running task is torn
+                // down and restarted at the requested video instead of merely being brought
+                // forward. Logged under a distinct op name so the next field log says which
+                // kind of re-fire ran.
                 if (!refiredSwitch && System.currentTimeMillis() >= refireAt &&
                     (videoId != null || query != null)
                 ) {
                     refiredSwitch = true
-                    logOp(entry, "nudge→refireSwitch", targetPkg)
-                    Log.w(TAG, "nudge: $targetPkg still on prior video — re-firing deep link once")
-                    fireYoutubeIntent(appCtx, videoId, query, entry)
+                    logOp(entry, "nudge→refireSwitch(clearTask)", targetPkg)
+                    Log.w(TAG, "nudge: $targetPkg still on prior video — re-firing deep link with CLEAR_TASK")
+                    fireYoutubeIntent(appCtx, videoId, query, entry, forceRestart = true)
                 }
                 // Give it until the window ends in case the new video is still loading; then
                 // speak the honest "can't open while locked" instead.
@@ -655,14 +699,39 @@ object MediaOrchestrator {
         //                clip, likely weak signal). Re-check the LIVE lock state here — it's what
         //                is true when the rider hears the line — and never tell an unlocked rider
         //                to unlock.
-        val line = when {
-            reason == "stillPrior" -> ErrorSpeech.SWITCH_NOT_LANDED
-            isScreenLocked(appCtx) == true -> ErrorSpeech.LAUNCH_BLOCKED_LOCKED
-            else -> ErrorSpeech.LAUNCH_FAILED_NO_SESSION
+        //
+        // v1.3.36 — "ปลดล็อคก่อน" is only true advice when the keyguard actually stopped us.
+        // Field log 1786104958601 (entries 1786100870242 / 1786100948949) has locked opens
+        // where fsiTrampolineRan=true AND fsiTrampolineLaunchOk=true — the full-screen intent
+        // was honored and YouTube was launched over the lock screen — yet the rider still
+        // heard "เปิดไม่ได้ตอนจอล็อค ลองปลดล็อคก่อน", which he logged as a bug. Unlocking would
+        // not have helped: the launch fired, the session was just slow to appear. Keep the
+        // unlock advice for the case it describes (no FSI path taken) and otherwise use the
+        // honest "didn't start, say it again" line.
+        val fsiHonored = entry.fsiTrampolineRan == true && entry.fsiTrampolineLaunchOk == true
+        val line = when (blockedLineFor(reason, isScreenLocked(appCtx) == true, fsiHonored)) {
+            BlockedLine.SwitchNotLanded -> ErrorSpeech.SWITCH_NOT_LANDED
+            BlockedLine.LockedNoFsi -> ErrorSpeech.LAUNCH_BLOCKED_LOCKED
+            BlockedLine.NoSession -> ErrorSpeech.LAUNCH_FAILED_NO_SESSION
         }
         speakOutOfPipeline(appCtx, line)
         pendingNudge = null
     }
+
+    /** Which honest line a blocked launch should speak. Named so a JVM test can lock it. */
+    internal enum class BlockedLine { SwitchNotLanded, LockedNoFsi, NoSession }
+
+    /**
+     * Pure decision behind [declareLaunchBlocked]'s TTS. The rule that matters:
+     * **never tell the rider to unlock when the full-screen-intent path was honored** —
+     * unlocking would not have changed anything, and he can hear that it is wrong.
+     */
+    internal fun blockedLineFor(reason: String, locked: Boolean, fsiHonored: Boolean): BlockedLine =
+        when {
+            reason == "stillPrior" -> BlockedLine.SwitchNotLanded
+            locked && !fsiHonored -> BlockedLine.LockedNoFsi
+            else -> BlockedLine.NoSession
+        }
 
     private fun cancelPendingNudge() {
         pendingNudge?.let { handler.removeCallbacks(it) }
@@ -690,7 +759,10 @@ object MediaOrchestrator {
      */
     private fun speakOutOfPipeline(appCtx: Context, text: String) {
         val tts = ThaiTTS(appCtx)
-        tts.speak(text) { runCatching { tts.stop() } }
+        // v1.3.36 — speakUnlogged: this line belongs to the nudge, not to the interaction
+        // whose DebugEntry is still at the head of the log. Stamping it there overwrote the
+        // interaction's own ttsEngine/cacheHit/azureError (field log 1786104958601).
+        tts.speakUnlogged(text) { runCatching { tts.stop() } }
     }
 
     /**

@@ -9,13 +9,29 @@ import kotlinx.coroutines.delay
  * we're in without looking at the phone. Redesigned for v1.3.9 per the "audio
  * language" spec:
  *
- *  - [ready]           : single rising beep = "new interaction starting, speak"
- *  - [answerListen]    : two short beeps ("ติ๊ง-ติ๊ง") = "your turn to reply to
- *                         a question (confirm / picker / slot-fill / follow-up)
- *                         — no button press needed"
+ *  - [ready] / [answerListen] : RISING two-tone (low→high) = "mic is open, speak now"
  *  - [endInteraction]  : one short low tone = "we stopped listening; press BVRA
  *                         again to talk". Fires on EVERY pipeline exit that
  *                         doesn't start media (media is its own signal).
+ *
+ * v1.3.36 — rider (7 Aug 2026): *"แยก 2 เสียงให้ชัดเจน ระหว่างเริ่มรอฟังกับหยุดฟัง เพราะตอนนี้
+ * ระหว่าง AI พูด ไม่รู้ว่าพูดได้ตอนไหน"*. On a helmet speaker the old cues were too close to
+ * tell apart mid-ride: [ready] was ONE beep and [endInteraction] is ONE tone, so "your
+ * turn" and "we're done" sounded like the same event; [answerListen] was two beeps at the
+ * SAME pitch, which reads as one longer beep through wind noise.
+ *
+ * The audio language is now reduced to the two states the rider actually acts on:
+ *
+ *   **speak now**  → two tones going UP. Both mic-opening cues share it, so there is a
+ *                    single sound to learn. ([ready] fires after a BVRA press,
+ *                    [answerListen] after a question — in both the required action is
+ *                    identical: talk.)
+ *   **stopped**    → one short low tone, unchanged.
+ *
+ * Direction (rising) plus count (two vs one) makes the pair distinguishable even when the
+ * pitch detail is lost. Deliberately NOT a descending motif for the end tone: v1.3.13
+ * shipped that and the rider rejected it ("แย่กว่าเดิม"), reverted in v1.3.14 — the end
+ * tone stays exactly what he already accepted.
  *  - [error]           : short low buzz = "that didn't work"
  *  - [cancel]          : three-step descending motif = "we bailed on your request"
  *
@@ -37,24 +53,34 @@ object Earcon {
      */
     const val MIC_OPEN_GAP_MS = 150L
 
-    /** Signal: "start speaking now" — new interaction just opened. Rising short beep. */
-    suspend fun ready() = play(ToneGenerator.TONE_PROP_BEEP, 180, tailMs = 200)
+    /** Signal: "start speaking now" — new interaction just opened after a BVRA press. */
+    suspend fun ready() = startListening()
 
     /**
-     * Signal: "your turn to answer" — assistant asked a question (confirm,
-     * disambig, slot-fill, follow-up window). Two crisp short pings so the rider
-     * unambiguously hears it's their move, not a button-required moment.
-     * Total body ≤ 250ms.
+     * Signal: "your turn to answer" — the assistant asked a question (confirm,
+     * disambig, slot-fill, follow-up window) and the mic is open with no button press
+     * needed. Same motif as [ready] since v1.3.36: the rider's required action is the
+     * same in both cases, and one sound to recognise beats two he has to tell apart at
+     * 90 km/h.
      */
-    suspend fun answerListen() {
-        play(ToneGenerator.TONE_PROP_ACK, 100, tailMs = 120)
-        play(ToneGenerator.TONE_PROP_ACK, 100, tailMs = 120)
+    suspend fun answerListen() = startListening()
+
+    /**
+     * The single "mic is open, speak now" motif: two tones going UP.
+     *
+     * DTMF_1 (697+1209 Hz) → DTMF_9 (852+1477 Hz) — both components rise, so the
+     * direction survives a helmet speaker and wind noise. Total body 210ms, inside the
+     * spec §1.4 budget, and callers still observe [MIC_OPEN_GAP_MS] before the mic opens.
+     */
+    private suspend fun startListening() {
+        play(ToneGenerator.TONE_DTMF_1, 90, tailMs = 100)
+        play(ToneGenerator.TONE_DTMF_9, 120, tailMs = 150)
     }
 
     /**
      * Signal: "interaction finished, mic is closed." Single low short tone —
-     * intentionally NOT the same as [ready]'s rising beep, so the rider can tell
-     * "assistant is now silent" from "assistant just started listening" without
+     * intentionally NOT the same as the rising pair [startListening] plays, so the rider
+     * can tell "assistant is now silent" from "assistant just started listening" without
      * looking. Fires on OK / cancelled / timeout / error / slot_filled / followup
      * / watchdog_reset exits. Skipped when a media action (youtube_play, fm) will
      * play immediately after — the media sound itself signals "we're done".

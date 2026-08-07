@@ -5,7 +5,7 @@ Samsung Galaxy S24 Ultra + Vimoto V11X helmet with the phone screen locked
 (the field-log condition that exposed the Spotify hijack in v1.3.19).
 
 **Rules**
-- All scenarios (A–H) must pass **two rounds in a row** before merge.
+- All scenarios (A–I) must pass **two rounds in a row** before merge.
 - Every pass attaches the debug-log JSON export as evidence.
 - Screen must be **locked** for scenarios A–D unless noted — Background
   Activity Launch behaviour differs between locked / unlocked, and the field

@@ -51,7 +51,7 @@ The debug log must be able to reconstruct what happened without guesswork.
 ## Acceptance Suite requirement
 
 Every commit that touches audio/media code must run [`ACCEPTANCE.md`](ACCEPTANCE.md)
-scenarios A–G on a real device (Samsung S24 Ultra + Vimoto V11X helmet) and
+scenarios A–I on a real device (Samsung S24 Ultra + Vimoto V11X helmet) and
 attach the resulting debug-log JSON to the PR / branch notes. **Two clean
 rounds in a row** before merge. Rider validates — Claude cannot.
 

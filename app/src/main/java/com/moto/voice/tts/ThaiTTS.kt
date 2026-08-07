@@ -28,7 +28,18 @@ class ThaiTTS(context: Context) {
 
     private val router = TtsRouter.getOrCreate(context)
 
-    fun speak(text: String, onDone: (() -> Unit)? = null) {
+    fun speak(text: String, onDone: (() -> Unit)? = null) = speak(text, onDone, stampDebug = true)
+
+    /**
+     * v1.3.36 — [speak] for lines that do NOT belong to the current interaction, so they
+     * don't overwrite its TTS fields in the debug log. Used by
+     * [com.moto.voice.media.MediaOrchestrator]'s nudge, which announces a blocked launch
+     * up to ~10s after the pipeline already finished and logged its own spoken line.
+     */
+    fun speakUnlogged(text: String, onDone: (() -> Unit)? = null) =
+        speak(text, onDone, stampDebug = false)
+
+    private fun speak(text: String, onDone: (() -> Unit)?, stampDebug: Boolean) {
         TtsRecentSpeech.markSpeaking(text)
         router.speak(text, onStart = null, onDone = {
             TtsRecentSpeech.markEnded()
@@ -36,7 +47,7 @@ class ThaiTTS(context: Context) {
         }, onError = {
             TtsRecentSpeech.markEnded()
             onDone?.invoke()
-        })
+        }, stampDebug = stampDebug)
     }
 
     /** Suspend until playback (not just synthesis) has finished. */

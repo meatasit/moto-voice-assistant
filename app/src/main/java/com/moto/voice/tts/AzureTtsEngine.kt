@@ -78,14 +78,26 @@ class AzureTtsEngine(
                 Log.d(TAG, "cache hit for '${text.take(40)}'")
                 cachedFile
             } else {
+                // v1.3.36 — carry WHY. Field log 1786104958601 has eight interactions that
+                // fell back to the Android voice mid-ride (the rider's "เสียงของ AI มี 2 เสียง"),
+                // every one of them reporting only "synth failed after 93–536ms". Those are
+                // far under SYNTH_TIMEOUT_MS, so they are not timeouts — but the exception
+                // was logged to logcat and dropped from the field log, leaving no way to tell
+                // a DNS miss from an HTTP 401/429. synthesizeToFile throws IllegalStateException
+                // ("HTTP <code>") for a bad response and IOException subclasses for the
+                // network, so the class name alone already separates the cases.
+                var failure: Throwable? = null
                 val fresh = runCatching { synthesizeToFile(text, rate) }
-                    .onFailure { Log.w(TAG, "synth failed", it) }
+                    .onFailure { failure = it; Log.w(TAG, "synth failed", it) }
                     .getOrNull()
                 if (fresh == null) {
                     val elapsed = System.currentTimeMillis() - synthStart
+                    val why = failure?.let {
+                        "${it.javaClass.simpleName}: ${it.message ?: "no message"}"
+                    } ?: "unknown"
                     AzureTtsState.setSynthTiming(elapsed, cacheHit = false)
-                    AzureTtsState.recordFailure("synth failed")
-                    onError?.invoke("synth failed after ${elapsed}ms")
+                    AzureTtsState.recordFailure("synth failed — $why")
+                    onError?.invoke("synth failed after ${elapsed}ms — $why")
                     return@Thread
                 }
                 cache.put(text, voice, rate, fresh)
