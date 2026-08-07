@@ -1,4 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  v1.3.35 — home screen rebuilt around "what does the rider need RIGHT NOW".
+
+  Was: a static permission checklist (4 rows, always visible even when all granted),
+  a Set-Default button, two nav buttons, and a how-to-use card. Everything above the
+  fold was setup UI the solo rider had already finished months ago.
+
+  Now: only problems that need a tap (hidden entirely when the install is healthy),
+  then the recent history inline — the part that is actually worth opening the app for.
+  The full status page and the full history list are still one tap away.
+-->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -17,7 +28,7 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginBottom="4dp">
+            android:layout_marginBottom="16dp">
 
             <TextView
                 android:layout_width="0dp"
@@ -50,21 +61,17 @@
 
         </LinearLayout>
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/onboarding_subtitle"
-            android:textColor="#CCFFFFFF"
-            android:textSize="14sp"
-            android:layout_marginBottom="24dp" />
-
-        <!-- Status banner -->
+        <!-- Status banner — tap opens the full system-status page -->
         <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardStatus"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="24dp"
+            android:layout_marginBottom="20dp"
             app:cardBackgroundColor="#1F1F1F"
-            app:cardCornerRadius="12dp">
+            app:cardCornerRadius="12dp"
+            android:foreground="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true">
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -89,101 +96,43 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Permissions -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="สิทธิ์ที่จำเป็น"
-            android:textColor="@color/purple_200"
-            android:textSize="13sp"
-            android:textAllCaps="true"
-            android:letterSpacing="0.1"
-            android:layout_marginBottom="12dp" />
-
-        <com.google.android.material.card.MaterialCardView
+        <!--
+          Attention section — populated from HomeAlerts. `visibility=gone` is the
+          resting state: a healthy install must not show an empty header.
+        -->
+        <LinearLayout
+            android:id="@+id/alertsSection"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="24dp"
-            app:cardBackgroundColor="#1F1F1F"
-            app:cardCornerRadius="12dp">
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:layout_marginBottom="20dp">
+
+            <TextView
+                android:id="@+id/tvAlertsHeader"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/home_alerts_title"
+                android:textColor="#FFB4AB"
+                android:textSize="13sp"
+                android:textAllCaps="true"
+                android:letterSpacing="0.1"
+                android:layout_marginBottom="12dp" />
+
             <LinearLayout
+                android:id="@+id/alertsContainer"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="8dp">
+                android:orientation="vertical" />
 
-                <LinearLayout android:layout_width="match_parent" android:layout_height="56dp"
-                    android:orientation="horizontal" android:gravity="center_vertical" android:paddingHorizontal="8dp">
-                    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                        android:text="🎤  ไมโครโฟน" android:textColor="@color/white" android:textSize="15sp" />
-                    <Button android:id="@+id/btnMic" style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="wrap_content" android:layout_height="36dp"
-                        android:text="@string/perm_grant" android:textColor="@color/white" />
-                </LinearLayout>
+        </LinearLayout>
 
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
-
-                <LinearLayout android:layout_width="match_parent" android:layout_height="56dp"
-                    android:orientation="horizontal" android:gravity="center_vertical" android:paddingHorizontal="8dp">
-                    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                        android:text="📋  รายชื่อ" android:textColor="@color/white" android:textSize="15sp" />
-                    <Button android:id="@+id/btnContacts" style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="wrap_content" android:layout_height="36dp"
-                        android:text="@string/perm_grant" android:textColor="@color/white" />
-                </LinearLayout>
-
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
-
-                <LinearLayout android:layout_width="match_parent" android:layout_height="56dp"
-                    android:orientation="horizontal" android:gravity="center_vertical" android:paddingHorizontal="8dp">
-                    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                        android:text="📞  โทรออก" android:textColor="@color/white" android:textSize="15sp" />
-                    <Button android:id="@+id/btnCall" style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="wrap_content" android:layout_height="36dp"
-                        android:text="@string/perm_grant" android:textColor="@color/white" />
-                </LinearLayout>
-
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
-
-                <LinearLayout android:layout_width="match_parent" android:layout_height="56dp"
-                    android:orientation="horizontal" android:gravity="center_vertical" android:paddingHorizontal="8dp">
-                    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                        android:text="🔵  บลูทูธ (หมวก)" android:textColor="@color/white" android:textSize="15sp" />
-                    <Button android:id="@+id/btnBluetooth" style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="wrap_content" android:layout_height="36dp"
-                        android:text="@string/perm_grant" android:textColor="@color/white" />
-                </LinearLayout>
-
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnSetDefault"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:text="@string/btn_set_default"
-            android:textSize="16sp"
-            android:layout_marginBottom="16dp"
-            app:cornerRadius="12dp" />
-
-        <!-- Quick access: History / Favorites (Riding Mode removed v1.3.16 —
-             rider keeps phone in pocket 100% of the time, tap-to-listen UI unused) -->
+        <!-- Quick access -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginBottom="24dp">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnHistory"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="0dp"
-                android:layout_height="48dp"
-                android:layout_weight="1"
-                android:layout_marginEnd="4dp"
-                android:text="📜 ประวัติ"
-                android:textColor="@color/white"
-                app:cornerRadius="12dp" />
+            android:layout_marginBottom="20dp">
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFavorites"
@@ -191,41 +140,58 @@
                 android:layout_width="0dp"
                 android:layout_height="48dp"
                 android:layout_weight="1"
-                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
                 android:text="⭐ โปรด"
+                android:textColor="@color/white"
+                app:cornerRadius="12dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSystemStatus"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                android:text="🩺 สถานะระบบ"
                 android:textColor="@color/white"
                 app:cornerRadius="12dp" />
 
         </LinearLayout>
 
-        <!-- How to use -->
-        <com.google.android.material.card.MaterialCardView
+        <!-- Recent history, inline (was a button pre-v1.3.35) -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            app:cardBackgroundColor="#1F1F1F"
-            app:cardCornerRadius="12dp">
-            <LinearLayout
-                android:layout_width="match_parent"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="8dp">
+
+            <TextView
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp">
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/how_to_use_title"
-                    android:textColor="@color/purple_200"
-                    android:textSize="14sp"
-                    android:textStyle="bold"
-                    android:layout_marginBottom="8dp" />
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/how_to_use_body"
-                    android:textColor="#CCFFFFFF"
-                    android:textSize="14sp"
-                    android:lineSpacingMultiplier="1.5" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
+                android:layout_weight="1"
+                android:text="@string/home_recent_title"
+                android:textColor="@color/purple_200"
+                android:textSize="13sp"
+                android:textAllCaps="true"
+                android:letterSpacing="0.1" />
+
+            <Button
+                android:id="@+id/btnHistoryAll"
+                style="@style/Widget.MaterialComponents.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="@string/home_see_all"
+                android:textSize="13sp"
+                android:textColor="@color/purple_200" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/historyContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
 
     </LinearLayout>
 </ScrollView>
