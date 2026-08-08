@@ -19,12 +19,14 @@ import com.moto.voice.MainActivity
 import com.moto.voice.MotoVoiceApplication.Companion.CH_LISTENING
 import com.moto.voice.VoiceAssistActivity
 import com.moto.voice.data.AppSettings
+import com.moto.voice.network.WebhookClient
 import com.moto.voice.nlu.ErrorSpeech
 import com.moto.voice.tts.ThaiTTS
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Calendar
@@ -83,20 +85,66 @@ class HelmetGreeter(private val app: Context) {
         showReadyNotification(deviceName)
 
         val settings = AppSettings(app)
-        if (!settings.greetOnConnect) return
 
-        // TTS in a short-lived scope. We give up after 4s if TTS can't init in time —
-        // the notification is the primary signal; the greeting is nice-to-have.
         // Spec v1.3.8 B4 — pick a time-appropriate greeting so the assistant feels
         // aware of context instead of repeating the same "พร้อมใช้งาน" every time.
+        val greeting = if (settings.greetOnConnect) pickTimeBasedGreeting() else null
+
+        // v1.3.37 — warm the LLM here, on the connect, so the first command of the ride
+        // isn't the one that pays for a cold model load (26s in field log 1786178611552).
+        // The ping is started BEFORE the greeting is spoken so the model loads while the
+        // rider is hearing "อรุณสวัสดิ์ค่ะ" — the wait is absorbed by audio he wanted anyway.
+        val warmNeeded = settings.webhookUrl.isNotBlank() &&
+            LlmWarmup.shouldWarm(System.currentTimeMillis(), lastWarmOkAt)
+
+        if (greeting == null && !warmNeeded) return
+
         ttsJob?.cancel()
-        val greeting = pickTimeBasedGreeting()
         ttsJob = scope.launch {
-            withTimeoutOrNull(4_000L) {
+            val ping = if (warmNeeded) async { pingLlm(settings) } else null
+
+            // TTS in a short-lived scope. We give up after 4s if TTS can't init in time —
+            // the notification is the primary signal; the greeting is nice-to-have.
+            if (greeting != null) {
+                withTimeoutOrNull(GREETING_TIMEOUT_MS) {
+                    val tts = ThaiTTS(app)
+                    tts.speakAwait(greeting)
+                    tts.stop()
+                }
+            }
+
+            val outcome = ping?.await() ?: return@launch
+            if (outcome == LlmWarmup.Outcome.Warm) lastWarmOkAt = System.currentTimeMillis()
+            // Rider's rule: silent when it works, speak only when something is wrong.
+            val line = LlmWarmup.lineFor(outcome) ?: return@launch
+            Log.w(TAG, "LLM warm-up: $outcome — telling the rider")
+            withTimeoutOrNull(GREETING_TIMEOUT_MS) {
                 val tts = ThaiTTS(app)
-                tts.speakAwait(greeting)
+                tts.speakAwait(line)
                 tts.stop()
             }
+        }
+    }
+
+    /**
+     * Fire the warm-up command and classify what came back. Never throws — a helmet
+     * connect must not be able to crash the app because the LLM box is off.
+     */
+    private suspend fun pingLlm(settings: AppSettings): LlmWarmup.Outcome {
+        val result = runCatching {
+            WebhookClient(settings.webhookUrl, settings.authToken, LlmWarmup.PING_TIMEOUT_SEC)
+                .call(LlmWarmup.PING_TEXT)
+        }.getOrNull()
+        return when (result) {
+            is WebhookClient.Result.Success ->
+                LlmWarmup.outcomeFor(configured = true, success = true, kind = null)
+            is WebhookClient.Result.Failure ->
+                LlmWarmup.outcomeFor(configured = true, success = false, kind = result.kind)
+            // The call itself blew up (bad URL, etc.) — same rider-visible meaning as
+            // "couldn't reach it".
+            null -> LlmWarmup.outcomeFor(
+                configured = true, success = false, kind = WebhookClient.Kind.Network,
+            )
         }
     }
 
@@ -156,6 +204,16 @@ class HelmetGreeter(private val app: Context) {
     companion object {
         private const val TAG = "HelmetGreeter"
         private const val NOTIF_ID = 44
+
+        /** Give up on any single spoken line after this — the notification is the real signal. */
+        private const val GREETING_TIMEOUT_MS = 4_000L
+
+        /**
+         * When the LLM last answered a warm-up. Process-global (the receiver is re-created
+         * with the app) and only set on success, so a failed ping is retried on the next
+         * connect — the rider may have just walked over and switched the box on.
+         */
+        @Volatile private var lastWarmOkAt: Long? = null
 
         /**
          * Spec v1.3.8 B4 — three greetings tuned to the rider's likely intent by hour:

@@ -77,22 +77,27 @@ private const val DEFAULT_MIN_LISTEN_MS = 3_000L
  * [com.moto.voice.audio.BluetoothAudioRouter.awaitScoRouteSettled] kdoc for the evidence
  * (field log 1786010970975).
  */
-private const val EARCON_ROUTE_POLL_BUDGET_MS = 400L
 /**
- * v1.3.36 — the COLD budget. 400ms is enough once the BT stack is warm (every warm entry
- * in field logs 1786072158662 / 1786104958601 shows `readyEarconRoute=sco`), but the FIRST
- * press of a session still lands on the phone speaker: both logs' opening interaction has
- * `scoColdConnect=true` + `readyEarconRoute=phone` + `finishReason=no_speech`, and the
- * rider dictated the symptom into the log himself — *"สัญญาณให้พูดครั้งแรกไม่ได้ยิน"*,
- * *"กดปุ่มครั้งแรกไม่มีสัญญาณให้เริ่มพูด"*.
+ * v1.3.37 — one budget for every press, raised 400ms → 2s.
  *
- * A cold connect already waits `SCO_COLD_SETTLE_MS` (800ms) inside the router, and the
- * observed `scoTimeMs` is ~806 — so the OS flips `communicationDevice` somewhere past the
- * ~1.2s that 800+400 allows. Give the cold path a much larger poll budget: it costs
- * nothing when the route settles early (the poll returns the moment it flips) and it only
- * ever applies to the first press after process start.
+ * v1.3.36 raised it only for cold connects, on the evidence that warm presses always showed
+ * `readyEarconRoute=sco`. Field log 1786178611552 disproved that: three of ten entries land
+ * on `phone` with `scoColdConnect=false`, so a warm press can miss the flip too and the
+ * rider hears nothing telling him to start talking. Waiting longer is free when the route
+ * settles early — [com.moto.voice.audio.BluetoothAudioRouter.awaitScoRouteSettled] returns
+ * the instant it flips — and the bound only costs anything on a press that was going to
+ * play the cue into the phone speaker anyway.
  */
-private const val EARCON_ROUTE_POLL_BUDGET_COLD_MS = 2_000L
+private const val EARCON_ROUTE_POLL_BUDGET_MS = 2_000L
+/**
+ * v1.3.37 — the re-listen after "ไม่ได้ยินเลย พูดอีกที" gets a longer window than the first
+ * attempt. Rider: *"บางที AI บอกให้พูดอีกครั้ง แต่พอ AI พูดจบก็หยุดฟังเลย"*. It was reusing
+ * [DEFAULT_MIN_LISTEN_MS] (3s), which starts counting the moment the prompt ends — on a bike,
+ * after being told to repeat yourself, 3s is over before you've drawn breath. Field log
+ * 1786178611552 entry 1786169082147: `sttRetryCount=1` and `sttTimeMs=4706` for BOTH listens
+ * put together.
+ */
+private const val RETRY_LISTEN_MS = 6_000L
 /**
  * v1.3.27 — silence after a prompt's answer-listen beep before the mic opens. Rider
  * preference (2026-07-17): prompts/re-listens pace SERIALLY — speak the whole prompt →
@@ -369,16 +374,11 @@ class VoiceCommandPipeline(
         // time we read it. Poll for up to EARCON_ROUTE_POLL_BUDGET_MS beyond the settle
         // delay before reading/playing, instead of trusting a single delayed read.
         //
-        // v1.3.36 — the first press of a session needs far more than 400ms (see
-        // EARCON_ROUTE_POLL_BUDGET_COLD_MS): both recent field logs open with
-        // scoColdConnect=true + readyEarconRoute=phone, i.e. the rider never heard the cue
-        // that tells him to start talking, and the interaction died as no_speech.
-        if (scoOk) {
-            val budget =
-                if (btRouter.lastConnectWasCold()) EARCON_ROUTE_POLL_BUDGET_COLD_MS
-                else EARCON_ROUTE_POLL_BUDGET_MS
-            btRouter.awaitScoRouteSettled(budget)
-        }
+        // v1.3.36/v1.3.37 — the budget is now 2s for EVERY press, cold or warm: field log
+        // 1786178611552 has warm presses (scoColdConnect=false) still landing on the phone
+        // speaker, so the rider never heard the cue that tells him to start talking and the
+        // interaction died as no_speech.
+        if (scoOk) btRouter.awaitScoRouteSettled(EARCON_ROUTE_POLL_BUDGET_MS)
 
         // v1.3.32 — prove where the ready cue lands. Field log 1784863894811: rider
         // reported the first-press cue was inaudible (helmet), but the earcon path had no
@@ -1356,7 +1356,9 @@ class VoiceCommandPipeline(
 
         entry.sttRetryCount = 1
         // Use the detailed variant so we go through Earcon.ready + echo filter.
-        val second = promptAndListenDetailed(ErrorSpeech.NOT_HEARD_RETRY, entry)
+        // v1.3.37 — and give the re-listen RETRY_LISTEN_MS: being told to repeat yourself
+        // and then having the mic shut in 3s is the "พอ AI พูดจบก็หยุดฟังเลย" complaint.
+        val second = promptAndListenDetailed(ErrorSpeech.NOT_HEARD_RETRY, entry, RETRY_LISTEN_MS)
         val secondText = second.text.trim()
         return if (secondText.length < MIN_MEANINGFUL_LEN) "" else secondText
     }
@@ -1726,11 +1728,15 @@ class VoiceCommandPipeline(
     }
 
     /** Detailed variant used by [listenMainWithMissRetry] where we need the SttOutcome. */
-    private suspend fun promptAndListenDetailed(prompt: String, entry: DebugEntry): SttOutcome {
+    private suspend fun promptAndListenDetailed(
+        prompt: String,
+        entry: DebugEntry,
+        minListenMs: Long = DEFAULT_MIN_LISTEN_MS,
+    ): SttOutcome {
         speakAndRemember(prompt)
         Earcon.answerListen()
         delay(PROMPT_SETTLE_MS)  // v1.3.27 — clearer "your turn" beat (was MIC_OPEN_GAP_MS 150ms)
-        val outcome = listenOnceDetailed(entry)
+        val outcome = listenOnceDetailed(entry, minListenMs)
         if (TtsEchoFilter.isEcho(outcome.text, memory.lastSpoken)) {
             Log.w(TAG, "echo detected — treating as no-speech: '${outcome.text}'")
             entry.error = ((entry.error ?: "") + " tts_echo_filtered").trim()

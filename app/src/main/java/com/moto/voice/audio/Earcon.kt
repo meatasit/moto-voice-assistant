@@ -73,8 +73,8 @@ object Earcon {
      * spec §1.4 budget, and callers still observe [MIC_OPEN_GAP_MS] before the mic opens.
      */
     private suspend fun startListening() {
-        play(ToneGenerator.TONE_DTMF_1, 90, tailMs = 100)
-        play(ToneGenerator.TONE_DTMF_9, 120, tailMs = 150)
+        play(ToneGenerator.TONE_DTMF_1, 70, tailMs = 85)
+        play(ToneGenerator.TONE_DTMF_9, 90, tailMs = 120)
     }
 
     /**
@@ -87,8 +87,15 @@ object Earcon {
      *
      * v1.3.14 — reverted from the descending 2-tone motif that shipped in v1.3.13.
      * Rider feedback: "แย่กว่าเดิม". Back to the original single tone.
+     *
+     * v1.3.37 — rider after riding v1.3.36: *"เสียงยังแยกไม่ออกระหว่างรอกับหยุดรอฟัง"*. Same
+     * pitch he already accepted, but stretched to the full 300ms spec budget while the start
+     * cue was shortened to two 70/90ms pips. Duration is the discriminator that survives
+     * wind noise and a helmet speaker best: the pair is now **two quick pips going up** vs
+     * **one long tone**, different in count, direction AND length. Still not a descending
+     * motif — that is the shape v1.3.13 was rejected for.
      */
-    suspend fun endInteraction() = play(ToneGenerator.TONE_DTMF_2, 140, tailMs = 160)
+    suspend fun endInteraction() = play(ToneGenerator.TONE_DTMF_2, 300, tailMs = 330)
 
     /** Signal: "that didn't work." Short low buzz. */
     suspend fun error() = play(ToneGenerator.TONE_PROP_NACK, 200, tailMs = 240)
