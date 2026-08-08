@@ -59,6 +59,14 @@ class TtsRouter private constructor(private val app: Context) {
         // entry. Threading the same reference through every callback of this one speak()
         // call fixes that regardless of what else DebugLog.new()'s in the meantime.
         val entry = if (stampDebug) DebugLog.entries().firstOrNull() else null
+        // v1.3.37 — clear once per speak, not per markDebug. v1.3.36 assigned azureError on
+        // EVERY markDebug so the pairs stayed consistent, but the Android-fallback success
+        // that follows a failure writes error=null — which wiped the very reason the failure
+        // detail had just been added to capture. Field log 1786178611552 came back with
+        // engineChoiceReason=azure_failed_fallback and no azureError at all. Clearing here
+        // keeps a later speak from inheriting an older one's error while the failure that
+        // belongs to THIS speak survives to the log.
+        entry?.azureError = null
 
         // Route decision: Azure only when configured AND online. Everything else → Android.
         // Field log 1783477052378 showed every entry `ttsEngine=android` — we couldn't
@@ -131,14 +139,9 @@ class TtsRouter private constructor(private val app: Context) {
         head.ttsSynthMs = AzureTtsState.synthMs().coerceAtLeast(0)
         head.ttsPlayMs = AzureTtsState.playMs().coerceAtLeast(0)
         head.cacheHit = AzureTtsState.cacheHit()
-        // v1.3.36 — assign unconditionally so azureError always describes the SAME speak as
-        // ttsEngine/engineChoiceReason next to it. Previously a failure was written and never
-        // cleared, so a later successful speak on the same entry left `engineChoiceReason=
-        // azure_used` sitting beside a stale `azureError` — a contradiction that cost a
-        // debugging session. The failure is still recorded by the azure_failed markDebug that
-        // precedes the Android fallback; it is only cleared when a LATER speak succeeded, in
-        // which case the entry's own engine fields say so too.
-        head.azureError = error
+        // Only write failures. The per-speak reset in [speak] is what stops a stale error
+        // from outliving the speak it belongs to — see the v1.3.37 note there.
+        if (error != null) head.azureError = error
     }
 
     private fun azureFor(cfg: Config): AzureTtsEngine {

@@ -515,7 +515,10 @@ object MediaOrchestrator {
     ) {
         val appCtx = context.applicationContext
         val pollStartAt = System.currentTimeMillis() + POLL_INITIAL_DELAY_MS
-        val pollWindowEndAt = pollStartAt + pollWindowMsFor(priorTitle)
+        // var: a CLEAR_TASK re-fire restarts YouTube from scratch and gets the window
+        // extended below — v1.3.36 shipped the escalation but kept judging it on the warm
+        // clock, so it was declared failed while it was still working.
+        var pollWindowEndAt = pollStartAt + pollWindowMsFor(priorTitle)
         val refireAt = pollStartAt + REFIRE_STILL_PRIOR_MS
         var playAttempts = 0
         var lastPlayAttemptAt = 0L
@@ -591,6 +594,12 @@ object MediaOrchestrator {
                     logOp(entry, "nudge→refireSwitch(clearTask)", targetPkg)
                     Log.w(TAG, "nudge: $targetPkg still on prior video — re-firing deep link with CLEAR_TASK")
                     fireYoutubeIntent(appCtx, videoId, query, entry, forceRestart = true)
+                    // v1.3.37 — CLEAR_TASK works, we were just judging it on the wrong clock.
+                    // Field log 1786178611552: entry 1786164662718 declared stillPrior, and the
+                    // NEXT interaction 57s later found YouTube playing -CXDKsZY80I — exactly the
+                    // video that "failed". Tearing the task down and starting it again is a full
+                    // cold start, so give it a cold start's worth of time from this moment.
+                    pollWindowEndAt = System.currentTimeMillis() + POLL_WINDOW_COLD_MS
                 }
                 // Give it until the window ends in case the new video is still loading; then
                 // speak the honest "can't open while locked" instead.
