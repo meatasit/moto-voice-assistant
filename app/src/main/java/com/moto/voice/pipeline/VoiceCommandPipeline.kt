@@ -384,8 +384,13 @@ class VoiceCommandPipeline(
         // reported the first-press cue was inaudible (helmet), but the earcon path had no
         // instrumentation. Read the live route right before the tone plays; the cold
         // settle in BluetoothAudioRouter aims to make this "sco" on the first press too.
-        entry.readyEarconRoute = if (btRouter.communicationRouteIsSco()) AudioRoute.SCO else AudioRoute.PHONE
+        val onSco = btRouter.communicationRouteIsSco()
+        entry.readyEarconRoute = if (onSco) AudioRoute.SCO else AudioRoute.PHONE
         entry.scoColdConnect = btRouter.lastConnectWasCold()
+        // v1.3.38 — send the tones down the SCO link itself rather than STREAM_MUSIC, which
+        // field logs keep showing landing somewhere the helmeted rider can't hear. Set for
+        // the whole interaction: the end-interaction tone has the same problem.
+        Earcon.scoActive = onSco
         Earcon.ready()
         delay(Earcon.MIC_OPEN_GAP_MS)  // spec §1.4 — earcon decay tail out before mic opens
 
