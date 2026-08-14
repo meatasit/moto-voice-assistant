@@ -96,7 +96,13 @@ class AzureTtsEngine(
                         "${it.javaClass.simpleName}: ${it.message ?: "no message"}"
                     } ?: "unknown"
                     AzureTtsState.setSynthTiming(elapsed, cacheHit = false)
-                    AzureTtsState.recordFailure("synth failed — $why")
+                    // v1.3.38 — a 401 is a dead key, not a blip: stop trying for the rest of
+                    // the process so every line comes out in ONE voice (see AzureTtsState).
+                    if (why.contains("HTTP 401")) {
+                        AzureTtsState.recordAuthRejected("synth failed — $why")
+                    } else {
+                        AzureTtsState.recordFailure("synth failed — $why")
+                    }
                     onError?.invoke("synth failed after ${elapsed}ms — $why")
                     return@Thread
                 }
