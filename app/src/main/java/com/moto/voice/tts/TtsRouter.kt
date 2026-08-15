@@ -46,14 +46,6 @@ class TtsRouter private constructor(private val app: Context) {
         onError: ((reason: String) -> Unit)?,
         stampDebug: Boolean = true,
     ) {
-        // v1.3.38 — one voice at a time. Rider: *"บางครั้ง AI 2 เสียงพูดทับกัน แต่คนละประโยคนะ"*.
-        // The Azure engine plays through its own MediaPlayer and Android TTS through the
-        // platform engine, so a line started while another is still playing does not replace
-        // it — they simply both come out. That is easy to hit: the pipeline speaks its reply
-        // and MediaOrchestrator's nudge announces a blocked launch seconds later. Stopping
-        // whatever is in flight makes the newer line win, which is also the more useful one.
-        stop()
-
         val cfg = loadConfig()
         val online = isOnline()
 
@@ -84,10 +76,6 @@ class TtsRouter private constructor(private val app: Context) {
             cfg.key.isBlank() -> EngineChoiceReason.ANDROID_NO_KEY
             cfg.region.isBlank() -> EngineChoiceReason.ANDROID_NO_REGION
             !online -> EngineChoiceReason.ANDROID_OFFLINE
-            // v1.3.38 — every synth in field log 1786688875809 came back HTTP 401. Retrying
-            // a rejected key just alternates voices: cached lines play in Azure, new ones
-            // fall back to Android. Pick one voice and stay there until the key works again.
-            AzureTtsState.authRejected() -> EngineChoiceReason.ANDROID_AZURE_401
             else -> null
         }
         if (androidReason != null) {

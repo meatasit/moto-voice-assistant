@@ -203,10 +203,6 @@ class SettingsActivity : AppCompatActivity() {
         settings.azureKey = binding.etAzureKey.text.toString().trim()
         settings.azureVoice = binding.ddAzureVoice.text.toString()
             .ifBlank { AppSettings.DEFAULT_AZURE_VOICE }
-        // v1.3.38 — the rider just typed credentials, so give Azure another chance. Without
-        // this the 401 latch (see AzureTtsState) would keep routing to Android even after a
-        // good key was pasted, and the preview below would silently prove nothing.
-        AzureTtsState.clearAuthRejected()
 
         if (settings.azureKey.isBlank()) {
             binding.tvAzureResult.text = "❌ ยังไม่ได้กรอก key"
