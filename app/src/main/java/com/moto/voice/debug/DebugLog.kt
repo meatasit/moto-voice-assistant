@@ -322,6 +322,12 @@ object EngineChoiceReason {
     const val ANDROID_NO_KEY = "android_no_key"
     const val ANDROID_NO_REGION = "android_no_region"
     const val ANDROID_OFFLINE = "android_offline"
+
+    /**
+     * v1.3.38 — Azure answered 401 earlier in this process, so we stopped asking and every
+     * line comes from Android. One voice beats a mix (field log 1786688875809).
+     */
+    const val ANDROID_AZURE_401 = "android_azure_401"
 }
 
 /**
