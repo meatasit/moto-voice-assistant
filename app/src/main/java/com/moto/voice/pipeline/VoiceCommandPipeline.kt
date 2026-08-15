@@ -384,9 +384,17 @@ class VoiceCommandPipeline(
         // reported the first-press cue was inaudible (helmet), but the earcon path had no
         // instrumentation. Read the live route right before the tone plays; the cold
         // settle in BluetoothAudioRouter aims to make this "sco" on the first press too.
-        entry.readyEarconRoute = if (btRouter.communicationRouteIsSco()) AudioRoute.SCO else AudioRoute.PHONE
+        val onSco = btRouter.communicationRouteIsSco()
+        entry.readyEarconRoute = if (onSco) AudioRoute.SCO else AudioRoute.PHONE
         entry.scoColdConnect = btRouter.lastConnectWasCold()
-        Earcon.ready()
+        // Recorded for the next attempt at the routing problem; nothing reads it today —
+        // see the Earcon.scoActive kdoc for why v1.3.38's stream switch was withdrawn.
+        Earcon.scoActive = onSco
+        // v1.3.40 — belt and braces with the guard inside Earcon.play. The ready cue is
+        // decoration, and v1.3.38 proved that letting it throw here costs the rider the entire
+        // command with no sound and no log. Every other Earcon call site is already wrapped
+        // or sits in a finally block; this one was the exception.
+        runCatching { Earcon.ready() }
         delay(Earcon.MIC_OPEN_GAP_MS)  // spec §1.4 — earcon decay tail out before mic opens
 
         PipelineState.setListening()  // spec v1.3.9 §4 — visual match to audio

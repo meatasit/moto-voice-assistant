@@ -45,7 +45,32 @@ import kotlinx.coroutines.delay
  */
 object Earcon {
 
-    private const val VOLUME = 80
+    /**
+     * v1.3.38 — full scale. Rider on the v1.3.36/37 tones: *"เสียงสัญญาณ Version แรกๆ ฟังง่าย
+     * และดังกว่า"*. Part of that is the tone type (DTMF tones are quieter than the PROP
+     * family — see [startListening]) and part is simply this.
+     */
+    private const val VOLUME = 100
+
+    /**
+     * Whether SCO is carrying audio right now. Set by the pipeline; recorded only — nothing
+     * reads it yet. See below for why.
+     *
+     * v1.3.38 routed the tones to `STREAM_VOICE_CALL` while this was true, on the theory that
+     * STREAM_MUSIC does not follow the SCO link (field logs kept showing `scoState=connected`
+     * alongside `readyEarconRoute=phone`). **That build was unusable with the helmet on:
+     * pressing BVRA did nothing at all and no interaction ever completed.**
+     *
+     * The proof is field log 1786763666528 — the SAME broken build with **no helmet**:
+     * `scoState=no_headset` kept this flag false, the tones took the old STREAM_MUSIC path,
+     * and every command worked (`nudge→confirmed`, playing). Helmet on = dead, helmet off =
+     * fine, and this flag is the only thing that differs between the two.
+     *
+     * So the stream switch is out. The routing problem it aimed at is real and still open,
+     * but the next attempt goes behind a setting that is off by default, so it can be tried
+     * while parked instead of discovered mid-ride.
+     */
+    @Volatile var scoActive: Boolean = false
 
     /**
      * Silence gap after any earcon before the mic opens, so the tone's decay
@@ -66,16 +91,19 @@ object Earcon {
     suspend fun answerListen() = startListening()
 
     /**
-     * The single "mic is open, speak now" motif: two tones going UP.
+     * The single "mic is open, speak now" cue.
      *
-     * DTMF_1 (697+1209 Hz) → DTMF_9 (852+1477 Hz) — both components rise, so the
-     * direction survives a helmet speaker and wind noise. Total body 210ms, inside the
-     * spec §1.4 budget, and callers still observe [MIC_OPEN_GAP_MS] before the mic opens.
+     * v1.3.38 — back to the original v1.3.9 rising [ToneGenerator.TONE_PROP_BEEP], 180ms.
+     * The v1.3.36/37 experiment (a rising DTMF pair, then shorter pips) was aimed at making
+     * start and stop easier to tell apart, and the rider's verdict after riding it was that
+     * it made things worse where it counts: *"เสียงสัญญาณ Version แรกๆ ฟังง่ายและดังกว่า"*.
+     * The PROP tones are simply more audible than DTMF through a helmet.
+     *
+     * Separation is now carried by [endInteraction] instead — a different PROP tone at
+     * 300ms against this one at 180ms — plus the routing fix ([scoActive]), which is the
+     * real reason the cue was being missed.
      */
-    private suspend fun startListening() {
-        play(ToneGenerator.TONE_DTMF_1, 70, tailMs = 85)
-        play(ToneGenerator.TONE_DTMF_9, 90, tailMs = 120)
-    }
+    private suspend fun startListening() = play(ToneGenerator.TONE_PROP_BEEP, 180, tailMs = 200)
 
     /**
      * Signal: "interaction finished, mic is closed." Single low short tone —
@@ -88,14 +116,15 @@ object Earcon {
      * v1.3.14 — reverted from the descending 2-tone motif that shipped in v1.3.13.
      * Rider feedback: "แย่กว่าเดิม". Back to the original single tone.
      *
-     * v1.3.37 — rider after riding v1.3.36: *"เสียงยังแยกไม่ออกระหว่างรอกับหยุดรอฟัง"*. Same
-     * pitch he already accepted, but stretched to the full 300ms spec budget while the start
-     * cue was shortened to two 70/90ms pips. Duration is the discriminator that survives
-     * wind noise and a helmet speaker best: the pair is now **two quick pips going up** vs
-     * **one long tone**, different in count, direction AND length. Still not a descending
-     * motif — that is the shape v1.3.13 was rejected for.
+     * v1.3.37 — stretched to the full 300ms spec budget so length carries the difference.
+     *
+     * v1.3.38 — and moved to [ToneGenerator.TONE_PROP_ACK], the same loud PROP family as the
+     * start cue now uses, so "quieter" can't be confused with "different". The pair the rider
+     * has to tell apart is a **short bright beep (180ms)** for *speak now* against a **long
+     * flatter tone (300ms)** for *stopped*. Still not a descending motif — that is the shape
+     * v1.3.13 was rejected for.
      */
-    suspend fun endInteraction() = play(ToneGenerator.TONE_DTMF_2, 300, tailMs = 330)
+    suspend fun endInteraction() = play(ToneGenerator.TONE_PROP_ACK, 300, tailMs = 330)
 
     /** Signal: "that didn't work." Short low buzz. */
     suspend fun error() = play(ToneGenerator.TONE_PROP_NACK, 200, tailMs = 240)
@@ -120,7 +149,12 @@ object Earcon {
         require(durationMs <= 300) { "spec §1.4: earcon body must be ≤ 300ms, got $durationMs" }
         val tone = runCatching { ToneGenerator(AudioManager.STREAM_MUSIC, VOLUME) }.getOrNull() ?: return
         try {
-            tone.startTone(toneType, durationMs)
+            // v1.3.40 — startTone() used to sit in a bare try/finally, so anything it threw
+            // propagated out of Earcon.ready() and killed the interaction before a single
+            // sound was made. That is how a cosmetic tone change took the whole app down in
+            // v1.3.38. A cue is decoration: failing to play one must never cost the rider a
+            // command. The delay stays outside the guard so cancellation still works.
+            runCatching { tone.startTone(toneType, durationMs) }
             delay(tailMs)
         } finally {
             runCatching { tone.release() }
