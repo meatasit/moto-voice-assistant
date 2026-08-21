@@ -88,7 +88,7 @@ private const val DEFAULT_MIN_LISTEN_MS = 3_000L
  * the instant it flips — and the bound only costs anything on a press that was going to
  * play the cue into the phone speaker anyway.
  */
-private const val EARCON_ROUTE_POLL_BUDGET_MS = 2_000L
+private const val EARCON_ROUTE_POLL_BUDGET_MS = 4_000L
 /**
  * v1.3.37 — the re-listen after "ไม่ได้ยินเลย พูดอีกที" gets a longer window than the first
  * attempt. Rider: *"บางที AI บอกให้พูดอีกครั้ง แต่พอ AI พูดจบก็หยุดฟังเลย"*. It was reusing
@@ -390,6 +390,8 @@ class VoiceCommandPipeline(
         // Recorded for the next attempt at the routing problem; nothing reads it today —
         // see the Earcon.scoActive kdoc for why v1.3.38's stream switch was withdrawn.
         Earcon.scoActive = onSco
+        // v1.3.41 — opt-in only; default false. See AppSettings.earconOnScoStream.
+        Earcon.useVoiceCallStream = onSco && settings.earconOnScoStream
         // v1.3.40 — belt and braces with the guard inside Earcon.play. The ready cue is
         // decoration, and v1.3.38 proved that letting it throw here costs the rider the entire
         // command with no sound and no log. Every other Earcon call site is already wrapped
@@ -407,7 +409,12 @@ class VoiceCommandPipeline(
         if (text.isBlank()) {
             Earcon.error()
             entry.finishReason = FinishReason.NO_SPEECH
-            speakAndRemember(ErrorSpeech.NOT_HEARD_GIVING_UP)
+            // v1.3.41 — do not tell the rider he was silent when the recognizer was the thing
+            // that failed, and do not stack two near-identical "didn't hear you" lines.
+            speakAndRemember(
+                if (lastListenWasServerError) ErrorSpeech.STT_SERVER_TROUBLE
+                else ErrorSpeech.NOT_HEARD_GIVING_UP
+            )
             return
         }
 
@@ -1352,6 +1359,7 @@ class VoiceCommandPipeline(
      * listens have their own re-prompt loops and shouldn't nest another retry inside.
      */
     private suspend fun listenMainWithMissRetry(entry: DebugEntry): String {
+        lastListenWasServerError = false
         val first = listenOnceDetailed(entry)
         val firstText = first.text.trim()
         if (firstText.length >= MIN_MEANINGFUL_LEN) return firstText
@@ -1360,7 +1368,10 @@ class VoiceCommandPipeline(
         // Only re-prompt for real "no speech heard" outcomes (or a too-short result,
         // which is common when wind noise gets recognised as a single syllable).
         val shouldPrompt = first.wasNoSpeech || firstText.isNotEmpty()
-        if (!shouldPrompt) return ""
+        if (!shouldPrompt) {
+            lastListenWasServerError = first.wasTransientError
+            return ""
+        }
 
         entry.sttRetryCount = 1
         // Use the detailed variant so we go through Earcon.ready + echo filter.
@@ -1368,8 +1379,16 @@ class VoiceCommandPipeline(
         // and then having the mic shut in 3s is the "พอ AI พูดจบก็หยุดฟังเลย" complaint.
         val second = promptAndListenDetailed(ErrorSpeech.NOT_HEARD_RETRY, entry, RETRY_LISTEN_MS)
         val secondText = second.text.trim()
+        // v1.3.41 — remember WHY the last listen came back empty. STT 11
+        // (ERROR_SERVER_DISCONNECTED) returns instantly, so the rider hears the retry prompt
+        // and the giving-up line back to back with no chance to speak; blaming him for
+        // silence is also wrong when it was the recognizer that dropped.
+        lastListenWasServerError = second.wasTransientError
         return if (secondText.length < MIN_MEANINGFUL_LEN) "" else secondText
     }
+
+    /** Set by [listenMainWithMissRetry]; read by the blank-result branch. See v1.3.41 note. */
+    private var lastListenWasServerError = false
 
     private data class SttOutcome(
         val text: String,

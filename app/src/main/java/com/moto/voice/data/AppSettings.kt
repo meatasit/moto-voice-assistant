@@ -132,6 +132,24 @@ class AppSettings(context: Context) {
         set(v) { prefs.edit().putBoolean("ask_youtube", v).apply() }
 
     /** Spec §7/§8: default ON — TTS says a short greeting through the helmet on connect. */
+    /**
+     * v1.3.41 — play the earcons on STREAM_VOICE_CALL while SCO is up, instead of
+     * STREAM_MUSIC.
+     *
+     * Default OFF, and deliberately a setting rather than a behaviour. Field logs keep
+     * showing the ready cue landing on the phone speaker with `scoState=connected` — the
+     * rider has never once heard the first-press cue — and the VOICE_CALL stream is the one
+     * the SCO link actually carries. But v1.3.38 shipped exactly this change unconditionally
+     * and made the app unusable with the helmet on (log 1786763666528 proved it: the same
+     * build worked perfectly with no helmet, i.e. with this path disabled).
+     *
+     * So it goes behind a switch he can flip while parked, and the tone calls are guarded
+     * (see Earcon.play) so it can no longer take an interaction down either way.
+     */
+    var earconOnScoStream: Boolean
+        get() = prefs.getBoolean("earcon_on_sco_stream", false)
+        set(v) { prefs.edit().putBoolean("earcon_on_sco_stream", v).apply() }
+
     var greetOnConnect: Boolean
         get() = prefs.getBoolean("greet_on_connect", true)
         set(v) { prefs.edit().putBoolean("greet_on_connect", v).apply() }

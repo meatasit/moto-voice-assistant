@@ -57,6 +57,21 @@ object ErrorSpeech {
         "ยังไม่ได้ยินครับ ลองใหม่อีกครั้งนะครับ",
     )
 
+    /**
+     * v1.3.41 — the listen died on a recognizer/server error, not on silence.
+     *
+     * Field log 1787294052224: every entry carrying `error: "STT 11"`
+     * (`ERROR_SERVER_DISCONNECTED`) fails instantly, so the rider heard [NOT_HEARD_RETRY] and
+     * then [NOT_HEARD_GIVING_UP] back to back with no real chance to speak in between —
+     * *"ยังไม่ทันรอฟังก็พูดขึ้นมาว่า ยังไม่ได้ยิน อีกครั้ง"*. Blaming him for not speaking is
+     * also simply wrong: Google's recognizer dropped the connection. Different wording, and
+     * it tells him the useful thing — press the button again rather than talk louder.
+     */
+    val STT_SERVER_TROUBLE: String get() = pick(
+        "ระบบฟังเสียงขัดข้องค่ะ กดปุ่มลองใหม่นะคะ",
+        "ระบบฟังเสียงขัดข้องครับ กดปุ่มลองใหม่นะครับ",
+    )
+
     // ─── Barge-in (§3) ────────────────────────────────────────────────────────
     val CANCELLED: String get() = pick("ยกเลิกแล้วค่ะ", "ยกเลิกแล้วครับ")
 
@@ -236,7 +251,7 @@ object ErrorSpeech {
         OFFLINE_LIMITED, TIMEOUT_WITH_FALLBACK, TIMEOUT_NO_FALLBACK,
         HTTP_401, HTTP_OTHER,
         YOUTUBE_NOT_FOUND, FM_STREAM_FAILED, NO_CELL_SIGNAL,
-        NOT_HEARD_RETRY, NOT_HEARD_GIVING_UP,
+        NOT_HEARD_RETRY, NOT_HEARD_GIVING_UP, STT_SERVER_TROUBLE,
         CANCELLED,
         PREFLIGHT_NOT_DEFAULT, PREFLIGHT_MISSING_MIC,
         PREFLIGHT_MISSING_CONTACTS, PREFLIGHT_MISSING_CALL,

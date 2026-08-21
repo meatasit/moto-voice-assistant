@@ -67,6 +67,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.switchConfirmCall.isChecked = settings.confirmBeforeCall
         binding.switchAskYoutube.isChecked = settings.askBeforeYoutube
         binding.switchGreetOnConnect.isChecked = settings.greetOnConnect
+        binding.switchEarconOnSco.isChecked = settings.earconOnScoStream
         binding.sliderTtsRate.value = settings.ttsSpeechRate
         binding.tvTtsRateValue.text = formatRate(settings.ttsSpeechRate)
         binding.switchResumeAfterCall.isChecked = settings.resumeAfterCall
@@ -122,6 +123,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.switchConfirmCall.setOnCheckedChangeListener { _, v -> settings.confirmBeforeCall = v }
         binding.switchAskYoutube.setOnCheckedChangeListener { _, v -> settings.askBeforeYoutube = v }
         binding.switchGreetOnConnect.setOnCheckedChangeListener { _, v -> settings.greetOnConnect = v }
+        binding.switchEarconOnSco.setOnCheckedChangeListener { _, v -> settings.earconOnScoStream = v }
 
         binding.sliderTtsRate.addOnChangeListener { _, value, _ ->
             binding.tvTtsRateValue.text = formatRate(value)
