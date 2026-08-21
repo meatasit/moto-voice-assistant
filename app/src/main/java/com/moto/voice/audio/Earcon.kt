@@ -73,6 +73,14 @@ object Earcon {
     @Volatile var scoActive: Boolean = false
 
     /**
+     * v1.3.41 — set true only when SCO is live AND the rider has switched
+     * `earconOnScoStream` on. See that setting for the full history; the short version is
+     * that this is the fix for "the first-press cue goes to the phone speaker", shipped
+     * opt-in because the unconditional version broke the app.
+     */
+    @Volatile var useVoiceCallStream: Boolean = false
+
+    /**
      * Silence gap after any earcon before the mic opens, so the tone's decay
      * tail doesn't bleed into STT. Spec v1.3.9 §1.4.
      */
@@ -147,7 +155,9 @@ object Earcon {
      */
     private suspend fun play(toneType: Int, durationMs: Int, tailMs: Long) {
         require(durationMs <= 300) { "spec §1.4: earcon body must be ≤ 300ms, got $durationMs" }
-        val tone = runCatching { ToneGenerator(AudioManager.STREAM_MUSIC, VOLUME) }.getOrNull() ?: return
+        val stream =
+            if (useVoiceCallStream) AudioManager.STREAM_VOICE_CALL else AudioManager.STREAM_MUSIC
+        val tone = runCatching { ToneGenerator(stream, VOLUME) }.getOrNull() ?: return
         try {
             // v1.3.40 — startTone() used to sit in a bare try/finally, so anything it threw
             // propagated out of Earcon.ready() and killed the interaction before a single

@@ -612,21 +612,33 @@ object MediaOrchestrator {
             }
 
             if (state == PlaybackState.STATE_PLAYING) {
-                // CONFIRMED_TARGET or SWITCHED (title changed to a new video) → genuine success.
-                // UNKNOWN (no title yet) but playing: keep waiting for the title, then accept
-                // at the window edge rather than false-block something that IS playing.
-                if (verdict != YoutubeVerify.Verdict.UNKNOWN || windowExhausted) {
-                    stampTrampoline(entry)
-                    logOp(entry, "nudge→confirmed", targetPkg)
-                    Log.d(TAG, "nudge: $targetPkg playing, verdict=$verdict title=\"$currentTitle\" — confirmed")
-                    if (speakPlayConfirmed && audioIsSettled(appCtx)) {
-                        speakOutOfPipeline(appCtx, ErrorSpeech.MEDIA_PLAY_CONFIRMED)
+                val decision = playingDecision(
+                    verdict = verdict,
+                    expectedKnown = !expectedTitle.isNullOrBlank(),
+                    windowExhausted = windowExhausted,
+                )
+                when (decision) {
+                    PlayingDecision.Confirm -> {
+                        stampTrampoline(entry)
+                        logOp(entry, "nudge→confirmed", targetPkg)
+                        Log.d(TAG, "nudge: $targetPkg playing, verdict=$verdict title=\"$currentTitle\" — confirmed")
+                        if (speakPlayConfirmed && audioIsSettled(appCtx)) {
+                            speakOutOfPipeline(appCtx, ErrorSpeech.MEDIA_PLAY_CONFIRMED)
+                        }
+                        pendingNudge = null
+                        return@Runnable
                     }
-                    pendingNudge = null
-                    return@Runnable
+                    PlayingDecision.WrongVideo -> {
+                        // Playing, but not what was asked for — see [playingDecision].
+                        Log.w(TAG, "nudge: $targetPkg playing the WRONG title: want=\"$expectedTitle\" got=\"$currentTitle\"")
+                        declareLaunchBlocked(appCtx, targetPkg, entry, reason = "wrongVideo")
+                        return@Runnable
+                    }
+                    PlayingDecision.KeepPolling -> {
+                        handler.postDelayed(poll, POLL_INTERVAL_MS)
+                        return@Runnable
+                    }
                 }
-                handler.postDelayed(poll, POLL_INTERVAL_MS)
-                return@Runnable
             }
             when (NudgeDecider.decide(
                 state = state,
@@ -727,6 +739,48 @@ object MediaOrchestrator {
         pendingNudge = null
     }
 
+    /** What to do when the target is PLAYING but we still have to judge WHAT it's playing. */
+    internal enum class PlayingDecision { Confirm, KeepPolling, WrongVideo }
+
+    /**
+     * v1.3.41 — "playing" is not the same as "playing what the rider asked for".
+     *
+     * Field log 1787294052224 caught the difference costing the rider three commands in a
+     * row. He asked for เรื่องเล่าเช้านี้ (landed), then for instrumental music twice — both
+     * declared `stillPrior` — then for กรรมกรข่าว, and got:
+     *
+     * ```
+     * want: Live "กรรมกรข่าว คุยนอกจอ" 21 สิงหาคม 2569
+     * got:  ดนตรีเพราะๆ บรรเลง เสียงธรรมชาติ ฟังเพลินๆ 1 ชม.      ← the music from two commands ago
+     * ops:  …;nudge→confirmed
+     * ```
+     *
+     * The CLEAR_TASK restart from the music command landed AFTER its window closed, so
+     * YouTube switched to the music while we were verifying the news request. The old rule
+     * confirmed on any verdict except UNKNOWN, and [YoutubeVerify.Verdict.SWITCHED] only
+     * means "the title moved away from the prior one" — so a late arrival from a previous
+     * command reads as success for the current one.
+     *
+     * SWITCHED is only trustworthy when there was nothing to check against ("อันต่อไป",
+     * where [expectedTitle] is blank). With a known target, a title that matches neither the
+     * target nor the prior one means something else is playing: keep polling in case ours is
+     * still loading, and if the window runs out, say so instead of claiming success.
+     */
+    internal fun playingDecision(
+        verdict: YoutubeVerify.Verdict,
+        expectedKnown: Boolean,
+        windowExhausted: Boolean,
+    ): PlayingDecision = when {
+        verdict == YoutubeVerify.Verdict.CONFIRMED_TARGET -> PlayingDecision.Confirm
+        // No target to verify against — playing anything new is the best we can know.
+        verdict == YoutubeVerify.Verdict.SWITCHED && !expectedKnown -> PlayingDecision.Confirm
+        verdict == YoutubeVerify.Verdict.SWITCHED && windowExhausted -> PlayingDecision.WrongVideo
+        verdict == YoutubeVerify.Verdict.SWITCHED -> PlayingDecision.KeepPolling
+        // No title at all, but audio IS playing: accept at the edge rather than false-block.
+        verdict == YoutubeVerify.Verdict.UNKNOWN && windowExhausted -> PlayingDecision.Confirm
+        else -> PlayingDecision.KeepPolling
+    }
+
     /** Which honest line a blocked launch should speak. Named so a JVM test can lock it. */
     internal enum class BlockedLine { SwitchNotLanded, LockedNoFsi, NoSession }
 
@@ -737,7 +791,10 @@ object MediaOrchestrator {
      */
     internal fun blockedLineFor(reason: String, locked: Boolean, fsiHonored: Boolean): BlockedLine =
         when {
-            reason == "stillPrior" -> BlockedLine.SwitchNotLanded
+            // v1.3.41 — "wrongVideo" is the same rider-facing situation as "stillPrior":
+            // something IS audible, it just isn't what was asked for. "Can't open" would
+            // contradict what he can hear.
+            reason == "stillPrior" || reason == "wrongVideo" -> BlockedLine.SwitchNotLanded
             locked && !fsiHonored -> BlockedLine.LockedNoFsi
             else -> BlockedLine.NoSession
         }

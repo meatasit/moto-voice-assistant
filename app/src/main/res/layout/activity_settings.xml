@@ -280,6 +280,24 @@
 
                 <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
 
+                <LinearLayout android:layout_width="match_parent" android:layout_height="72dp"
+                    android:orientation="horizontal" android:gravity="center_vertical"
+                    android:paddingHorizontal="8dp">
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:orientation="vertical">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="ส่งเสียงสัญญาณเข้าหูฟัง" android:textColor="@color/white" android:textSize="15sp" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="ลองเปิดถ้าไม่ได้ยินเสียงบี๊บตอนกดปุ่ม — ทดสอบตอนจอดก่อน"
+                            android:textColor="#88FFFFFF" android:textSize="12sp" />
+                    </LinearLayout>
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switchEarconOnSco"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                </LinearLayout>
+
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
+
                 <LinearLayout android:layout_width="match_parent" android:layout_height="64dp"
                     android:orientation="horizontal" android:gravity="center_vertical"
                     android:paddingHorizontal="8dp">
