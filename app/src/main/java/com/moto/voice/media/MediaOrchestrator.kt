@@ -150,6 +150,13 @@ object MediaOrchestrator {
     }
 
     /**
+     * v1.3.42 — whether to open videos with the https App Link rather than `vnd.youtube:`.
+     * Set from [com.moto.voice.data.AppSettings.youtubeWebLink] by the pipeline before each
+     * op, same way [speakPlayConfirmed] works. Default true.
+     */
+    @Volatile var webLinkPreferred: Boolean = true
+
+    /**
      * Whether a successful nudge should speak [ErrorSpeech.MEDIA_PLAY_CONFIRMED].
      * Rider preference — [com.moto.voice.data.AppSettings.confirmMediaStart].
      * Pipeline sets this before each op; default true.
@@ -448,6 +455,15 @@ object MediaOrchestrator {
             Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or restartFlag)
         val pm = context.packageManager
         if (videoId != null) {
+            // v1.3.42 — prefer the https App Link over the vnd.youtube: custom scheme; see
+            // AppSettings.youtubeWebLink for the evidence. Package-targeted so no chooser can
+            // appear, and we only use it if YouTube actually claims it — otherwise this falls
+            // through to exactly what shipped before.
+            if (webLinkPreferred) {
+                val web = view(Uri.parse("https://www.youtube.com/watch?v=$videoId"))
+                    .setPackage(MediaSessions.YOUTUBE_PKG)
+                if (web.resolveActivity(pm) != null) return web
+            }
             val app = view(Uri.parse("vnd.youtube:$videoId"))
             val web = view(Uri.parse("https://www.youtube.com/watch?v=$videoId"))
             return if (app.resolveActivity(pm) != null) app else web

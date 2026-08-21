@@ -150,6 +150,31 @@ class AppSettings(context: Context) {
         get() = prefs.getBoolean("earcon_on_sco_stream", false)
         set(v) { prefs.edit().putBoolean("earcon_on_sco_stream", v).apply() }
 
+    /**
+     * v1.3.42 — open YouTube with `https://www.youtube.com/watch?v=…` (targeted at the
+     * YouTube package) instead of the `vnd.youtube:` custom scheme. Default ON.
+     *
+     * The custom scheme is why locked switches don't land. When YouTube's task already
+     * exists, a `vnd.youtube:` VIEW intent with NEW_TASK just brings that task forward and
+     * the new video is never delivered — field log 1786104958601 has eleven consecutive
+     * switches failing that way, 22 deliveries, none landing, while log 1786763666528 shows
+     * the same code switching fine with the screen UNLOCKED. Forcing it with CLEAR_TASK
+     * (v1.3.36) works but restarts the whole app, which is slow enough that the result
+     * arrives after we've given up — and then lands on top of the NEXT command.
+     *
+     * An https App Link goes through the normal intent-filter path rather than a private
+     * scheme, so it has a real chance of being delivered to the running activity instead of
+     * swallowed. Never tried before this: the URL has been in the code since day one, but
+     * only as the fallback for devices without the YouTube app, so on this phone it has
+     * never once executed.
+     *
+     * Safe by construction — the intent is package-targeted (no app chooser) and falls back
+     * to `vnd.youtube:` if YouTube can't handle it. Worst case matches today's behaviour.
+     */
+    var youtubeWebLink: Boolean
+        get() = prefs.getBoolean("youtube_web_link", true)
+        set(v) { prefs.edit().putBoolean("youtube_web_link", v).apply() }
+
     var greetOnConnect: Boolean
         get() = prefs.getBoolean("greet_on_connect", true)
         set(v) { prefs.edit().putBoolean("greet_on_connect", v).apply() }
