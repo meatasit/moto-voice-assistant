@@ -584,6 +584,7 @@ class VoiceCommandPipeline(
      */
     private suspend fun handlePlayContinue(appHint: String?, entry: DebugEntry) {
         MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
+        MediaOrchestrator.webLinkPreferred = settings.youtubeWebLink
         val result = MediaOrchestrator.playContinue(context, appHint, entry)
         when (result) {
             is MediaOrchestrator.Result.NoTarget ->
@@ -629,6 +630,7 @@ class VoiceCommandPipeline(
         com.moto.voice.media.MediaSessionMemory.advanceTo(next)
         releaseScoBeforeMedia(entry)
         MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
+        MediaOrchestrator.webLinkPreferred = settings.youtubeWebLink
         MediaOrchestrator.openYoutube(context, next.id, null, entry, expectedTitle = next.title)
         recordHistory(HistoryAction.YoutubeOpen(next.id, next.title))
         mediaActionStarted = true  // spec v1.3.9 §1.3
@@ -912,6 +914,7 @@ class VoiceCommandPipeline(
                 val n = (resp.frequency ?: 0.0).toInt()
                 if (n == 0) {
                     MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
+        MediaOrchestrator.webLinkPreferred = settings.youtubeWebLink
                     val result = MediaOrchestrator.playContinue(context, appHint = null, entry = entry)
                     // Only speak here if the nudge WON'T also speak — i.e. we didn't
                     // fire a fresh deep link. Result.Success means "deep link refired,
@@ -1126,6 +1129,7 @@ class VoiceCommandPipeline(
             speakAndRememberWithOpener(spoken)
             releaseScoBeforeMedia(entry)
             MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
+        MediaOrchestrator.webLinkPreferred = settings.youtubeWebLink
             MediaOrchestrator.openYoutube(context, chosen.id, resp.query, entry, expectedTitle = chosen.title)
             recordHistory(HistoryAction.YoutubeOpen(chosen.id, chosen.title))
             // Spec v1.3.8 B5 — remember the videos list so "อันต่อไป" can advance.
