@@ -10,9 +10,8 @@ import kotlin.coroutines.resume
  * HelmetGreeter, FmPlayerService, SettingsActivity, SystemStatusActivity,
  * VoiceCommandService).
  *
- * Zero call-site changes from the original Android-only implementation. Internally
- * this delegates to [TtsRouter], which picks Azure Neural TTS when configured and
- * available, and silently falls back to Android TTS otherwise.
+ * Delegates to the shared [TtsRouter] singleton (one Android TTS engine for the whole
+ * process — v1.4.0 dropped the Azure engine, see there).
  *
  * ─── Contract invariant ─────────────────────────────────────────────────────────
  * [speakAwait] suspends until the audio has FINISHED PLAYING (via engine onDone),

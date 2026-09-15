@@ -14,6 +14,11 @@ data class DebugEntry(
     var sttFinal: String = "",
     var webhookRequest: String? = null,
     var webhookResponse: String? = null,
+    /**
+     * v1.4.0 — "api" or "local": which brain this command was routed to. Without it a slow
+     * `webhookTimeMs` can't be attributed (cold local model vs. cloud hiccup vs. n8n itself).
+     */
+    var llmProvider: String? = null,
     var scoTimeMs: Long = 0,
     var sttTimeMs: Long = 0,
     var webhookTimeMs: Long = 0,
@@ -51,21 +56,12 @@ data class DebugEntry(
     var scoColdConnect: Boolean? = null,
 
     // ─── TTS instrumentation (Sprint I §6) ───────────────────────────────────
-    /** Which engine actually delivered the audio (azure / android / android_fallback). */
-    var ttsEngine: String? = null,
-    /** Synthesise time in ms (0 when we served from cache). */
-    var ttsSynthMs: Long = 0,
-    /** Playback time in ms (from prepare start to OnCompletion). */
-    var ttsPlayMs: Long = 0,
-    /** True if the last Azure speak served from the on-disk cache instead of hitting the API. */
-    var cacheHit: Boolean = false,
-    /** Reason string when Azure failed (network, HTTP code, playback error). */
-    var azureError: String? = null,
     /**
-     * Why the TTS router picked the engine it did. See [EngineChoiceReason].
-     * Field-test 1783477052378 showed every entry as ttsEngine=android with no way to tell
-     * whether the key was missing, the region was blank, or we were offline — this makes it explicit.
+     * Which engine delivered the audio. v1.4.0: always "android" — kept so old and new logs
+     * grep the same way (pre-1.4.0 values: azure / android / android_fallback).
      */
+    var ttsEngine: String? = null,
+    /** Why the TTS router picked the engine it did. See [EngineChoiceReason]. */
     var engineChoiceReason: String? = null,
 
     // ─── SCO lifecycle (bug from log 1783477052378) ──────────────────────────
@@ -310,23 +306,22 @@ object ScoState {
 }
 
 /**
- * Constants for [DebugEntry.engineChoiceReason]. The router's decision path is
- * `key.isNotBlank() && region.isNotBlank() && online → Azure`, else Android; the
- * reason string tells us which of those gates failed. `azure_used` means Azure
- * synthesised the audio; `azure_failed_fallback` means Azure was attempted but
- * threw and we fell through to Android silently (spec §1.3).
+ * Constants for [DebugEntry.engineChoiceReason].
+ *
+ * v1.4.0 — the router only has one engine, so the only value it writes is [ANDROID_ONLY].
+ * The pre-1.4.0 constants stay defined so tests and log tooling that grep the historic
+ * values (`azure_used`, `android_azure_401`, …) keep compiling and keep matching old exports.
  */
 object EngineChoiceReason {
+    /** v1.4.0+ — the only engine there is. */
+    const val ANDROID_ONLY = "android"
+
+    // ── Historic (≤ v1.3.42, Azure era) — never written by current code ──────
     const val AZURE_USED = "azure_used"
     const val AZURE_FAILED_FALLBACK = "azure_failed_fallback"
     const val ANDROID_NO_KEY = "android_no_key"
     const val ANDROID_NO_REGION = "android_no_region"
     const val ANDROID_OFFLINE = "android_offline"
-
-    /**
-     * v1.3.38 — Azure answered 401 earlier in this process, so we stopped asking and every
-     * line comes from Android. One voice beats a mix (field log 1786688875809).
-     */
     const val ANDROID_AZURE_401 = "android_azure_401"
 }
 

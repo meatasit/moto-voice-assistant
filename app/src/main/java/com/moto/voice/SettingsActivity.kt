@@ -6,31 +6,31 @@ import android.os.Bundle
 import android.provider.Settings
 import android.text.method.PasswordTransformationMethod
 import android.view.MenuItem
-import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.lifecycleScope
-import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.moto.voice.data.AppSettings
 import com.moto.voice.data.SettingsBackup
 import com.moto.voice.databinding.ActivitySettingsBinding
 import com.moto.voice.network.WebhookClient
 import com.moto.voice.nlu.ErrorSpeech
-import com.moto.voice.nlu.PersonaHolder
-import com.moto.voice.tts.AzureTtsState
 import com.moto.voice.tts.ThaiTTS
-import com.moto.voice.tts.TtsRouter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * v1.4.0 — the Azure Neural TTS section is gone with the engine (see [com.moto.voice.tts.TtsRouter]).
+ * New at the top: the brain selector, Cloud AI (default) vs Local LLM — see
+ * [AppSettings.llmProvider] for why the default flipped.
+ */
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySettingsBinding
     private lateinit var settings: AppSettings
     private var tokenVisible = false
-    private var azureKeyVisible = false
     private var testJob: Job? = null
     private var previewTts: ThaiTTS? = null
 
@@ -48,6 +48,7 @@ class SettingsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivitySettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        setSupportActionBar(binding.toolbar)
         supportActionBar?.apply { title = getString(R.string.title_settings); setDisplayHomeAsUpEnabled(true) }
 
         settings = AppSettings(this)
@@ -79,32 +80,19 @@ class SettingsActivity : AppCompatActivity() {
         binding.sliderListenPace.value = settings.listenPaceSeconds
         binding.tvListenPaceValue.text = formatSeconds(settings.listenPaceSeconds)
 
-        // Azure section
-        binding.etAzureRegion.setText(settings.azureRegion)
-        binding.etAzureKey.setText(settings.azureKey)
-        binding.etAzureKey.transformationMethod = PasswordTransformationMethod.getInstance()
-        showAzureKeyStatus()
-        loadVoiceDropdown()
+        // Brain selector — check() before the listener is attached so loading doesn't write.
+        binding.toggleLlmProvider.check(
+            if (settings.llmProvider == AppSettings.LLM_LOCAL) R.id.btnLlmLocal else R.id.btnLlmApi
+        )
+        showLlmProviderHint()
     }
 
-    /**
-     * Show at a glance whether a subscription key is already stored — the masked field
-     * alone made "not entered yet" indistinguishable from "entered and saved" (rider
-     * feedback 2026-07-16). Reports only that a key exists + its length, never the value.
-     */
-    private fun showAzureKeyStatus() {
-        binding.tvAzureResult.text = if (settings.azureKey.isBlank()) {
-            "⚪ ยังไม่ได้ใส่ key"
+    private fun showLlmProviderHint() {
+        binding.tvLlmProviderHint.text = if (settings.llmProvider == AppSettings.LLM_LOCAL) {
+            "Ollama บนคอมที่บ้าน — ฟรีและเป็นส่วนตัว แต่ต้องเปิดเครื่องไว้ และคำสั่งแรกอาจช้าถ้าโมเดลยังไม่โหลด"
         } else {
-            "🟢 มี key บันทึกไว้แล้ว (${settings.azureKey.length} ตัวอักษร)"
+            "แนะนำ — ตอบภายใน 2–3 วินาทีทุกครั้ง ไม่ต้องรอโหลดโมเดล กุญแจเก็บไว้ที่ n8n ไม่อยู่ในมือถือ"
         }
-    }
-
-    private fun loadVoiceDropdown() {
-        val voices = AppSettings.AZURE_VOICES
-        val adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, voices)
-        binding.ddAzureVoice.setAdapter(adapter)
-        binding.ddAzureVoice.setText(settings.azureVoice, false)
     }
 
     private fun formatRate(rate: Float): String = "%.1fx".format(rate)
@@ -118,6 +106,12 @@ class SettingsActivity : AppCompatActivity() {
                 if (tokenVisible) null else PasswordTransformationMethod.getInstance()
             binding.etToken.setSelection(binding.etToken.text?.length ?: 0)
             binding.btnShowToken.text = if (tokenVisible) getString(R.string.token_hide) else getString(R.string.token_show)
+        }
+
+        binding.toggleLlmProvider.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            settings.llmProvider = if (checkedId == R.id.btnLlmLocal) AppSettings.LLM_LOCAL else AppSettings.LLM_API
+            showLlmProviderHint()
         }
 
         binding.switchLlm.setOnCheckedChangeListener { _, v -> settings.llmMode = v }
@@ -174,73 +168,6 @@ class SettingsActivity : AppCompatActivity() {
         binding.btnImportSettings.setOnClickListener {
             openBackupFile.launch(arrayOf("application/json"))
         }
-
-        // ─── Azure Neural TTS ────────────────────────────────────────────────
-        binding.btnShowAzureKey.setOnClickListener {
-            azureKeyVisible = !azureKeyVisible
-            binding.etAzureKey.transformationMethod =
-                if (azureKeyVisible) null else PasswordTransformationMethod.getInstance()
-            binding.etAzureKey.setSelection(binding.etAzureKey.text?.length ?: 0)
-            binding.btnShowAzureKey.text = if (azureKeyVisible) getString(R.string.token_hide) else getString(R.string.token_show)
-        }
-        binding.ddAzureVoice.setOnItemClickListener { _, _, position, _ ->
-            val voice = AppSettings.AZURE_VOICES[position]
-            settings.azureVoice = voice
-            // Auto-update persona per §5.2 so ค่ะ/ครับ flips whenever voice does.
-            val newPersona = com.moto.voice.nlu.PersonaHolder.personaForVoice(voice)
-            PersonaHolder.set(newPersona)
-            settings.persona = if (newPersona == com.moto.voice.nlu.Persona.Feminine)
-                AppSettings.PERSONA_FEMININE else AppSettings.PERSONA_MASCULINE
-            // Rebuild the Azure engine so it uses the new voice; warm cache in bg.
-            val router = TtsRouter.getOrCreate(this@SettingsActivity)
-            router.reloadAzureConfig()
-            router.warmCache()
-        }
-        binding.btnAzurePreview.setOnClickListener { previewAzure() }
-    }
-
-    /** Save Azure region/key + fire a preview through TtsRouter to validate the key. */
-    private fun previewAzure() {
-        // Persist inputs before we spin up the engine.
-        settings.azureRegion = binding.etAzureRegion.text.toString().trim()
-            .ifBlank { AppSettings.DEFAULT_AZURE_REGION }
-        settings.azureKey = binding.etAzureKey.text.toString().trim()
-        settings.azureVoice = binding.ddAzureVoice.text.toString()
-            .ifBlank { AppSettings.DEFAULT_AZURE_VOICE }
-        // v1.3.38 — the rider just typed credentials, so give Azure another chance. Without
-        // this the 401 latch (see AzureTtsState) would keep routing to Android even after a
-        // good key was pasted, and the preview below would silently prove nothing.
-        AzureTtsState.clearAuthRejected()
-
-        if (settings.azureKey.isBlank()) {
-            binding.tvAzureResult.text = "❌ ยังไม่ได้กรอก key"
-            return
-        }
-        binding.tvAzureResult.text = "กำลังสังเคราะห์..."
-        binding.btnAzurePreview.isEnabled = false
-
-        // Force router to pick up the new config immediately.
-        val router = TtsRouter.getOrCreate(this)
-        router.reloadAzureConfig()
-
-        val start = System.currentTimeMillis()
-        previewTts?.stop()
-        previewTts = ThaiTTS(this).apply {
-            speak(ErrorSpeech.PREVIEW_SAMPLE) {
-                runOnUiThread {
-                    binding.btnAzurePreview.isEnabled = true
-                    binding.tvAzureResult.text = when (AzureTtsState.result()) {
-                        AzureTtsState.LastResult.Ok ->
-                            "✅ synth ${AzureTtsState.synthMs()}ms · play ${AzureTtsState.playMs()}ms" +
-                                if (AzureTtsState.cacheHit()) " · cache" else ""
-                        AzureTtsState.LastResult.Failed ->
-                            "❌ ${AzureTtsState.error() ?: "unknown"} — ใช้ Android แทน (${System.currentTimeMillis() - start}ms)"
-                        AzureTtsState.LastResult.Never ->
-                            "⚠️ ไม่ได้เรียก Azure — key ว่างหรือออฟไลน์ (${System.currentTimeMillis() - start}ms)"
-                    }
-                }
-            }
-        }
     }
 
     private fun writeBackup(uri: android.net.Uri) {
@@ -286,11 +213,12 @@ class SettingsActivity : AppCompatActivity() {
         val url = settings.webhookUrl
         val token = settings.authToken
         val timeout = settings.timeoutSeconds
+        val provider = settings.llmProvider
         testJob = lifecycleScope.launch {
-            val result = WebhookClient(url, token, timeout).call("ทดสอบระบบ")
+            val result = WebhookClient(url, token, timeout, provider).call("ทดสอบระบบ")
             binding.btnTestConnection.isEnabled = true
             binding.tvTestResult.text = when (result) {
-                is WebhookClient.Result.Success -> "✅ ${result.elapsedMs}ms\n${result.rawJson.take(400)}"
+                is WebhookClient.Result.Success -> "✅ ${result.elapsedMs}ms · สมอง: $provider\n${result.rawJson.take(400)}"
                 is WebhookClient.Result.Failure -> "❌ ${result.error}\n(${result.elapsedMs}ms)"
             }
         }

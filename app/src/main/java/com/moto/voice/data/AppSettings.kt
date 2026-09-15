@@ -50,14 +50,11 @@ class AppSettings(context: Context) {
         const val PERSONA_FEMININE = "feminine"
         const val PERSONA_MASCULINE = "masculine"
 
-        // Azure defaults (spec §4.1, §4.3).
-        const val DEFAULT_AZURE_REGION = "southeastasia"
-        const val AZURE_VOICE_PREMWADEE = "th-TH-PremwadeeNeural"  // feminine
-        const val AZURE_VOICE_NIWAT = "th-TH-NiwatNeural"          // masculine
-        const val AZURE_VOICE_ACHARA = "th-TH-AcharaNeural"        // feminine
-        const val DEFAULT_AZURE_VOICE = AZURE_VOICE_PREMWADEE
+        /** Values for [llmProvider]. Wire format — the webhook reads these exact strings. */
+        const val LLM_API = "api"
+        const val LLM_LOCAL = "local"
 
-        val AZURE_VOICES = listOf(AZURE_VOICE_PREMWADEE, AZURE_VOICE_NIWAT, AZURE_VOICE_ACHARA)
+
     }
 
     /** true if the auth token store is hardware-backed encrypted, false if using plaintext fallback. */
@@ -104,6 +101,8 @@ class AppSettings(context: Context) {
         if (currentToken.isBlank()) {
             secure.edit().putString("auth_token", DEFAULT_TOKEN).apply()
         }
+        // v1.4.0 — Azure is gone; don't leave a dead subscription key sitting in the store.
+        if (secure.contains("azure_key")) secure.edit().remove("azure_key").apply()
     }
 
     var webhookUrl: String
@@ -121,6 +120,20 @@ class AppSettings(context: Context) {
     var llmMode: Boolean
         get() = prefs.getBoolean("llm_mode", true)
         set(v) { prefs.edit().putBoolean("llm_mode", v).apply() }
+
+    /**
+     * v1.4.0 — which brain answers: [LLM_API] (cloud, via n8n → OpenAI) or [LLM_LOCAL]
+     * (Ollama on the home PC). Sent to the webhook as `llm` and routed there; the app never
+     * holds an API key.
+     *
+     * Default API. Field log 1789440952407: webhookTimeMs 30.7s → 15.4s (client timeout) →
+     * 9.3s → 4.1s → 1.6s across five consecutive commands — the local model was loading
+     * into a busy GPU and the first commands of the ride paid for it. Rider's call:
+     * *"Default เป็น Api key ก่อน เพื่อให้มันนิ่งๆ ไม่มีตัวแปรเรื่อง Local LLM"*.
+     */
+    var llmProvider: String
+        get() = prefs.getString("llm_provider", LLM_API).let { if (it == LLM_LOCAL) LLM_LOCAL else LLM_API }
+        set(v) { prefs.edit().putString("llm_provider", if (v == LLM_LOCAL) LLM_LOCAL else LLM_API).apply() }
 
     var confirmBeforeCall: Boolean
         get() = prefs.getBoolean("confirm_call", true)
@@ -254,17 +267,4 @@ class AppSettings(context: Context) {
         get() = prefs.getString("persona", PERSONA_FEMININE) ?: PERSONA_FEMININE
         set(v) { prefs.edit().putString("persona", v).apply() }
 
-    // ─── Azure Neural TTS (Sprint I) ─────────────────────────────────────────
-    var azureRegion: String
-        get() = prefs.getString("azure_region", DEFAULT_AZURE_REGION) ?: DEFAULT_AZURE_REGION
-        set(v) { prefs.edit().putString("azure_region", v).apply() }
-
-    /** Stored in EncryptedSharedPreferences (same slot as auth token). Blank = Azure disabled. */
-    var azureKey: String
-        get() = secure.getString("azure_key", "") ?: ""
-        set(v) { secure.edit().putString("azure_key", v).apply() }
-
-    var azureVoice: String
-        get() = prefs.getString("azure_voice", DEFAULT_AZURE_VOICE) ?: DEFAULT_AZURE_VOICE
-        set(v) { prefs.edit().putString("azure_voice", v).apply() }
 }

@@ -4,9 +4,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginBottom="12dp"
-    app:cardBackgroundColor="#1F1F1F"
-    app:cardCornerRadius="12dp">
+    android:layout_marginBottom="10dp">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -25,15 +23,14 @@
                 android:id="@+id/tvStepStatus"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="20sp"
+                android:textSize="18sp"
                 android:layout_marginEnd="12dp" />
 
             <TextView
                 android:id="@+id/tvStepTitle"
+                style="@style/Widget.Moto.RowTitle"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:textColor="@color/white"
                 android:textSize="16sp"
                 android:textStyle="bold" />
 
@@ -41,19 +38,17 @@
 
         <TextView
             android:id="@+id/tvStepReason"
+            style="@style/Widget.Moto.RowSub"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="#CCFFFFFF"
             android:textSize="13sp"
             android:layout_marginBottom="12dp" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnStepAction"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            style="@style/Widget.Moto.Button.Outlined"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="ทำเลย"
-            android:textColor="@color/white" />
+            android:text="ทำเลย" />
 
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

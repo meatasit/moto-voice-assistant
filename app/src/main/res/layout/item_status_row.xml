@@ -5,8 +5,7 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginBottom="8dp"
-    app:cardBackgroundColor="#1F1F1F"
-    app:cardCornerRadius="12dp"
+    app:cardCornerRadius="16dp"
     android:foreground="?attr/selectableItemBackground"
     android:clickable="true"
     android:focusable="true">
@@ -15,15 +14,19 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="14dp"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="14dp"
+        android:paddingBottom="14dp"
         android:gravity="center_vertical">
 
+        <!-- Activities set a "●" glyph and tint it ok / warn / bad. -->
         <TextView
             android:id="@+id/tvStatusDot"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textSize="18sp"
-            android:layout_marginEnd="12dp" />
+            android:textSize="14sp"
+            android:layout_marginEnd="14dp" />
 
         <LinearLayout
             android:layout_width="0dp"
@@ -33,21 +36,22 @@
 
             <TextView
                 android:id="@+id/tvStatusLabel"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="@color/white"
-                android:textSize="16sp"
+                style="@style/Widget.Moto.RowTitle"
                 android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/tvStatusDetail"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="#CCFFFFFF"
-                android:textSize="13sp"
-                android:layout_marginTop="2dp" />
+                style="@style/Widget.Moto.RowSub" />
 
         </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="›"
+            android:textColor="@color/text_tertiary"
+            android:textSize="22sp"
+            android:layout_marginStart="8dp" />
 
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

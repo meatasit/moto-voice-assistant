@@ -1,10 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  v1.4.0 — amber microphone in a soft ring on the night-ride background. The ring reads
+  as a helmet visor / speaker grille at launcher size; the mic is the promise.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- soft ring -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,26 C42,26 32,36 32,48 C32,57 37,65 45,69 L45,80 L63,80 L63,69 C71,65 76,57 76,48 C76,36 66,26 54,26 Z M48,74 L48,70 C50,70.8 52,71.2 54,71.2 C56,71.2 58,70.8 60,70 L60,74 L48,74 Z" />
+        android:fillColor="#1C242E"
+        android:pathData="M54,22 A32,32 0 1,1 54,86 A32,32 0 1,1 54,22 Z" />
+    <path
+        android:strokeColor="#2A3441"
+        android:strokeWidth="2"
+        android:pathData="M54,22 A32,32 0 1,1 54,86 A32,32 0 1,1 54,22 Z" />
+    <!-- mic capsule -->
+    <path
+        android:fillColor="#FFB000"
+        android:pathData="M54,36 C49,36 45,40 45,45 L45,55 C45,60 49,64 54,64 C59,64 63,60 63,55 L63,45 C63,40 59,36 54,36 Z" />
+    <!-- mic cradle -->
+    <path
+        android:strokeColor="#FFB000"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M40,54 C40,62 46,68 54,68 C62,68 68,62 68,54" />
+    <!-- stem + base -->
+    <path
+        android:strokeColor="#FFB000"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M54,68 L54,75 M46,75 L62,75" />
 </vector>

@@ -11,6 +11,7 @@
     <string name="status_ready">พร้อมใช้งาน</string>
     <string name="status_not_default">ยังไม่ได้ตั้งเป็น Default Assistant</string>
     <string name="status_missing_perms">ยังขาดสิทธิ์บางอย่าง</string>
+    <string name="status_ready_offline">พร้อมใช้งาน — ออฟไลน์</string>
 
     <!-- v1.3.35 home screen -->
     <string name="home_alerts_title">ต้องแก้ก่อนใช้งาน</string>

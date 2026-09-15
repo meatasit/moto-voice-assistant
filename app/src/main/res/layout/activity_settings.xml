@@ -1,556 +1,409 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<!--
+  v1.4.0 — settings, product pass. Five cards in the order the rider actually touches them:
+  brain → connection → behaviour → voice → system. The Azure Neural TTS card is gone with
+  the engine (see TtsRouter).
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/black">
+    android:orientation="vertical"
+    android:background="@color/bg">
 
-    <LinearLayout
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="16dp">
+        android:layout_height="?attr/actionBarSize" />
 
-        <!-- Webhook section -->
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="WEBHOOK" android:textColor="@color/purple_200"
-            android:textSize="12sp" android:textAllCaps="true" android:letterSpacing="0.1"
-            android:layout_marginBottom="8dp" android:layout_marginTop="8dp" />
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
 
-        <com.google.android.material.card.MaterialCardView
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            app:cardBackgroundColor="#1F1F1F"
-            app:cardCornerRadius="12dp">
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:orientation="vertical" android:padding="16dp">
+            android:orientation="vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="32dp">
 
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="Webhook URL" android:textColor="#AAFFFFFF" android:textSize="12sp"
-                    android:layout_marginBottom="4dp" />
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="match_parent" android:layout_height="wrap_content"
-                    style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense"
-                    app:boxStrokeColor="@color/purple_200"
-                    android:layout_marginBottom="16dp">
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/etWebhookUrl"
-                        android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:textColor="@color/white" android:textSize="14sp"
-                        android:inputType="textUri"
-                        android:hint="https://n8n.example.com/webhook/..." />
-                </com.google.android.material.textfield.TextInputLayout>
+            <!-- ═══════════ 1. Brain ═══════════ -->
+            <TextView style="@style/Widget.Moto.Section" android:text="สมอง AI" />
 
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="Auth Token" android:textColor="#AAFFFFFF" android:textSize="12sp"
-                    android:layout_marginBottom="4dp" />
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="20dp">
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="horizontal" android:gravity="center_vertical"
-                    android:layout_marginBottom="16dp">
-                    <com.google.android.material.textfield.TextInputLayout
-                        android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense"
-                        app:boxStrokeColor="@color/purple_200">
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/etToken"
-                            android:layout_width="match_parent" android:layout_height="wrap_content"
-                            android:textColor="@color/white" android:textSize="14sp"
-                            android:inputType="textPassword"
-                            android:hint="Bearer token หรือ API key" />
-                    </com.google.android.material.textfield.TextInputLayout>
-                    <Button android:id="@+id/btnShowToken"
-                        style="@style/Widget.MaterialComponents.Button.TextButton"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="แสดง" android:textColor="@color/purple_200"
-                        android:layout_marginStart="8dp" />
-                </LinearLayout>
+                    android:orientation="vertical">
 
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="Timeout (วินาที) — 5 ถึง 30 default 15" android:textColor="#AAFFFFFF" android:textSize="12sp"
-                    android:layout_marginBottom="4dp" />
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="120dp" android:layout_height="wrap_content"
-                    style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense"
-                    app:boxStrokeColor="@color/purple_200"
-                    android:layout_marginBottom="16dp">
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/etTimeout"
-                        android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:textColor="@color/white" android:textSize="14sp"
-                        android:inputType="number"
-                        android:hint="15" />
-                </com.google.android.material.textfield.TextInputLayout>
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="vertical" android:padding="16dp">
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnTestConnection"
-                    android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="ทดสอบการเชื่อมต่อ"
-                    app:cornerRadius="8dp" />
+                        <TextView style="@style/Widget.Moto.RowTitle" android:text="ใครเป็นคนคิด" android:textStyle="bold" />
+                        <TextView style="@style/Widget.Moto.RowSub" android:layout_width="match_parent"
+                            android:text="ทั้งสองแบบผ่าน n8n เหมือนกัน ต่างกันแค่ตัวที่แปลคำพูดเป็นคำสั่ง"
+                            android:layout_marginBottom="12dp" />
 
-                <TextView
-                    android:id="@+id/tvTestResult"
-                    android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:textColor="#CCFFFFFF" android:textSize="12sp"
-                    android:fontFamily="monospace"
-                    android:layout_marginTop="12dp"
-                    android:text="" />
+                        <com.google.android.material.button.MaterialButtonToggleGroup
+                            android:id="@+id/toggleLlmProvider"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            app:singleSelection="true"
+                            app:selectionRequired="true">
 
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnLlmApi"
+                                style="?attr/materialButtonOutlinedStyle"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="☁️  Cloud AI" />
 
-        <!-- Azure Neural TTS section -->
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="AZURE NEURAL TTS" android:textColor="@color/purple_200"
-            android:textSize="12sp" android:textAllCaps="true" android:letterSpacing="0.1"
-            android:layout_marginBottom="8dp" android:layout_marginTop="8dp" />
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnLlmLocal"
+                                style="?attr/materialButtonOutlinedStyle"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="🖥️  Local LLM" />
 
-        <com.google.android.material.card.MaterialCardView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            app:cardBackgroundColor="#1F1F1F"
-            app:cardCornerRadius="12dp">
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:orientation="vertical" android:padding="16dp">
+                        </com.google.android.material.button.MaterialButtonToggleGroup>
 
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="ยังไม่กรอก key = ใช้ Android TTS เหมือนเดิม ไม่มี error"
-                    android:textColor="#88FFFFFF" android:textSize="12sp"
-                    android:layout_marginBottom="12dp" />
+                        <TextView
+                            android:id="@+id/tvLlmProviderHint"
+                            style="@style/Widget.Moto.RowSub"
+                            android:layout_width="match_parent"
+                            android:layout_marginTop="10dp"
+                            android:text="" />
 
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="Region" android:textColor="#AAFFFFFF" android:textSize="12sp"
-                    android:layout_marginBottom="4dp" />
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="match_parent" android:layout_height="wrap_content"
-                    style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense"
-                    app:boxStrokeColor="@color/purple_200"
-                    android:layout_marginBottom="12dp">
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/etAzureRegion"
-                        android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:textColor="@color/white" android:textSize="14sp"
-                        android:inputType="text"
-                        android:hint="southeastasia" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="Subscription Key" android:textColor="#AAFFFFFF" android:textSize="12sp"
-                    android:layout_marginBottom="4dp" />
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="horizontal" android:gravity="center_vertical"
-                    android:layout_marginBottom="12dp">
-                    <com.google.android.material.textfield.TextInputLayout
-                        android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense"
-                        app:boxStrokeColor="@color/purple_200">
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/etAzureKey"
-                            android:layout_width="match_parent" android:layout_height="wrap_content"
-                            android:textColor="@color/white" android:textSize="14sp"
-                            android:inputType="textPassword"
-                            android:hint="Ocp-Apim-Subscription-Key" />
-                    </com.google.android.material.textfield.TextInputLayout>
-                    <Button android:id="@+id/btnShowAzureKey"
-                        style="@style/Widget.MaterialComponents.Button.TextButton"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="แสดง" android:textColor="@color/purple_200"
-                        android:layout_marginStart="8dp" />
-                </LinearLayout>
-
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="เสียง (voice)" android:textColor="#AAFFFFFF" android:textSize="12sp"
-                    android:layout_marginBottom="4dp" />
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="match_parent" android:layout_height="wrap_content"
-                    style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
-                    app:boxStrokeColor="@color/purple_200"
-                    android:layout_marginBottom="12dp">
-                    <AutoCompleteTextView
-                        android:id="@+id/ddAzureVoice"
-                        android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:textColor="@color/white" android:textSize="14sp"
-                        android:inputType="none" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnAzurePreview"
-                    android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="🔊 ฟังตัวอย่าง"
-                    app:cornerRadius="8dp" />
-
-                <TextView
-                    android:id="@+id/tvAzureResult"
-                    android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:textColor="#CCFFFFFF" android:textSize="12sp"
-                    android:fontFamily="monospace"
-                    android:layout_marginTop="12dp"
-                    android:text="" />
-
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- Behavior section -->
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="พฤติกรรม" android:textColor="@color/purple_200"
-            android:textSize="12sp" android:textAllCaps="true" android:letterSpacing="0.1"
-            android:layout_marginBottom="8dp" />
-
-        <com.google.android.material.card.MaterialCardView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            app:cardBackgroundColor="#1F1F1F"
-            app:cardCornerRadius="12dp">
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:orientation="vertical" android:padding="8dp">
-
-                <LinearLayout android:layout_width="match_parent" android:layout_height="64dp"
-                    android:orientation="horizontal" android:gravity="center_vertical"
-                    android:paddingHorizontal="8dp">
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1" android:orientation="vertical">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="โหมด LLM" android:textColor="@color/white" android:textSize="15sp" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="เปิด = ใช้ webhook / ปิด = rule-based เท่านั้น"
-                            android:textColor="#88FFFFFF" android:textSize="12sp" />
                     </LinearLayout>
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchLlm"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content" />
-                </LinearLayout>
 
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
+                    <View style="@style/Widget.Moto.Divider" />
 
-                <LinearLayout android:layout_width="match_parent" android:layout_height="64dp"
-                    android:orientation="horizontal" android:gravity="center_vertical"
-                    android:paddingHorizontal="8dp">
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1" android:orientation="vertical">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="ยืนยันก่อนโทรเสมอ" android:textColor="@color/white" android:textSize="15sp" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="TTS ถามยืนยัน ก่อน ACTION_CALL"
-                            android:textColor="#88FFFFFF" android:textSize="12sp" />
+                    <LinearLayout style="@style/Widget.Moto.SwitchRow">
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:orientation="vertical">
+                            <TextView style="@style/Widget.Moto.RowTitle" android:text="ใช้สมอง AI" />
+                            <TextView style="@style/Widget.Moto.RowSub"
+                                android:text="ปิด = เข้าใจเฉพาะคำสั่งตายตัวในเครื่อง ไม่ต่อเน็ต" />
+                        </LinearLayout>
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switchLlm"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content" />
                     </LinearLayout>
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchConfirmCall"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content" />
+
                 </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
+            <!-- ═══════════ 2. Connection ═══════════ -->
+            <TextView style="@style/Widget.Moto.Section" android:text="การเชื่อมต่อ" />
 
-                <LinearLayout android:layout_width="match_parent" android:layout_height="64dp"
-                    android:orientation="horizontal" android:gravity="center_vertical"
-                    android:paddingHorizontal="8dp">
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1" android:orientation="vertical">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="ถามก่อนเปิด YouTube" android:textColor="@color/white" android:textSize="15sp" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="เปิด = อ่านตัวเลือก 3 อัน ให้เลือก / ปิด = เปิดอันแรกทันที"
-                            android:textColor="#88FFFFFF" android:textSize="12sp" />
-                    </LinearLayout>
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchAskYoutube"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content" />
-                </LinearLayout>
-
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
-
-                <LinearLayout android:layout_width="match_parent" android:layout_height="64dp"
-                    android:orientation="horizontal" android:gravity="center_vertical"
-                    android:paddingHorizontal="8dp">
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1" android:orientation="vertical">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="เสียงทักเมื่อต่อหมวก" android:textColor="@color/white" android:textSize="15sp" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="TTS พูด 'พร้อมใช้งานครับ' ผ่านหมวกเมื่อเชื่อมต่อ"
-                            android:textColor="#88FFFFFF" android:textSize="12sp" />
-                    </LinearLayout>
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchGreetOnConnect"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content" />
-                </LinearLayout>
-
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
-
-                <LinearLayout android:layout_width="match_parent" android:layout_height="72dp"
-                    android:orientation="horizontal" android:gravity="center_vertical"
-                    android:paddingHorizontal="8dp">
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1" android:orientation="vertical">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="ส่งเสียงสัญญาณเข้าหูฟัง" android:textColor="@color/white" android:textSize="15sp" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="ลองเปิดถ้าไม่ได้ยินเสียงบี๊บตอนกดปุ่ม — ทดสอบตอนจอดก่อน"
-                            android:textColor="#88FFFFFF" android:textSize="12sp" />
-                    </LinearLayout>
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchEarconOnSco"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content" />
-                </LinearLayout>
-
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
-
-                <LinearLayout android:layout_width="match_parent" android:layout_height="72dp"
-                    android:orientation="horizontal" android:gravity="center_vertical"
-                    android:paddingHorizontal="8dp">
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1" android:orientation="vertical">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="เปิด YouTube ด้วยลิงก์เว็บ" android:textColor="@color/white" android:textSize="15sp" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="ช่วยให้สลับคลิปตอนจอล็อคติดง่ายขึ้น — ปิดถ้าเปิดคลิปไม่ขึ้น"
-                            android:textColor="#88FFFFFF" android:textSize="12sp" />
-                    </LinearLayout>
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchYoutubeWebLink"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content" />
-                </LinearLayout>
-
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
-
-                <LinearLayout android:layout_width="match_parent" android:layout_height="64dp"
-                    android:orientation="horizontal" android:gravity="center_vertical"
-                    android:paddingHorizontal="8dp">
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1" android:orientation="vertical">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="เล่นวิทยุต่อหลังวางสาย" android:textColor="@color/white" android:textSize="15sp" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="วิทยุ FM ที่ถูกโทรเข้าตัดจะเล่นต่อเองเมื่อวางสาย"
-                            android:textColor="#88FFFFFF" android:textSize="12sp" />
-                    </LinearLayout>
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchResumeAfterCall"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content" />
-                </LinearLayout>
-
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
-
-                <!-- v1.3.8 B2 — คุยต่อเนื่องหลังตอบ -->
-                <LinearLayout android:layout_width="match_parent" android:layout_height="64dp"
-                    android:orientation="horizontal" android:gravity="center_vertical"
-                    android:paddingHorizontal="8dp">
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1" android:orientation="vertical">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="คุยต่อเนื่องหลังตอบ" android:textColor="@color/white" android:textSize="15sp" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="เปิดฟังต่อ 4 วินาที หลังจาวิสตอบ ไม่ต้องกดปุ่มอีก"
-                            android:textColor="#88FFFFFF" android:textSize="12sp" />
-                    </LinearLayout>
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchFollowup"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content" />
-                </LinearLayout>
-
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
-
-                <!-- v1.3.11 §3.1 — ยืนยันเมื่อเริ่มเล่น -->
-                <LinearLayout android:layout_width="match_parent" android:layout_height="64dp"
-                    android:orientation="horizontal" android:gravity="center_vertical"
-                    android:paddingHorizontal="8dp">
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1" android:orientation="vertical">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="ยืนยันเมื่อเริ่มเล่น" android:textColor="@color/white" android:textSize="15sp" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="พูดสั้นๆ ว่า &quot;เล่นแล้วค่ะ&quot; หลังจากวิดีโอ YouTube เริ่ม (ผ่านสิทธิ์ Media control)"
-                            android:textColor="#88FFFFFF" android:textSize="12sp" />
-                    </LinearLayout>
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchConfirmMediaStart"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content" />
-                </LinearLayout>
-
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
-
-                <!-- Assistant volume 0.5 – 1.5 -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="20dp">
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:orientation="vertical" android:padding="16dp">
 
+                    <TextView style="@style/Widget.Moto.FieldLabel" android:text="Webhook URL (n8n)" />
+                    <com.google.android.material.textfield.TextInputLayout
+                        style="@style/Widget.Moto.Input"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginBottom="14dp">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etWebhookUrl"
+                            android:layout_width="match_parent" android:layout_height="wrap_content"
+                            android:textSize="14sp"
+                            android:inputType="textUri"
+                            android:hint="https://…/webhook/Javis" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <TextView style="@style/Widget.Moto.FieldLabel" android:text="Auth Token" />
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                         android:orientation="horizontal" android:gravity="center_vertical"
-                        android:layout_marginBottom="4dp">
-                        <TextView android:layout_width="0dp" android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="ระดับเสียงผู้ช่วย" android:textColor="@color/white" android:textSize="15sp" />
+                        android:layout_marginBottom="14dp">
+                        <com.google.android.material.textfield.TextInputLayout
+                            style="@style/Widget.Moto.Input"
+                            android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1">
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/etToken"
+                                android:layout_width="match_parent" android:layout_height="wrap_content"
+                                android:textSize="14sp"
+                                android:inputType="textPassword"
+                                android:hint="X-Auth-Token" />
+                        </com.google.android.material.textfield.TextInputLayout>
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnShowToken"
+                            style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="@string/token_show"
+                            android:textColor="@color/accent"
+                            android:layout_marginStart="4dp" />
+                    </LinearLayout>
+
+                    <TextView style="@style/Widget.Moto.FieldLabel" android:text="รอคำตอบสูงสุด (วินาที) · 5–30" />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:gravity="center_vertical"
+                        android:layout_marginBottom="6dp">
+                        <com.google.android.material.textfield.TextInputLayout
+                            style="@style/Widget.Moto.Input"
+                            android:layout_width="110dp" android:layout_height="wrap_content">
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/etTimeout"
+                                android:layout_width="match_parent" android:layout_height="wrap_content"
+                                android:textSize="14sp"
+                                android:inputType="number"
+                                android:hint="15" />
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnTestConnection"
+                            style="@style/Widget.Moto.Button.Tonal"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:minHeight="48dp"
+                            android:text="ทดสอบการเชื่อมต่อ" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tvTestResult"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:textColor="@color/text_secondary" android:textSize="12sp"
+                        android:fontFamily="monospace"
+                        android:layout_marginTop="8dp"
+                        android:text="" />
+
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- ═══════════ 3. Behaviour ═══════════ -->
+            <TextView style="@style/Widget.Moto.Section" android:text="พฤติกรรม" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="20dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <LinearLayout style="@style/Widget.Moto.SwitchRow">
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:orientation="vertical">
+                            <TextView style="@style/Widget.Moto.RowTitle" android:text="ยืนยันก่อนโทรเสมอ" />
+                            <TextView style="@style/Widget.Moto.RowSub" android:text="ถามซ้ำก่อนต่อสายทุกครั้ง" />
+                        </LinearLayout>
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switchConfirmCall"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <View style="@style/Widget.Moto.Divider" />
+
+                    <LinearLayout style="@style/Widget.Moto.SwitchRow">
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:orientation="vertical">
+                            <TextView style="@style/Widget.Moto.RowTitle" android:text="ถามก่อนเปิด YouTube" />
+                            <TextView style="@style/Widget.Moto.RowSub" android:text="เปิด = อ่าน 3 ตัวเลือกให้เลือก / ปิด = เปิดอันแรกทันที" />
+                        </LinearLayout>
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switchAskYoutube"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <View style="@style/Widget.Moto.Divider" />
+
+                    <LinearLayout style="@style/Widget.Moto.SwitchRow">
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:orientation="vertical">
+                            <TextView style="@style/Widget.Moto.RowTitle" android:text="ยืนยันเมื่อเริ่มเล่น" />
+                            <TextView style="@style/Widget.Moto.RowSub" android:text="พูดสั้นๆ ว่า &quot;เล่นแล้วค่ะ&quot; เมื่อวิดีโอเริ่มจริง (ต้องให้สิทธิ์ควบคุมสื่อ)" />
+                        </LinearLayout>
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switchConfirmMediaStart"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <View style="@style/Widget.Moto.Divider" />
+
+                    <LinearLayout style="@style/Widget.Moto.SwitchRow">
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:orientation="vertical">
+                            <TextView style="@style/Widget.Moto.RowTitle" android:text="เปิด YouTube ด้วยลิงก์เว็บ" />
+                            <TextView style="@style/Widget.Moto.RowSub" android:text="ช่วยให้สลับคลิปตอนจอล็อคติดง่ายขึ้น — ปิดถ้าเปิดคลิปไม่ขึ้น" />
+                        </LinearLayout>
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switchYoutubeWebLink"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <View style="@style/Widget.Moto.Divider" />
+
+                    <LinearLayout style="@style/Widget.Moto.SwitchRow">
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:orientation="vertical">
+                            <TextView style="@style/Widget.Moto.RowTitle" android:text="คุยต่อเนื่องหลังตอบ" />
+                            <TextView style="@style/Widget.Moto.RowSub" android:text="เปิดฟังต่ออีก 4 วินาทีหลังจาวิสตอบ ไม่ต้องกดปุ่มอีก" />
+                        </LinearLayout>
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switchFollowup"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <View style="@style/Widget.Moto.Divider" />
+
+                    <LinearLayout style="@style/Widget.Moto.SwitchRow">
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:orientation="vertical">
+                            <TextView style="@style/Widget.Moto.RowTitle" android:text="เสียงทักเมื่อต่อหมวก" />
+                            <TextView style="@style/Widget.Moto.RowSub" android:text="ทักตามช่วงเวลา แล้วอุ่นสมอง AI ให้พร้อมก่อนคำสั่งแรก" />
+                        </LinearLayout>
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switchGreetOnConnect"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <View style="@style/Widget.Moto.Divider" />
+
+                    <LinearLayout style="@style/Widget.Moto.SwitchRow">
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:orientation="vertical">
+                            <TextView style="@style/Widget.Moto.RowTitle" android:text="เล่นวิทยุต่อหลังวางสาย" />
+                            <TextView style="@style/Widget.Moto.RowSub" android:text="วิทยุ FM ที่ถูกสายเข้าตัด จะเล่นต่อเองเมื่อวางสาย" />
+                        </LinearLayout>
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switchResumeAfterCall"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <View style="@style/Widget.Moto.Divider" />
+
+                    <LinearLayout style="@style/Widget.Moto.SwitchRow">
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:orientation="vertical">
+                            <TextView style="@style/Widget.Moto.RowTitle" android:text="ส่งเสียงสัญญาณเข้าหูฟัง" />
+                            <TextView style="@style/Widget.Moto.RowSub" android:text="ทดลอง: ลองเปิดถ้าไม่ได้ยินเสียงบี๊บตอนกดปุ่ม — ทดสอบตอนจอดก่อน" />
+                        </LinearLayout>
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switchEarconOnSco"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- ═══════════ 4. Voice ═══════════ -->
+            <TextView style="@style/Widget.Moto.Section" android:text="เสียงของจาวิส" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="20dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="16dp">
+
+                    <!-- Assistant volume 0.5 – 1.5 -->
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:gravity="center_vertical">
+                        <TextView style="@style/Widget.Moto.RowTitle" android:layout_width="0dp"
+                            android:layout_weight="1" android:text="ระดับเสียงผู้ช่วย" />
                         <TextView android:id="@+id/tvAssistantVolumeValue"
                             android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="1.0x" android:textColor="@color/purple_200"
+                            android:text="1.0x" android:textColor="@color/accent"
                             android:textSize="14sp" android:fontFamily="monospace" />
                     </LinearLayout>
-
-                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="แยกจากระดับเสียง media ปกติ ใช้กับ TTS ของแอปเท่านั้น"
-                        android:textColor="#88FFFFFF" android:textSize="12sp"
-                        android:layout_marginBottom="8dp" />
-
+                    <TextView style="@style/Widget.Moto.RowSub" android:text="แยกจากเสียงเพลง — ใช้กับเสียงพูดของแอปเท่านั้น" />
                     <com.google.android.material.slider.Slider
                         android:id="@+id/sliderAssistantVolume"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:stepSize="0.1"
-                        android:value="1.0"
-                        android:valueFrom="0.5"
-                        android:valueTo="1.5" />
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:stepSize="0.1" android:value="1.0" android:valueFrom="0.5" android:valueTo="1.5" />
 
-                </LinearLayout>
+                    <View style="@style/Widget.Moto.Divider" android:layout_marginStart="0dp" android:layout_marginEnd="0dp"
+                        android:layout_marginTop="8dp" android:layout_marginBottom="16dp" />
 
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
-
-                <!-- TTS speech rate 0.8 – 1.5 -->
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="vertical" android:padding="16dp">
-
+                    <!-- TTS speech rate 0.8 – 1.5 -->
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:orientation="horizontal" android:gravity="center_vertical"
-                        android:layout_marginBottom="4dp">
-                        <TextView android:layout_width="0dp" android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="ความเร็วเสียงพูด (TTS)" android:textColor="@color/white" android:textSize="15sp" />
+                        android:orientation="horizontal" android:gravity="center_vertical">
+                        <TextView style="@style/Widget.Moto.RowTitle" android:layout_width="0dp"
+                            android:layout_weight="1" android:text="ความเร็วเสียงพูด" />
                         <TextView android:id="@+id/tvTtsRateValue"
                             android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="1.0x" android:textColor="@color/purple_200"
+                            android:text="1.0x" android:textColor="@color/accent"
                             android:textSize="14sp" android:fontFamily="monospace" />
                     </LinearLayout>
-
                     <com.google.android.material.slider.Slider
                         android:id="@+id/sliderTtsRate"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:stepSize="0.1"
-                        android:value="1.0"
-                        android:valueFrom="0.8"
-                        android:valueTo="1.5" />
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:stepSize="0.1" android:value="1.0" android:valueFrom="0.8" android:valueTo="1.5" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnPreviewTts"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        style="@style/Widget.Moto.Button.Outlined"
                         android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="🔊 ทดลองฟัง" android:textColor="@color/white"
-                        android:layout_marginTop="8dp"
-                        app:cornerRadius="8dp" />
+                        android:text="🔊  ทดลองฟัง" />
 
-                    <!-- v1.3.6 §1: จังหวะรอฟัง — silence-length hint to the recognizer -->
-                    <LinearLayout
-                        android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:orientation="horizontal" android:gravity="center_vertical"
-                        android:layout_marginTop="12dp" android:layout_marginBottom="4dp">
-                        <TextView android:layout_width="0dp" android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="จังหวะรอฟัง (ก่อนตัดจบ)" android:textColor="@color/white" android:textSize="15sp" />
+                    <View style="@style/Widget.Moto.Divider" android:layout_marginStart="0dp" android:layout_marginEnd="0dp"
+                        android:layout_marginTop="16dp" android:layout_marginBottom="16dp" />
+
+                    <!-- v1.3.6 §1: จังหวะรอฟัง -->
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:gravity="center_vertical">
+                        <TextView style="@style/Widget.Moto.RowTitle" android:layout_width="0dp"
+                            android:layout_weight="1" android:text="รอฟังก่อนตัดจบ" />
                         <TextView android:id="@+id/tvListenPaceValue"
                             android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="2.0s" android:textColor="@color/purple_200"
+                            android:text="2.0s" android:textColor="@color/accent"
                             android:textSize="14sp" android:fontFamily="monospace" />
                     </LinearLayout>
-
+                    <TextView style="@style/Widget.Moto.RowSub" android:text="ค่ามาก = พูดเว้นจังหวะได้นานขึ้น แต่ตอบช้าลง" />
                     <com.google.android.material.slider.Slider
                         android:id="@+id/sliderListenPace"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:stepSize="0.1"
-                        android:value="2.0"
-                        android:valueFrom="1.0"
-                        android:valueTo="3.0" />
-
-                    <TextView
                         android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:text="พูดเว้นจังหวะได้นานขึ้น = ค่ามาก แต่ตอบสนองช้าลง"
-                        android:textColor="@color/purple_200" android:textSize="12sp"
-                        android:layout_marginBottom="4dp" />
+                        android:stepSize="0.1" android:value="2.0" android:valueFrom="1.0" android:valueTo="3.0" />
 
                 </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
+            <!-- ═══════════ 5. System ═══════════ -->
+            <TextView style="@style/Widget.Moto.Section" android:text="ระบบ" />
 
-        <!-- Quick links section -->
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="ลิงก์ลัด" android:textColor="@color/purple_200"
-            android:textSize="12sp" android:textAllCaps="true" android:letterSpacing="0.1"
-            android:layout_marginBottom="8dp" />
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:paddingTop="4dp" android:paddingBottom="4dp">
 
-        <com.google.android.material.card.MaterialCardView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            app:cardBackgroundColor="#1F1F1F"
-            app:cardCornerRadius="12dp">
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:orientation="vertical" android:padding="8dp">
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btnSystemStatus"
+                        style="@style/Widget.Moto.LinkRow" android:text="🩺   สถานะระบบ" />
+                    <View style="@style/Widget.Moto.Divider" />
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btnDefaultAssistant"
+                        style="@style/Widget.Moto.LinkRow" android:text="🎙️   ตั้งเป็นผู้ช่วยหลัก (Digital Assistant)" />
+                    <View style="@style/Widget.Moto.Divider" />
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btnBatteryOpt"
+                        style="@style/Widget.Moto.LinkRow" android:text="🔋   ยกเว้นการประหยัดแบตเตอรี่" />
+                    <View style="@style/Widget.Moto.Divider" />
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btnAppPermissions"
+                        style="@style/Widget.Moto.LinkRow" android:text="🔐   สิทธิ์ของแอป" />
+                    <View style="@style/Widget.Moto.Divider" />
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btnReopenOnboarding"
+                        style="@style/Widget.Moto.LinkRow" android:text="🧭   ตั้งค่าครั้งแรกอีกรอบ" />
+                    <View style="@style/Widget.Moto.Divider" />
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btnExportSettings"
+                        style="@style/Widget.Moto.LinkRow" android:text="⬇   ส่งออกการตั้งค่า (JSON)" />
+                    <View style="@style/Widget.Moto.Divider" />
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btnImportSettings"
+                        style="@style/Widget.Moto.LinkRow" android:text="⬆   นำเข้าการตั้งค่า (JSON)" />
 
-                <Button android:id="@+id/btnDefaultAssistant"
-                    style="@style/Widget.MaterialComponents.Button.TextButton"
-                    android:layout_width="match_parent" android:layout_height="48dp"
-                    android:text="⚙️  ตั้งค่า Default Digital Assistant"
-                    android:textColor="@color/white" android:gravity="start|center_vertical"
-                    android:paddingStart="8dp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
+        </LinearLayout>
+    </ScrollView>
 
-                <Button android:id="@+id/btnBatteryOpt"
-                    style="@style/Widget.MaterialComponents.Button.TextButton"
-                    android:layout_width="match_parent" android:layout_height="48dp"
-                    android:text="🔋  ยกเว้น Battery Optimization"
-                    android:textColor="@color/white" android:gravity="start|center_vertical"
-                    android:paddingStart="8dp" />
-
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
-
-                <Button android:id="@+id/btnAppPermissions"
-                    style="@style/Widget.MaterialComponents.Button.TextButton"
-                    android:layout_width="match_parent" android:layout_height="48dp"
-                    android:text="🔐  App permissions"
-                    android:textColor="@color/white" android:gravity="start|center_vertical"
-                    android:paddingStart="8dp" />
-
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
-
-                <Button android:id="@+id/btnReopenOnboarding"
-                    style="@style/Widget.MaterialComponents.Button.TextButton"
-                    android:layout_width="match_parent" android:layout_height="48dp"
-                    android:text="🧭  เปิด Onboarding อีกครั้ง"
-                    android:textColor="@color/white" android:gravity="start|center_vertical"
-                    android:paddingStart="8dp" />
-
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
-
-                <Button android:id="@+id/btnSystemStatus"
-                    style="@style/Widget.MaterialComponents.Button.TextButton"
-                    android:layout_width="match_parent" android:layout_height="48dp"
-                    android:text="🩺  สถานะระบบ"
-                    android:textColor="@color/white" android:gravity="start|center_vertical"
-                    android:paddingStart="8dp" />
-
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
-
-                <Button android:id="@+id/btnExportSettings"
-                    style="@style/Widget.MaterialComponents.Button.TextButton"
-                    android:layout_width="match_parent" android:layout_height="48dp"
-                    android:text="⬇  Export การตั้งค่าเป็นไฟล์ JSON"
-                    android:textColor="@color/white" android:gravity="start|center_vertical"
-                    android:paddingStart="8dp" />
-
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33FFFFFF" />
-
-                <Button android:id="@+id/btnImportSettings"
-                    style="@style/Widget.MaterialComponents.Button.TextButton"
-                    android:layout_width="match_parent" android:layout_height="48dp"
-                    android:text="⬆  Import การตั้งค่าจากไฟล์ JSON"
-                    android:textColor="@color/white" android:gravity="start|center_vertical"
-                    android:paddingStart="8dp" />
-
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-    </LinearLayout>
-</ScrollView>
+</LinearLayout>

@@ -22,6 +22,7 @@ class HistoryActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityHistoryBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        setSupportActionBar(binding.toolbar)
         supportActionBar?.apply { title = "ประวัติการใช้งาน"; setDisplayHomeAsUpEnabled(true) }
 
         history = AppHistory(this)
@@ -39,7 +40,7 @@ class HistoryActivity : AppCompatActivity() {
         if (entries.isEmpty()) {
             binding.historyContainer.addView(TextView(this).apply {
                 text = getString(R.string.home_history_empty)
-                setTextColor(android.graphics.Color.parseColor("#AAFFFFFF"))
+                setTextColor(getColor(R.color.text_secondary))
                 textSize = 14f
                 setPadding(16, 24, 16, 16)
             })

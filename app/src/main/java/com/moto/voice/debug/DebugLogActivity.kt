@@ -18,6 +18,7 @@ class DebugLogActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityDebugLogBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        setSupportActionBar(binding.toolbar)
         supportActionBar?.apply { title = "Debug Log"; setDisplayHomeAsUpEnabled(true) }
 
         binding.btnClear.setOnClickListener {
@@ -46,7 +47,7 @@ class DebugLogActivity : AppCompatActivity() {
         }
         if (entries.isEmpty()) {
             val message = if (errorsOnly) "ไม่พบ error ในช่วงที่ผ่านมา" else "ยังไม่มี log"
-            binding.logContainer.addView(makeTv(message, "#AAFFFFFF"))
+            binding.logContainer.addView(makeTv(message))
             return
         }
         entries.forEach { e ->
@@ -66,9 +67,9 @@ class DebugLogActivity : AppCompatActivity() {
         }
     }
 
-    private fun makeTv(text: String, color: String): TextView = TextView(this).apply {
+    private fun makeTv(text: String): TextView = TextView(this).apply {
         this.text = text
-        setTextColor(android.graphics.Color.parseColor(color))
+        setTextColor(getColor(com.moto.voice.R.color.text_secondary))
         textSize = 14f
         setPadding(16, 16, 16, 16)
     }

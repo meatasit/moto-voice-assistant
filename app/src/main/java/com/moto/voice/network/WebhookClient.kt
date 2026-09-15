@@ -34,6 +34,11 @@ class WebhookClient(
     private val url: String,
     private val authToken: String,
     timeoutSeconds: Int,
+    /**
+     * v1.4.0 — `llm` field of the request body: "api" or "local". n8n routes on it; an
+     * older workflow simply ignores the extra field. See [com.moto.voice.data.AppSettings.llmProvider].
+     */
+    private val llmProvider: String = "api",
 ) {
     /** Categorises failure so the pipeline can pick the right TTS message per spec §6. */
     enum class Kind { Network, Timeout, Http401, HttpOther, Parse }
@@ -137,7 +142,7 @@ class WebhookClient(
     }
 
     private fun buildRequest(text: String): Request {
-        val body = gson.toJson(mapOf("text" to text))
+        val body = gson.toJson(mapOf("text" to text, "llm" to llmProvider))
             .toRequestBody("application/json".toMediaType())
         return Request.Builder()
             .url(url)

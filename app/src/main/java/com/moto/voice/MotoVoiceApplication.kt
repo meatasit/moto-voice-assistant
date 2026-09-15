@@ -10,7 +10,6 @@ import com.moto.voice.bt.HelmetGreeter
 import com.moto.voice.data.AppSettings
 import com.moto.voice.nlu.Persona
 import com.moto.voice.nlu.PersonaHolder
-import com.moto.voice.tts.TtsRouter
 
 class MotoVoiceApplication : Application() {
 
@@ -42,11 +41,9 @@ class MotoVoiceApplication : Application() {
      * the LOW_MEMORY exit path we observed in prior sessions
      * (ApplicationExitInfo REASON_LOW_MEMORY, importance 400).
      *
-     * At MODERATE and above we:
-     *   * clear the LRU tier of [TtsCache] (persistent pre-synth stays — that's what
-     *     keeps the assistant responsive right when memory just tightened);
-     *   * release the [HelmetGreeter] singleton — it's cheap to recreate on the next
-     *     Bluetooth connect, but holds a coroutine scope that can be reclaimed now.
+     * At MODERATE and above we release the [HelmetGreeter] singleton — it's cheap to
+     * recreate on the next Bluetooth connect, but holds a coroutine scope that can be
+     * reclaimed now. (v1.4.0: the on-disk Azure TTS cache this used to trim is gone.)
      *
      * Nothing here touches persistent state — favorites, settings, memory all live in
      * SharedPreferences and are untouched.
@@ -55,10 +52,6 @@ class MotoVoiceApplication : Application() {
         super.onTrimMemory(level)
         Log.d(TAG, "onTrimMemory level=$level")
         if (level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE) {
-            runCatching {
-                val deleted = TtsRouter.getOrCreate(this).clearTtsCacheLru()
-                Log.d(TAG, "onTrimMemory MODERATE+ → cleared $deleted LRU TTS files")
-            }
             greeter?.let {
                 runCatching { it.stop() }
                 greeter = null

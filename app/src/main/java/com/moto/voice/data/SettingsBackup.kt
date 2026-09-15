@@ -41,6 +41,11 @@ data class SettingsBackup(
      * older backups still parse; missing = AppSettings default (true).
      */
     @SerializedName("confirm_media_start") val confirmMediaStart: Boolean? = null,
+    /**
+     * Added in v1.4.0 — "api" / "local" brain selector. Optional; missing = AppSettings
+     * default (api). Not a secret: the key itself lives in n8n, never on the phone.
+     */
+    @SerializedName("llm_provider") val llmProvider: String? = null,
     val favorites: List<Favorite>,
     @SerializedName("last_station") val lastStation: LastStation?,
 ) {
@@ -93,6 +98,7 @@ data class SettingsBackup(
                 listenPaceSeconds = s.listenPaceSeconds,
                 followupEnabled = s.followupEnabled,
                 confirmMediaStart = s.confirmMediaStart,
+                llmProvider = s.llmProvider,
                 favorites = fav,
                 lastStation = station,
             )
@@ -135,6 +141,7 @@ data class SettingsBackup(
             backup.listenPaceSeconds?.let { s.listenPaceSeconds = it }
             backup.followupEnabled?.let { s.followupEnabled = it }
             backup.confirmMediaStart?.let { s.confirmMediaStart = it }
+            backup.llmProvider?.let { s.llmProvider = it }
 
             val favStore = FavoritesStore(context)
             favStore.clear()

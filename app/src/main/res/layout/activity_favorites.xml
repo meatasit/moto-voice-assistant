@@ -4,55 +4,79 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="@color/black"
-    android:padding="16dp">
+    android:background="@color/bg">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="รายการโปรด — เพิ่มได้สูงสุด 5 คน"
-        android:textColor="#CCFFFFFF"
-        android:textSize="14sp"
-        android:layout_marginBottom="12dp" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="คนในรายการนี้จะถูกจับคู่ได้แม่นกว่า เวลาพูดชื่อ"
-        android:textColor="#88FFFFFF"
-        android:textSize="12sp"
-        android:layout_marginBottom="4dp" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="เรียกด้วยเสียง: พูดว่า &quot;โทรหารายการโปรดหนึ่ง&quot; (หรือหมายเลข 1-5)"
-        android:textColor="#88FFFFFF"
-        android:textSize="12sp"
-        android:layout_marginBottom="16dp" />
-
-    <LinearLayout
-        android:id="@+id/favoritesContainer"
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:layout_marginBottom="16dp" />
+        android:layout_height="?attr/actionBarSize" />
 
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btnAddFavorite"
+    <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="56dp"
-        android:text="เพิ่มจากรายชื่อ"
-        android:textSize="15sp"
-        app:cornerRadius="12dp" />
+        android:layout_height="0dp"
+        android:layout_weight="1">
 
-    <TextView
-        android:id="@+id/tvFullWarning"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text=""
-        android:textColor="#FFB74D"
-        android:textSize="12sp"
-        android:layout_marginTop="8dp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="24dp">
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardBackgroundColor="@color/accent_soft"
+                app:strokeWidth="0dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        style="@style/Widget.Moto.RowTitle"
+                        android:text="โทรหาคนสำคัญด้วยเสียงคำเดียว"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        style="@style/Widget.Moto.RowSub"
+                        android:layout_width="match_parent"
+                        android:textColor="@color/text_primary"
+                        android:text="เพิ่มได้สูงสุด 5 คน — พูดว่า &quot;โทรหารายการโปรดหนึ่ง&quot; (หรือหมายเลข 1–5) ชื่อในรายการนี้จะถูกจับคู่ได้แม่นกว่าตอนพูด" />
+
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <LinearLayout
+                android:id="@+id/favoritesContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginBottom="12dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnAddFavorite"
+                style="@style/Widget.Moto.Button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="＋  เพิ่มจากรายชื่อ" />
+
+            <TextView
+                android:id="@+id/tvFullWarning"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textColor="@color/warn"
+                android:textSize="12.5sp"
+                android:layout_marginTop="10dp"
+                android:layout_marginStart="4dp" />
+
+        </LinearLayout>
+    </ScrollView>
 
 </LinearLayout>

@@ -1,98 +1,175 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  v1.3.35 — home screen rebuilt around "what does the rider need RIGHT NOW".
+  v1.4.0 — home screen, product pass.
 
-  Was: a static permission checklist (4 rows, always visible even when all granted),
-  a Set-Default button, two nav buttons, and a how-to-use card. Everything above the
-  fold was setup UI the solo rider had already finished months ago.
-
-  Now: only problems that need a tap (hidden entirely when the install is healthy),
-  then the recent history inline — the part that is actually worth opening the app for.
-  The full status page and the full history list are still one tap away.
+  Hero card answers "can I ride now?" in one glance: a coloured status dot + one line, then
+  three chips for the things that actually vary day to day — which brain is answering
+  (Cloud / Local), whether the helmet is connected, and whether we are online. Below it the
+  v1.3.35 structure is unchanged: only problems that need a tap (hidden when healthy), two
+  quick actions, then recent history inline.
 -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/black">
+    android:background="@color/bg"
+    android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="16dp"
+        android:paddingBottom="28dp">
 
-        <!-- Header row -->
+        <!-- Header -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginBottom="16dp">
+            android:layout_marginBottom="18dp">
 
-            <TextView
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Moto Voice"
-                android:textColor="@color/white"
-                android:textSize="28sp"
-                android:textStyle="bold" />
+                android:orientation="vertical">
 
-            <Button
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Moto Voice"
+                    android:textColor="@color/text_primary"
+                    android:textSize="26sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="-0.02" />
+
+                <TextView
+                    android:id="@+id/tvVersion"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="จาวิส · ผู้ช่วยเสียงตอนขี่"
+                    android:textColor="@color/text_tertiary"
+                    android:textSize="12.5sp" />
+
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnDebugLog"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
+                style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
+                android:layout_height="44dp"
+                android:minWidth="44dp"
                 android:text="📋"
                 android:textSize="18sp"
-                android:textColor="@color/white"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
                 android:contentDescription="@string/cd_debug_log" />
 
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnSettings"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
+                style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
+                android:layout_height="44dp"
+                android:minWidth="44dp"
                 android:text="⚙️"
                 android:textSize="18sp"
-                android:textColor="@color/white"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
                 android:contentDescription="@string/cd_settings" />
 
         </LinearLayout>
 
-        <!-- Status banner — tap opens the full system-status page -->
+        <!-- Hero: readiness at a glance. Tap → full system-status page. -->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/cardStatus"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="20dp"
-            app:cardBackgroundColor="#1F1F1F"
-            app:cardCornerRadius="12dp"
+            app:cardCornerRadius="24dp"
             android:foreground="?attr/selectableItemBackground"
             android:clickable="true"
             android:focusable="true">
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:padding="16dp"
-                android:gravity="center_vertical">
-                <TextView
-                    android:id="@+id/tvStatusIcon"
-                    android:layout_width="wrap_content"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="⚙️"
-                    android:textSize="24sp"
-                    android:layout_marginEnd="12dp" />
-                <TextView
-                    android:id="@+id/tvStatus"
-                    android:layout_width="0dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="14dp">
+
+                    <!-- Coloured dot; MainActivity tints it ok / warn / bad. -->
+                    <View
+                        android:id="@+id/statusDot"
+                        android:layout_width="12dp"
+                        android:layout_height="12dp"
+                        android:background="@drawable/bg_status_dot"
+                        android:layout_marginEnd="12dp" />
+
+                    <TextView
+                        android:id="@+id/tvStatus"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="กำลังตรวจสอบ..."
+                        android:textColor="@color/text_primary"
+                        android:textSize="20sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="›"
+                        android:textColor="@color/text_tertiary"
+                        android:textSize="24sp" />
+
+                </LinearLayout>
+
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="กำลังตรวจสอบ..."
-                    android:textColor="@color/white"
-                    android:textSize="15sp" />
+                    android:scrollbars="none"
+                    android:layout_marginBottom="12dp">
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/chipBrain"
+                            style="@style/Widget.Moto.Chip"
+                            android:text="☁️ Cloud AI" />
+
+                        <TextView
+                            android:id="@+id/chipHelmet"
+                            style="@style/Widget.Moto.Chip"
+                            android:text="🪖 หมวก" />
+
+                        <TextView
+                            android:id="@+id/chipNet"
+                            style="@style/Widget.Moto.Chip"
+                            android:layout_marginEnd="0dp"
+                            android:text="📶 ออนไลน์" />
+
+                    </LinearLayout>
+                </HorizontalScrollView>
+
+                <TextView
+                    android:id="@+id/tvHeroHint"
+                    style="@style/Widget.Moto.RowSub"
+                    android:layout_width="match_parent"
+                    android:text="กดปุ่มบนหมวก แล้วพูดหลังเสียงบี๊บ" />
+
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -106,18 +183,13 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:visibility="gone"
-            android:layout_marginBottom="20dp">
+            android:layout_marginBottom="16dp">
 
             <TextView
                 android:id="@+id/tvAlertsHeader"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                style="@style/Widget.Moto.Section"
                 android:text="@string/home_alerts_title"
-                android:textColor="#FFB4AB"
-                android:textSize="13sp"
-                android:textAllCaps="true"
-                android:letterSpacing="0.1"
-                android:layout_marginBottom="12dp" />
+                android:textColor="@color/bad" />
 
             <LinearLayout
                 android:id="@+id/alertsContainer"
@@ -127,63 +199,57 @@
 
         </LinearLayout>
 
-        <!-- Quick access -->
+        <!-- Quick actions -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginBottom="20dp">
+            android:layout_marginBottom="24dp">
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFavorites"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                style="@style/Widget.Moto.Button.Tonal"
                 android:layout_width="0dp"
-                android:layout_height="48dp"
+                android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:layout_marginEnd="4dp"
-                android:text="⭐ โปรด"
-                android:textColor="@color/white"
-                app:cornerRadius="12dp" />
+                android:layout_marginEnd="6dp"
+                android:text="⭐  รายการโปรด" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnSystemStatus"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                style="@style/Widget.Moto.Button.Tonal"
                 android:layout_width="0dp"
-                android:layout_height="48dp"
+                android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:layout_marginStart="4dp"
-                android:text="🩺 สถานะระบบ"
-                android:textColor="@color/white"
-                app:cornerRadius="12dp" />
+                android:layout_marginStart="6dp"
+                android:text="🩺  สถานะระบบ" />
 
         </LinearLayout>
 
-        <!-- Recent history, inline (was a button pre-v1.3.35) -->
+        <!-- Recent history, inline -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginBottom="8dp">
+            android:layout_marginBottom="4dp">
 
             <TextView
+                style="@style/Widget.Moto.Section"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="@string/home_recent_title"
-                android:textColor="@color/purple_200"
-                android:textSize="13sp"
-                android:textAllCaps="true"
-                android:letterSpacing="0.1" />
+                android:layout_marginBottom="0dp"
+                android:layout_marginTop="0dp"
+                android:text="@string/home_recent_title" />
 
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnHistoryAll"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
+                style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="36dp"
                 android:text="@string/home_see_all"
                 android:textSize="13sp"
-                android:textColor="@color/purple_200" />
+                android:textColor="@color/accent" />
 
         </LinearLayout>
 
