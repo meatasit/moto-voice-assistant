@@ -26,6 +26,13 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default package list is "tools platform-tools". The legacy
+          # "tools" package was removed from Google's SDK repository (run 34925097606,
+          # 15 Sep 2026: `Warning: Failed to find package 'tools'` → exit 1). Gradle
+          # fetches the platform / build-tools it needs itself; only platform-tools is
+          # worth pre-installing.
+          packages: platform-tools
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
