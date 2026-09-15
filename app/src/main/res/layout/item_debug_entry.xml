@@ -5,8 +5,7 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginBottom="8dp"
-    app:cardBackgroundColor="#1A1A1A"
-    app:cardCornerRadius="8dp">
+    app:cardCornerRadius="12dp">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -18,7 +17,7 @@
             android:id="@+id/tvEntryHeader"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="#CCFFFFFF"
+            android:textColor="@color/text_primary"
             android:textSize="12sp"
             android:fontFamily="monospace"
             android:layout_marginBottom="4dp" />
@@ -27,7 +26,7 @@
             android:id="@+id/tvEntryDetail"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="#88FFFFFF"
+            android:textColor="@color/text_secondary"
             android:textSize="11sp"
             android:fontFamily="monospace" />
 

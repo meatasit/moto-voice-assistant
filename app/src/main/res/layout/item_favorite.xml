@@ -5,43 +5,43 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginBottom="8dp"
-    app:cardBackgroundColor="#1F1F1F"
-    app:cardCornerRadius="12dp">
+    app:cardCornerRadius="16dp">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="16dp"
+        android:paddingStart="12dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp"
         android:gravity="center_vertical">
 
         <TextView
             android:id="@+id/tvFavSlot"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textColor="@color/purple_200"
-            android:textSize="20sp"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_icon_tile"
+            android:gravity="center"
+            android:textColor="@color/accent"
+            android:textSize="18sp"
             android:textStyle="bold"
-            android:fontFamily="monospace"
-            android:layout_marginEnd="16dp"
-            android:minWidth="28dp"
-            android:gravity="center" />
+            android:layout_marginEnd="12dp" />
 
         <TextView
             android:id="@+id/tvFavName"
+            style="@style/Widget.Moto.RowTitle"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:textColor="@color/white"
             android:textSize="16sp" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnRemoveFav"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
-            android:layout_height="36dp"
+            android:layout_height="40dp"
             android:text="ลบ"
-            android:textColor="@color/white" />
+            android:textColor="@color/text_secondary" />
 
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

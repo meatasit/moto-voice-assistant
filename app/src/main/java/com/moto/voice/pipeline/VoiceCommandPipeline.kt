@@ -695,6 +695,7 @@ class VoiceCommandPipeline(
 
     private suspend fun processText(text: String, entry: DebugEntry) {
         entry.webhookRequest = text
+        entry.llmProvider = settings.llmProvider
         val useWebhook = settings.llmMode && settings.webhookUrl.isNotBlank()
         if (!useWebhook) {
             entry.finishReason = FinishReason.LLM_OFF
@@ -705,7 +706,7 @@ class VoiceCommandPipeline(
         val progress1Spoken = AtomicBoolean(false)
         val progress2Spoken = AtomicBoolean(false)
 
-        val client = WebhookClient(settings.webhookUrl, settings.authToken, settings.timeoutSeconds)
+        val client = WebhookClient(settings.webhookUrl, settings.authToken, settings.timeoutSeconds, settings.llmProvider)
         val result = client.call(text) { elapsed ->
             when {
                 elapsed <= 5_000L && progress1Spoken.compareAndSet(false, true) -> {

@@ -57,6 +57,7 @@ class OnboardingActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityOnboardingBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        setSupportActionBar(binding.toolbar)
         supportActionBar?.apply { title = "เริ่มต้นใช้งาน"; setDisplayHomeAsUpEnabled(true) }
 
         settings = AppSettings(this)
@@ -201,7 +202,7 @@ class OnboardingActivity : AppCompatActivity() {
     private fun testWebhook() {
         binding.btnFinishOnboarding.isEnabled = false
         lifecycleScope.launch {
-            val result = WebhookClient(settings.webhookUrl, settings.authToken, settings.timeoutSeconds)
+            val result = WebhookClient(settings.webhookUrl, settings.authToken, settings.timeoutSeconds, settings.llmProvider)
                 .call("ทดสอบระบบ")
             val msg = when (result) {
                 is WebhookClient.Result.Success -> "✅ เชื่อมได้ (${result.elapsedMs}ms)"

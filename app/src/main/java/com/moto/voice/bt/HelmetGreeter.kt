@@ -116,7 +116,8 @@ class HelmetGreeter(private val app: Context) {
             val outcome = ping?.await() ?: return@launch
             if (outcome == LlmWarmup.Outcome.Warm) lastWarmOkAt = System.currentTimeMillis()
             // Rider's rule: silent when it works, speak only when something is wrong.
-            val line = LlmWarmup.lineFor(outcome) ?: return@launch
+            val line = LlmWarmup.lineFor(outcome, local = settings.llmProvider == AppSettings.LLM_LOCAL)
+                ?: return@launch
             Log.w(TAG, "LLM warm-up: $outcome — telling the rider")
             withTimeoutOrNull(GREETING_TIMEOUT_MS) {
                 val tts = ThaiTTS(app)
@@ -132,7 +133,7 @@ class HelmetGreeter(private val app: Context) {
      */
     private suspend fun pingLlm(settings: AppSettings): LlmWarmup.Outcome {
         val result = runCatching {
-            WebhookClient(settings.webhookUrl, settings.authToken, LlmWarmup.PING_TIMEOUT_SEC)
+            WebhookClient(settings.webhookUrl, settings.authToken, LlmWarmup.PING_TIMEOUT_SEC, settings.llmProvider)
                 .call(LlmWarmup.PING_TEXT)
         }.getOrNull()
         return when (result) {

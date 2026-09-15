@@ -29,6 +29,7 @@ class SystemStatusActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivitySystemStatusBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        setSupportActionBar(binding.toolbar)
         supportActionBar?.apply { title = "สถานะระบบ"; setDisplayHomeAsUpEnabled(true) }
 
         checker = SystemStatusChecker(this)
@@ -71,7 +72,10 @@ class SystemStatusActivity : AppCompatActivity() {
         binding.statusRowsContainer.removeAllViews()
         rows.forEach { row ->
             val v = layoutInflater.inflate(R.layout.item_status_row, binding.statusRowsContainer, false)
-            v.findViewById<TextView>(R.id.tvStatusDot).text = dotFor(row.state)
+            v.findViewById<TextView>(R.id.tvStatusDot).apply {
+                text = "●"
+                setTextColor(getColor(colorFor(row.state)))
+            }
             v.findViewById<TextView>(R.id.tvStatusLabel).text = row.label
             v.findViewById<TextView>(R.id.tvStatusDetail).text = row.detail
             v.setOnClickListener { handleRowTap(row) }
@@ -79,11 +83,11 @@ class SystemStatusActivity : AppCompatActivity() {
         }
     }
 
-    private fun dotFor(state: StatusRow.State) = when (state) {
-        StatusRow.State.Green -> "🟢"
-        StatusRow.State.Yellow -> "🟡"
-        StatusRow.State.Red -> "🔴"
-        StatusRow.State.Pending -> "⏳"
+    private fun colorFor(state: StatusRow.State) = when (state) {
+        StatusRow.State.Green -> R.color.ok
+        StatusRow.State.Yellow -> R.color.warn
+        StatusRow.State.Red -> R.color.bad
+        StatusRow.State.Pending -> R.color.text_tertiary
     }
 
     private fun handleRowTap(row: StatusRow) {

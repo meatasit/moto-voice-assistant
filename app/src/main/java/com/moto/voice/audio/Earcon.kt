@@ -92,11 +92,18 @@ object Earcon {
     /**
      * Signal: "your turn to answer" — the assistant asked a question (confirm,
      * disambig, slot-fill, follow-up window) and the mic is open with no button press
-     * needed. Same motif as [ready] since v1.3.36: the rider's required action is the
-     * same in both cases, and one sound to recognise beats two he has to tell apart at
-     * 90 km/h.
+     * needed.
+     *
+     * v1.4.0 — back to the original two short ACK beeps ("ตึ่งตึ๊ง", v1.3.9 → v1.3.35).
+     * v1.3.36 folded this into [ready]'s single beep on the theory that one sound is easier
+     * to learn; the rider noticed the loss and asked for it back: *"Build แรกๆ ยังมีเสียง
+     * ตึ่งตึ๊งก่อนจะให้เริ่มพูดอยู่เลย หลังๆ มาเสียงหายไป"*. Two beeps here, one for [ready]
+     * — the count now also tells "answer my question" from "new command".
      */
-    suspend fun answerListen() = startListening()
+    suspend fun answerListen() {
+        play(ToneGenerator.TONE_PROP_ACK, 100, tailMs = 120)
+        play(ToneGenerator.TONE_PROP_ACK, 100, tailMs = 120)
+    }
 
     /**
      * The single "mic is open, speak now" cue.

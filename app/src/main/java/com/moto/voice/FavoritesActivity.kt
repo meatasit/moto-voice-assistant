@@ -52,6 +52,7 @@ class FavoritesActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityFavoritesBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        setSupportActionBar(binding.toolbar)
         supportActionBar?.apply { title = "รายการโปรด"; setDisplayHomeAsUpEnabled(true) }
 
         store = FavoritesStore(this)
@@ -67,7 +68,7 @@ class FavoritesActivity : AppCompatActivity() {
         if (items.isEmpty()) {
             binding.favoritesContainer.addView(TextView(this).apply {
                 text = "ยังไม่มีรายการโปรด"
-                setTextColor(android.graphics.Color.parseColor("#AAFFFFFF"))
+                setTextColor(getColor(R.color.text_secondary))
                 textSize = 14f
                 setPadding(8, 8, 8, 8)
             })

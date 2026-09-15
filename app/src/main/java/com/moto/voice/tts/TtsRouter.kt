@@ -1,43 +1,39 @@
 package com.moto.voice.tts
 
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import android.util.Log
-import com.moto.voice.data.AppSettings
 import com.moto.voice.debug.DebugEntry
 import com.moto.voice.debug.DebugLog
 import com.moto.voice.debug.EngineChoiceReason
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * The single TTS access point for the rest of the app. Picks between Azure and Android
- * per-call, and silently falls back to Android if Azure is unavailable or fails.
+ * The single TTS access point for the rest of the app.
  *
- * Per spec §1.3: the swap must be seamless — the rider never hears an error announcement
- * about which engine is being used, and the caller's speak / onDone callback timing is
- * indistinguishable from a pure-Android setup.
+ * v1.4.0 — Android TTS only. Azure Neural TTS (Sprint I → v1.3.42) is gone: the free
+ * subscription expired (`ReadOnlyDisabledSubscription`, every synth HTTP 401 in field log
+ * 1786688875809) and the rider chose to drop it rather than pay — *"เลิกใช้ Azure ไปเลยก็ได้"*.
  *
- * Singleton so both the pipeline's [ThaiTTS] facade and the pre-synthesize [CacheWarmer]
- * share the same cache instance and Azure config.
+ * Removing the second engine also removes, by construction, two bugs that took several
+ * rounds to chase:
+ *
+ *  * **two voices in one ride** — cached lines played in the Azure voice while fresh lines
+ *    fell back to Android (v1.3.38 latch was the workaround);
+ *  * **two sentences on top of each other** — Azure played through its own MediaPlayer and
+ *    Android through the platform engine, so one could not flush the other (v1.3.38
+ *    stop-before-speak was the workaround). One engine with QUEUE_FLUSH cannot overlap.
+ *
+ * Still a singleton so every [ThaiTTS] facade shares one engine instance — that is what
+ * makes [stop] from any caller silence whatever is in flight.
  */
-class TtsRouter private constructor(private val app: Context) {
+class TtsRouter private constructor(app: Context) {
 
-    private val cache = TtsCache(app)
     private val android = AndroidTtsEngine(app)
 
-    private val azure = AtomicReference<AzureTtsEngine?>(null)
-
-    private data class Config(val region: String, val key: String, val voice: String)
-
     /**
-     * @param stampDebug whether this speak writes its engine/timings onto the current
-     *   [DebugEntry]. v1.3.36 — false for lines spoken OUTSIDE an interaction (the nudge's
-     *   launch-blocked announcement fires ~10s after the pipeline finished). Those resolved
-     *   `DebugLog.entries().firstOrNull()` to the already-finished interaction and overwrote
-     *   its TTS fields, producing the impossible rows in field log 1786104958601:
-     *   `cacheHit=true` + `ttsSynthMs=1` — served from cache, no synthesis — carrying an
-     *   `azureError="synth failed after 599ms"` that belonged to a different sentence.
+     * @param stampDebug whether this speak writes its engine onto the current [DebugEntry].
+     *   v1.3.36 — false for lines spoken OUTSIDE an interaction (the nudge's launch-blocked
+     *   announcement fires ~10s after the pipeline finished) so they don't overwrite the
+     *   finished interaction's TTS fields (field log 1786104958601).
      */
     fun speak(
         text: String,
@@ -46,171 +42,26 @@ class TtsRouter private constructor(private val app: Context) {
         onError: ((reason: String) -> Unit)?,
         stampDebug: Boolean = true,
     ) {
-        // v1.3.38 — one voice at a time. Rider: *"บางครั้ง AI 2 เสียงพูดทับกัน แต่คนละประโยคนะ"*.
-        // The Azure engine plays through its own MediaPlayer and Android TTS through the
-        // platform engine, so a line started while another is still playing does not replace
-        // it — they simply both come out. That is easy to hit: the pipeline speaks its reply
-        // and MediaOrchestrator's nudge announces a blocked launch seconds later. Stopping
-        // whatever is in flight makes the newer line win, which is also the more useful one.
+        // One voice at a time (v1.3.38). Kept even with a single engine: the platform TTS
+        // flushes its own queue, but an explicit stop also cancels a pending pre-init
+        // utterance so a stale line can't surface after the engine finishes starting.
         stop()
-
-        val cfg = loadConfig()
-        val online = isOnline()
-
-        // v1.3.33 — capture the entry THIS call belongs to right now, synchronously.
-        // Field log 1786010970975 caught entries with ttsSynthMs=5 (a cache hit — no
-        // synth happened) but azureError="synth failed after 601ms" — impossible unless
-        // that error came from a DIFFERENT interaction. markDebug used to re-resolve
-        // `DebugLog.entries().firstOrNull()` at each async callback; AzureTtsEngine.speak
-        // runs on a background Thread, so if a NEW DebugEntry had been created (rider
-        // pressed the button again) before that callback fired, it wrote onto the wrong
-        // entry. Threading the same reference through every callback of this one speak()
-        // call fixes that regardless of what else DebugLog.new()'s in the meantime.
         val entry = if (stampDebug) DebugLog.entries().firstOrNull() else null
-        // v1.3.37 — clear once per speak, not per markDebug. v1.3.36 assigned azureError on
-        // EVERY markDebug so the pairs stayed consistent, but the Android-fallback success
-        // that follows a failure writes error=null — which wiped the very reason the failure
-        // detail had just been added to capture. Field log 1786178611552 came back with
-        // engineChoiceReason=azure_failed_fallback and no azureError at all. Clearing here
-        // keeps a later speak from inheriting an older one's error while the failure that
-        // belongs to THIS speak survives to the log.
-        entry?.azureError = null
-
-        // Route decision: Azure only when configured AND online. Everything else → Android.
-        // Field log 1783477052378 showed every entry `ttsEngine=android` — we couldn't
-        // tell whether the key was lost, the region was blank, or connectivity failed.
-        // Compute the exact reason so the next field log makes the answer legible.
-        val androidReason = when {
-            cfg.key.isBlank() -> EngineChoiceReason.ANDROID_NO_KEY
-            cfg.region.isBlank() -> EngineChoiceReason.ANDROID_NO_REGION
-            !online -> EngineChoiceReason.ANDROID_OFFLINE
-            // v1.3.38 — every synth in field log 1786688875809 came back HTTP 401. Retrying
-            // a rejected key just alternates voices: cached lines play in Azure, new ones
-            // fall back to Android. Pick one voice and stay there until the key works again.
-            AzureTtsState.authRejected() -> EngineChoiceReason.ANDROID_AZURE_401
-            else -> null
-        }
-        if (androidReason != null) {
-            android.speak(text, onStart, onDone, onError)
-            markDebug(entry, "android", reason = androidReason, error = null)
-            return
-        }
-
-        val engine = azureFor(cfg)
-        engine.speak(
-            text,
-            onStart = onStart,
-            onDone = {
-                markDebug(entry, "azure", reason = EngineChoiceReason.AZURE_USED, error = null)
-                onDone?.invoke()
-            },
-            onError = { reason ->
-                Log.w(TAG, "azure failed: $reason — falling back to Android silently")
-                markDebug(entry, "azure_failed", reason = EngineChoiceReason.AZURE_FAILED_FALLBACK, error = reason)
-                // Silent fallback per spec §1.3 — no user-facing announcement.
-                android.speak(
-                    text,
-                    onStart = null,  // don't fire onStart twice
-                    onDone = {
-                        // Keep engineChoiceReason = azure_failed_fallback so the field
-                        // log records that Azure was TRIED — don't overwrite with an
-                        // Android success reason. Just refresh the timings.
-                        markDebug(entry, "android_fallback", reason = EngineChoiceReason.AZURE_FAILED_FALLBACK, error = null)
-                        onDone?.invoke()
-                    },
-                    onError = { androidReason2 ->
-                        markDebug(entry, "android_fallback_failed", reason = EngineChoiceReason.AZURE_FAILED_FALLBACK, error = androidReason2)
-                        onError?.invoke(androidReason2)
-                    },
-                )
-            },
-        )
+        markDebug(entry)
+        android.speak(text, onStart, onDone, onError)
     }
 
     fun stop() {
-        azure.get()?.stop()
         android.stop()
     }
 
-    /**
-     * Attach the current TTS timing + engine choice to [entry] — the DebugEntry that was
-     * current when THIS [speak] call started (captured once by the caller, not re-resolved
-     * per callback; see the v1.3.33 comment at the [speak] call site). Timings are pulled
-     * from [AzureTtsState] so we can distinguish synth vs playback ms and know whether the
-     * cache served it. For pure-Android calls the timings remain zero — they were never
-     * synthesised via Azure.
-     *
-     * [reason] is the [EngineChoiceReason] constant explaining why THIS engine was
-     * chosen — populates `engineChoiceReason` so field logs make the fallback path
-     * legible (spec-round-3 bug 3, log 1783477052378).
-     */
-    private fun markDebug(entry: DebugEntry?, engine: String, reason: String, error: String?) {
+    private fun markDebug(entry: DebugEntry?) {
         val head = entry ?: return
-        head.ttsEngine = engine
-        head.engineChoiceReason = reason
-        head.ttsSynthMs = AzureTtsState.synthMs().coerceAtLeast(0)
-        head.ttsPlayMs = AzureTtsState.playMs().coerceAtLeast(0)
-        head.cacheHit = AzureTtsState.cacheHit()
-        // Only write failures. The per-speak reset in [speak] is what stops a stale error
-        // from outliving the speak it belongs to — see the v1.3.37 note there.
-        if (error != null) head.azureError = error
+        head.ttsEngine = "android"
+        head.engineChoiceReason = EngineChoiceReason.ANDROID_ONLY
     }
-
-    private fun azureFor(cfg: Config): AzureTtsEngine {
-        val existing = azure.get()
-        if (existing != null) return existing
-        val fresh = AzureTtsEngine(app, cfg.region, cfg.key, cfg.voice, cache)
-        return if (azure.compareAndSet(null, fresh)) fresh else azure.get()!!
-    }
-
-    private fun loadConfig(): Config {
-        val s = AppSettings(app)
-        return Config(
-            region = s.azureRegion,
-            key = s.azureKey,
-            voice = s.azureVoice,
-        )
-    }
-
-    private fun isOnline(): Boolean {
-        val cm = app.getSystemService(ConnectivityManager::class.java) ?: return false
-        val net = cm.activeNetwork ?: return false
-        val caps = cm.getNetworkCapabilities(net) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-               caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-    }
-
-    /** Invalidate the Azure engine so the next speak re-reads config. */
-    fun reloadAzureConfig() {
-        val old = azure.getAndSet(null)
-        runCatching { old?.shutdown() }
-    }
-
-    /**
-     * Kick off a pre-synth of every system line into the persistent cache. WiFi-only
-     * per spec §3.3. Callers: Settings after voice/rate change; Settings after successful
-     * preview.
-     */
-    fun warmCache() {
-        val cfg = loadConfig()
-        if (cfg.key.isBlank() || cfg.region.isBlank()) return
-        CacheWarmer(app, cfg.region, cfg.key, cfg.voice, cache).warmAllIfPossible()
-    }
-
-    /** Test hook: expose the cache for instrumentation. */
-    internal fun cacheForTest(): TtsCache = cache
-
-    /**
-     * Spec v1.3.8 A4 — public accessor used by [com.moto.voice.MotoVoiceApplication.onTrimMemory]
-     * to clear the LRU tier of the on-disk TTS cache under memory pressure. The
-     * persistent tier (pre-synthesized system lines) stays so the assistant is still
-     * responsive right after the OS reclaimed memory.
-     * @return number of LRU files deleted.
-     */
-    fun clearTtsCacheLru(): Int = cache.clearLru()
 
     companion object {
-        private const val TAG = "TtsRouter"
         private val instance = AtomicReference<TtsRouter?>(null)
 
         fun getOrCreate(context: Context): TtsRouter {

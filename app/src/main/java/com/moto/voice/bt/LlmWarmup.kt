@@ -87,9 +87,12 @@ object LlmWarmup {
      *
      * Deliberately short: this lands right after the connect greeting, in a helmet.
      */
-    fun lineFor(outcome: Outcome): String? = when (outcome) {
+    fun lineFor(outcome: Outcome, local: Boolean = true): String? = when (outcome) {
         Outcome.Warm, Outcome.NotConfigured -> null
-        Outcome.Loading -> "ระบบ AI กำลังโหลดอยู่ รออีกสักครู่นะคะ"
+        // v1.4.0 — only a local model has a "loading" state; the cloud brain being slow is
+        // a different thing to hear about.
+        Outcome.Loading -> if (local) "ระบบ AI กำลังโหลดอยู่ รออีกสักครู่นะคะ"
+                           else "ระบบ AI ตอบช้าผิดปกติค่ะ"
         Outcome.Unreachable -> "ต่อระบบ AI ไม่ได้ค่ะ เช็คเน็ตหรือเครื่องที่บ้านนะคะ"
         Outcome.Rejected -> "ระบบ AI ไม่รับการเชื่อมต่อค่ะ ลองดู token ในตั้งค่านะคะ"
         Outcome.Broken -> "ระบบ AI ตอบผิดปกติค่ะ"

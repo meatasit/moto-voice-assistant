@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.role.RoleManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -37,16 +38,17 @@ import java.util.Locale
  *    discovered mid-ride, as a locked media open that quietly did nothing.
  *  * **Recent history renders inline** instead of hiding behind a button; tapping a row
  *    replays it via [HistoryReplay], same as [HistoryActivity].
- *  * The permission checklist, the Set-Default button and the how-to-use card are gone.
- *    Both remaining fixups are still reachable — as alert rows, when they actually apply.
  *
- * Everything is recomputed in [onResume] so returning from an OS settings screen
- * immediately reflects the new grant.
+ * v1.4.0 — product pass. The banner became a hero card with a coloured dot and three chips
+ * (brain: Cloud/Local, helmet, network) so the day-to-day variables are visible without
+ * opening anything. Everything is still recomputed in [onResume] so returning from an OS
+ * settings screen immediately reflects the new grant.
  */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var history: AppHistory
+    private lateinit var settings: AppSettings
     private val timeFmt = SimpleDateFormat("HH:mm  d MMM", Locale.getDefault())
 
     private val allPermissions: Array<String> = buildList {
@@ -78,11 +80,13 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         history = AppHistory(this)
+        settings = AppSettings(this)
 
-        if (!AppSettings(this).onboardingComplete) {
+        if (!settings.onboardingComplete) {
             startActivity(Intent(this, OnboardingActivity::class.java))
         }
 
+        binding.tvVersion.text = versionLabel()
         binding.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         binding.btnDebugLog.setOnClickListener { startActivity(Intent(this, DebugLogActivity::class.java)) }
         binding.btnFavorites.setOnClickListener { startActivity(Intent(this, FavoritesActivity::class.java)) }
@@ -97,49 +101,58 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun render() {
-        renderBanner()
-        renderAlerts()
+        // Sync checks only — home must paint instantly and must not fire the webhook probe
+        // just because the app was opened. The async Webhook/TTS rows stay on
+        // [SystemStatusActivity].
+        val rows = SystemStatusChecker(this).checkSync()
+        renderHero(rows)
+        renderAlerts(rows)
         renderHistory()
     }
 
-    // ─── Banner ──────────────────────────────────────────────────────────────
+    // ─── Hero ────────────────────────────────────────────────────────────────
 
-    private fun renderBanner() {
+    private fun renderHero(rows: List<StatusRow>) {
         val allGranted = missingPermissions().isEmpty()
         val isDefault = isDefaultAssistant()
         val online = NetworkState.isOnline(this)
-        val offlineSuffix = if (!online) "  •  ออฟไลน์" else ""
-        when {
-            isDefault && allGranted -> {
-                binding.tvStatusIcon.text = if (online) "✅" else "📡"
-                binding.tvStatus.text = getString(R.string.status_ready) + offlineSuffix
-            }
-            !isDefault -> {
-                binding.tvStatusIcon.text = "⚠️"
-                binding.tvStatus.text = getString(R.string.status_not_default) + offlineSuffix
-            }
-            else -> {
-                binding.tvStatusIcon.text = "⚠️"
-                binding.tvStatus.text = getString(R.string.status_missing_perms) + offlineSuffix
-            }
+        val helmetOn = rows.firstOrNull { it.id == StatusRow.Kind.Helmet }?.state == StatusRow.State.Green
+
+        val (line, color) = when {
+            !isDefault -> getString(R.string.status_not_default) to R.color.bad
+            !allGranted -> getString(R.string.status_missing_perms) to R.color.bad
+            !online -> getString(R.string.status_ready_offline) to R.color.warn
+            else -> getString(R.string.status_ready) to R.color.ok
+        }
+        binding.tvStatus.text = line
+        binding.statusDot.backgroundTintList = ColorStateList.valueOf(getColor(color))
+
+        binding.chipBrain.text = when {
+            !settings.llmMode -> "🧩 กฎในเครื่อง"
+            settings.llmProvider == AppSettings.LLM_LOCAL -> "🖥️ Local LLM"
+            else -> "☁️ Cloud AI"
+        }
+        binding.chipHelmet.text = if (helmetOn) "🪖 หมวกเชื่อมแล้ว" else "🪖 ยังไม่ต่อหมวก"
+        binding.chipNet.text = if (online) "📶 ออนไลน์" else "📵 ออฟไลน์"
+        binding.tvHeroHint.text = when {
+            !isDefault -> "แตะเพื่อตั้งเป็นผู้ช่วยหลักก่อน ปุ่มบนหมวกถึงจะเรียกได้"
+            helmetOn -> "กดปุ่มบนหมวก แล้วพูดหลังเสียงบี๊บ"
+            else -> "ต่อหมวกแล้วกดปุ่ม BVRA หรือกดปุ่ม Home ค้างบนเครื่อง"
         }
     }
 
     // ─── Alerts ──────────────────────────────────────────────────────────────
 
-    /**
-     * Sync checks only — home must paint instantly and must not fire the webhook probe
-     * just because the app was opened. The async Webhook/TTS rows stay on
-     * [SystemStatusActivity].
-     */
-    private fun renderAlerts() {
-        val alerts = HomeAlerts.alerts(SystemStatusChecker(this).checkSync())
+    private fun renderAlerts(rows: List<StatusRow>) {
+        val alerts = HomeAlerts.alerts(rows)
         binding.alertsContainer.removeAllViews()
         binding.alertsSection.visibility = if (alerts.isEmpty()) View.GONE else View.VISIBLE
         alerts.forEach { row ->
             val v = layoutInflater.inflate(R.layout.item_status_row, binding.alertsContainer, false)
-            v.findViewById<TextView>(R.id.tvStatusDot).text =
-                if (row.state == StatusRow.State.Red) "🔴" else "🟡"
+            v.findViewById<TextView>(R.id.tvStatusDot).apply {
+                text = "●"
+                setTextColor(getColor(if (row.state == StatusRow.State.Red) R.color.bad else R.color.warn))
+            }
             v.findViewById<TextView>(R.id.tvStatusLabel).text = row.label
             v.findViewById<TextView>(R.id.tvStatusDetail).text = row.detail
             v.setOnClickListener { handleAlertTap(row) }
@@ -172,7 +185,7 @@ class MainActivity : AppCompatActivity() {
         if (entries.isEmpty()) {
             binding.historyContainer.addView(TextView(this).apply {
                 text = getString(R.string.home_history_empty)
-                setTextColor(android.graphics.Color.parseColor("#AAFFFFFF"))
+                setTextColor(getColor(R.color.text_secondary))
                 textSize = 14f
                 setPadding(16, 16, 16, 16)
             })
@@ -194,6 +207,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    private fun versionLabel(): String {
+        val name = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull()
+        return if (name.isNullOrBlank()) "จาวิส · ผู้ช่วยเสียงตอนขี่" else "จาวิส · ผู้ช่วยเสียงตอนขี่ · v$name"
+    }
 
     private fun missingPermissions(): List<String> = allPermissions.filterNot {
         ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
