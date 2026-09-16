@@ -40,7 +40,7 @@ internal object YoutubeVerify {
      * `titlesMatch` said no, the verdict stayed SWITCHED until the window ran out, and the
      * rider heard "ยังเปลี่ยนคลิปไม่ทัน" for a live stream that was audibly playing.
      */
-    private val WS = Regex("[\s\p{Z}\u200B\u200C\u200D\uFEFF]+")
+    private val WS = Regex("""[\s\p{Z}\u200B\u200C\u200D\uFEFF]+""")
 
     fun normalize(s: String?): String =
         s?.replace(WS, " ")?.trim()?.lowercase() ?: ""
