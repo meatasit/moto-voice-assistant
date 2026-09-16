@@ -70,6 +70,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.switchGreetOnConnect.isChecked = settings.greetOnConnect
         binding.switchEarconOnSco.isChecked = settings.earconOnScoStream
         binding.switchYoutubeWebLink.isChecked = settings.youtubeWebLink
+        binding.switchYoutubeMediaBrowser.isChecked = settings.youtubeMediaBrowser
         binding.sliderTtsRate.value = settings.ttsSpeechRate
         binding.tvTtsRateValue.text = formatRate(settings.ttsSpeechRate)
         binding.switchResumeAfterCall.isChecked = settings.resumeAfterCall
@@ -120,6 +121,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.switchGreetOnConnect.setOnCheckedChangeListener { _, v -> settings.greetOnConnect = v }
         binding.switchEarconOnSco.setOnCheckedChangeListener { _, v -> settings.earconOnScoStream = v }
         binding.switchYoutubeWebLink.setOnCheckedChangeListener { _, v -> settings.youtubeWebLink = v }
+        binding.switchYoutubeMediaBrowser.setOnCheckedChangeListener { _, v -> settings.youtubeMediaBrowser = v }
 
         binding.sliderTtsRate.addOnChangeListener { _, value, _ ->
             binding.tvTtsRateValue.text = formatRate(value)
