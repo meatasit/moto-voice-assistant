@@ -34,12 +34,42 @@ object SlotFiller {
      * mechanism keeping this from stealing normal commands.
      */
     fun detect(normalized: String): Need {
-        val t = normalized.trim()
+        val t = stripPoliteTail(normalized.trim())
         return when {
             BARE_CALL_REGEX.matches(t) -> Need.CallTarget
             BARE_YOUTUBE_REGEX.matches(t) -> Need.YoutubeQuery
             BARE_RADIO_REGEX.matches(t) -> Need.RadioStation
             else -> Need.None
+        }
+    }
+
+    /**
+     * v1.4.5 — drop a trailing politeness tail before the bare-opener match.
+     *
+     * Field log 1789561893967, entries 1789559709013 and 1789561561232: the rider said
+     * "เปิด YouTube ให้ฟังหน่อย" — a bare opener wearing a Thai politeness suffix — and because
+     * [BARE_YOUTUBE_REGEX] is anchored to the end of the string it did not match. The
+     * sentence went to the cloud instead, cost ~4 s of webhook time, and came back
+     * `action=chat` with "อยากฟังอะไรดีคะ": the same question [promptFor] asks, arrived slower
+     * and with no slot to fill afterwards. Twice in one session.
+     *
+     * "ให้ฟังหน่อย" is not a payload, so removing it does not weaken the guard that keeps this
+     * from stealing real commands: the match is still whole-string, so the two sentences in
+     * the same log that DO carry a payload — "เปิด YouTube ช่องในอาร์มให้ฟังหน่อย" and
+     * "เปิดเพลงจาก YouTube ให้ฟังหน่อย" — still fall through to the webhook, because what is
+     * left after the tail comes off is not a bare opener either.
+     *
+     * Applied repeatedly: riders stack these ("...ให้หน่อยครับ").
+     */
+    internal fun stripPoliteTail(normalized: String): String {
+        var t = normalized.trim()
+        while (true) {
+            val m = POLITE_TAIL_REGEX.find(t) ?: return t
+            val stripped = t.removeRange(m.range).trim()
+            // Never strip the sentence down to nothing — "หน่อย" alone is not an opener,
+            // and returning "" here would make every blank-ish result look like one.
+            if (stripped.isEmpty()) return t
+            t = stripped
         }
     }
 
@@ -114,5 +144,17 @@ object SlotFiller {
     )
     private val BARE_RADIO_REGEX = Regex(
         "^เปิด\\s?(?:วิทยุ|คลื่น)$"
+    )
+
+    /**
+     * Trailing politeness / filler the rider adds to a bare opener. Anchored to the END so
+     * it can only ever remove a suffix, and ordered longest-first inside each alternation so
+     * "ให้ฟังหน่อย" is consumed whole rather than leaving "ให้ฟัง" behind.
+     *
+     * Every token here is drawn from the rider's own logs; this is not a general politeness
+     * stripper and should not grow speculatively.
+     */
+    private val POLITE_TAIL_REGEX = Regex(
+        "\\s*(?:ให้ฟังหน่อย|ให้ฟังที|ให้ฟัง|ให้หน่อย|ให้ที|ได้ไหม|ได้มั้ย|หน่อย|ที|ครับ|ค่ะ|คะ)$"
     )
 }

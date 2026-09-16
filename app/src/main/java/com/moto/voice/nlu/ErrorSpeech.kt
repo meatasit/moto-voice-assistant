@@ -267,6 +267,21 @@ object ErrorSpeech {
     )
 
     /** Every system line, in a stable order — used by the pre-synthesize cache warmer. */
+    /**
+     * v1.4.5 — `action=spotify_play` resumed Spotify but Spotify had no session, so all we
+     * could do was launch the app; it comes up paused. Never claim playback we can't see.
+     */
+    val SPOTIFY_OPENED_NOT_PLAYING: String get() = pick(
+        "เปิดสปอติฟายให้แล้ว แต่ยังไม่เล่นค่ะ",
+        "เปิดสปอติฟายให้แล้ว แต่ยังไม่เล่นครับ",
+    )
+
+    /** v1.4.5 — `action=spotify_play` could not even get Spotify open (not installed?). */
+    val SPOTIFY_LAUNCH_FAILED: String get() = pick(
+        "เปิดสปอติฟายไม่สำเร็จค่ะ ลองสั่งใหม่อีกครั้งนะคะ",
+        "เปิดสปอติฟายไม่สำเร็จครับ ลองสั่งใหม่อีกครั้งนะครับ",
+    )
+
     fun allSystemLines(): List<String> = listOf(
         THINKING, ONE_MORE_MOMENT,
         OFFLINE_LIMITED, TIMEOUT_WITH_FALLBACK, TIMEOUT_NO_FALLBACK,
@@ -288,6 +303,7 @@ object ErrorSpeech {
         SEEK_ATTEMPTED, MEDIA_PLAY_CONFIRMED, MEDIA_OPENED_NOT_PLAYING,
         LAUNCH_BLOCKED_LOCKED, LAUNCH_FAILED_NO_SESSION, SWITCH_NOT_LANDED,
         MEDIA_STOPPED_AFTER_OPEN, SEEK_AMOUNT_UNKNOWN,
+        SPOTIFY_OPENED_NOT_PLAYING, SPOTIFY_LAUNCH_FAILED,
     )
 
     private fun pick(feminine: String, masculine: String): String =

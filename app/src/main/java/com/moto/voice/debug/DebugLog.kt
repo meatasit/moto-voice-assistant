@@ -9,6 +9,18 @@ import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
 
 data class DebugEntry(
+    /**
+     * v1.4.5 — "1.4.4 (53)": which build produced this entry. Set by [DebugLog.new] from
+     * [DebugLog.appVersion]; null in pure-JVM tests, which never boot the Application.
+     *
+     * Field log 1789561893967 is why. Reviewing it, the single most important question —
+     * did the rider run the build whose fixes we are checking? — could not be answered:
+     * the export carried no version anywhere, and every field in it had existed since
+     * v1.4.2. It is stamped PER ENTRY on purpose. Entries get excerpted one at a time
+     * into branch notes and chat messages, and a version that only lives in a file header
+     * is gone the moment someone pastes the entry that matters.
+     */
+    var appVersion: String? = null,
     val timestamp: Long = System.currentTimeMillis(),
     var sttPartial: String = "",
     var sttFinal: String = "",
@@ -283,8 +295,32 @@ data class DebugEntry(
 ) {
     fun time(): String = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date(timestamp))
 
+    /**
+     * v1.4.5 — the predicate behind the Debug Log screen's "Errors only" chip, and the one
+     * definition of "this entry is worth the rider's attention". It used to be written out
+     * twice: once inline in [com.moto.voice.debug.DebugLogActivity] and once, separately, in
+     * ErrorFilterTest — so the tested rule and the shipped rule were free to drift.
+     *
+     * A dropped FOLLOW-UP listen is deliberately NOT error-like. The follow-up window writes
+     * into the interaction's own entry, so a rider who simply had nothing more to say after a
+     * chat reply left `error: "STT 11"` on a completed, successful interaction: in field log
+     * 1789561893967, five `finishReason=ok` entries with correct `sttFinal` all read as
+     * failures. The breadcrumb is kept — the entry just stops claiming the interaction broke.
+     */
+    fun isErrorlike(): Boolean {
+        val err = error
+        val realError = err != null && !err.startsWith(FOLLOWUP_STT_ERROR_PREFIX)
+        val badFinish = finishReason != null &&
+            finishReason != FinishReason.OK &&
+            finishReason != FinishReason.INTERCEPTED
+        return realError || badFinish
+    }
+
     fun summary(): String = buildString {
         append("[${time()}]")
+        // v1.4.5 — the in-app Debug Log screen shows the build too, so the rider can read
+        // it off the phone without exporting.
+        if (appVersion != null) append("  v${appVersion}")
         if (sttFinal.isNotBlank()) append("  STT: \"$sttFinal\"")
         if (audioRoute != null) append("  route:${audioRoute}")
         if (scoState != null) append("  sco:${scoState}")
@@ -443,13 +479,41 @@ object FinishReason {
     const val LAUNCH_BLOCKED = "launch_blocked"
 }
 
+/**
+ * v1.4.5 — prefix [DebugEntry.error] carries when it was the passive follow-up listen that
+ * dropped, not the interaction's own. Mirrors STT_ERROR_LABEL_FOLLOWUP in the pipeline, which
+ * is what writes it; kept here because reading the schema is this file's job.
+ */
+const val FOLLOWUP_STT_ERROR_PREFIX = "followup_stt"
+
 object DebugLog {
     private const val MAX = 50  // spec §9
     private val list = CopyOnWriteArrayList<DebugEntry>()
     private val gson = GsonBuilder().setPrettyPrinting().create()
 
+    /**
+     * v1.4.5 — "versionName (versionCode)" of the running build, stamped onto every entry.
+     * Set once by [com.moto.voice.MotoVoiceApplication.onCreate] via [bindAppVersion];
+     * stays null in pure-JVM tests, which never construct an Application.
+     */
+    @Volatile
+    var appVersion: String? = null
+        private set
+
+    /** Read the running build's version straight off the package — no BuildConfig needed. */
+    @Suppress("DEPRECATION")  // versionCode, for the API < 28 branch
+    fun bindAppVersion(context: Context) {
+        appVersion = runCatching {
+            val info = context.packageManager.getPackageInfo(context.packageName, 0)
+            val code =
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) info.longVersionCode
+                else info.versionCode.toLong()
+            "${info.versionName} ($code)"
+        }.getOrNull()
+    }
+
     fun new(): DebugEntry {
-        val e = DebugEntry()
+        val e = DebugEntry(appVersion = appVersion)
         list.add(0, e)
         while (list.size > MAX) list.removeAt(list.size - 1)
         return e
@@ -474,7 +538,11 @@ object DebugLog {
      */
     fun exportToFile(context: Context): File {
         val dir = context.getExternalFilesDir(null) ?: context.filesDir
-        val file = File(dir, "moto_voice_debug_${System.currentTimeMillis()}.json")
+        // v1.4.5 — the version rides in the filename as well as in every entry, so a log
+        // can be triaged from the file listing alone.
+        if (appVersion == null) bindAppVersion(context)
+        val tag = appVersion?.substringBefore(' ')?.replace('.', '_')?.let { "v${it}_" } ?: ""
+        val file = File(dir, "moto_voice_debug_${tag}${System.currentTimeMillis()}.json")
         if (file.exists()) file.delete()
 
         val json = gson.toJson(list.toList())

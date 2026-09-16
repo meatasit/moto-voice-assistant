@@ -8,6 +8,7 @@ import android.os.Build
 import android.util.Log
 import com.moto.voice.bt.HelmetGreeter
 import com.moto.voice.data.AppSettings
+import com.moto.voice.debug.DebugLog
 import com.moto.voice.nlu.Persona
 import com.moto.voice.nlu.PersonaHolder
 
@@ -17,6 +18,9 @@ class MotoVoiceApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // v1.4.5 — before anything can log: every DebugEntry carries the build that made it,
+        // so "was the rider even running the fixed build?" is answerable from the export.
+        DebugLog.bindAppVersion(this)
         createChannels()
         applyPersonaFromSettings()
         greeter = HelmetGreeter(this).also { it.start() }

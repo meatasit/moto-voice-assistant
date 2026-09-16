@@ -97,6 +97,30 @@ object MediaOrchestrator {
      * escalates instead of repeating — see [fireYoutubeIntent]'s `forceRestart`.
      */
     private const val REFIRE_STILL_PRIOR_MS = 2_500L
+
+    /**
+     * v1.4.5 — how long to sit with NO target session at all before escalating with a
+     * CLEAR_TASK re-fire.
+     *
+     * Field log 1789561893967: SIX consecutive `youtube_play` attempts ended
+     * `nudge->launchBlocked(noSession)` with `fsiTrampolineRan=true`,
+     * `fsiTrampolineLaunchOk=true`, `screenLocked=true`, `screenInteractive=false` — the
+     * full-screen intent was honored and the trampoline's startActivity succeeded, yet
+     * YouTube never registered a MediaSession inside the 15 s cold window. Not once did
+     * the poll log a `nudge->sessionSeen`.
+     *
+     * The escalation that fixes it was already in the log: entry 1789561588003 blocked,
+     * and 40 s later entry 1789561627775 — same lock state, same transport — landed with
+     * `sessionSeen(none);play#1;confirmed`. Firing the launch a second time is what makes
+     * it stick; until now the only thing doing that was the rider saying it again.
+     * [REFIRE_STILL_PRIOR_MS]'s escalation lives in the STILL_PRIOR branch, which needs a
+     * controller to reach and so could never help this shape.
+     *
+     * Longer than the stillPrior re-fire: a genuine cold start is documented at 800 ms-3 s
+     * and CLEAR_TASK would tear down a launch that is merely slow. 6 s is past that range
+     * and still leaves the window room to extend.
+     */
+    private const val REFIRE_NO_SESSION_MS = 6_000L
     private const val NUDGE_SETTLE_MS = 2_000L
     private const val NUDGE_MAX_ATTEMPTS = 3
     private const val NUDGE_RETRY_SPACING_MS = 1_500L
@@ -181,6 +205,14 @@ object MediaOrchestrator {
         object LaunchFailed : Result()
         /** Target session found + [MediaController.TransportControls] call fired. */
         object CommandDispatched : Result()
+        /**
+         * v1.4.5 — a non-YouTube target had no session, so all we could do was launch the
+         * app by package. It comes up PAUSED: the app is open, nothing is playing. v1.4.4
+         * returned [Success] here and left the caller to speak "เล่นแล้ว" over silence; it
+         * was filed below the cut until field log 1789561893967 showed `spotify_play`
+         * reaching the rider for real.
+         */
+        object AppLaunchedNotPlaying : Result()
         /** No target could be identified (e.g. seek with no lastOpenedApp). */
         object NoTarget : Result()
         /** No permission to enumerate sessions + no explicit target → nothing safe to do. */
@@ -320,8 +352,15 @@ object MediaOrchestrator {
                 // Non-YouTube target with no session and no known deep-link — best-effort
                 // launch by package name (Play Store apps typically expose a main activity).
                 logOp(entry, "playContinue→launchApp", target)
-                val launched = launchAppByPackage(context, target)
-                if (launched) Result.Success else Result.NoTarget
+                if (!launchAppByPackage(context, target)) {
+                    // v1.4.5 — Rule #3: a launch that never fired is stamped, not silent.
+                    entry.launchBlocked = true
+                    entry.finishReason = FinishReason.LAUNCH_BLOCKED
+                    logOp(entry, "playContinue→launchFailed", target)
+                    return@withLock Result.LaunchFailed
+                }
+                // The app is up but paused — say that, don't claim playback.
+                Result.AppLaunchedNotPlaying
             }
         }
     }
@@ -624,9 +663,13 @@ object MediaOrchestrator {
         // clock, so it was declared failed while it was still working.
         var pollWindowEndAt = pollStartAt + pollWindowMsFor(priorTitle)
         val refireAt = pollStartAt + REFIRE_STILL_PRIOR_MS
+        val refireNoSessionAt = pollStartAt + REFIRE_NO_SESSION_MS
         var playAttempts = 0
         var lastPlayAttemptAt = 0L
-        var refiredSwitch = false
+        // v1.4.5 — ONE escalation per launch, shared by both branches that can ask for it
+        // (stillPrior and noSession). Two CLEAR_TASK restarts racing each other would be a
+        // re-fire war, which is the failure mode v1.3.36 already paid for once.
+        var refired = false
         // v1.4.2 — did the target EVER show a session during this window? Field log
         // 1789518388540 (entry 1789518322022): the poll saw YouTube PLAYING the right video
         // mid-window (mediaActualTitle / playbackState were stamped), then the session was
@@ -669,6 +712,34 @@ object MediaOrchestrator {
             if (ctrl == null) {
                 // Rule #1: NO media-key fallback here. If YouTube's session isn't there,
                 // dispatching MEDIA_PLAY would wake Spotify (per field log 1784028862496).
+                //
+                // v1.4.5 — but do not just wait out the window either. Field log
+                // 1789561893967 has six consecutive launches that died here having never
+                // seen a session, each one rescued by the rider repeating himself. Escalate
+                // ONCE the way the stillPrior branch does — CLEAR_TASK tears down a YouTube
+                // task that came up behind the keyguard without ever resuming (so it never
+                // registered a session) and starts it again at the requested video. See
+                // [REFIRE_NO_SESSION_MS].
+                //
+                // Gated on !sawSession: if a session DID appear and then vanished, the honest
+                // "it opened and then stopped" line is more useful to the rider than a restart
+                // that will hit the same keyguard again.
+                if (shouldRefireNoSession(
+                        alreadyRefired = refired,
+                        sawSession = sawSession,
+                        nowMs = SystemClock.uptimeMillis(),
+                        refireAt = refireNoSessionAt,
+                        haveLinkTarget = videoId != null || query != null,
+                    )
+                ) {
+                    refired = true
+                    logOp(entry, "nudge→refireNoSession(clearTask)", targetPkg)
+                    Log.w(TAG, "nudge: $targetPkg never registered a session — re-firing deep link with CLEAR_TASK")
+                    fireYoutubeIntent(appCtx, videoId, query, entry, forceRestart = true)
+                    // A CLEAR_TASK restart is a full cold start, so it gets a cold start's
+                    // budget from this moment — same reasoning as the v1.3.37 stillPrior fix.
+                    pollWindowEndAt = SystemClock.uptimeMillis() + POLL_WINDOW_COLD_MS
+                }
                 // If the poll window has elapsed with no controller, mark launch_blocked.
                 if (SystemClock.uptimeMillis() >= pollWindowEndAt) {
                     declareLaunchBlocked(
@@ -713,10 +784,10 @@ object MediaOrchestrator {
                 // down and restarted at the requested video instead of merely being brought
                 // forward. Logged under a distinct op name so the next field log says which
                 // kind of re-fire ran.
-                if (!refiredSwitch && SystemClock.uptimeMillis() >= refireAt &&
+                if (!refired && SystemClock.uptimeMillis() >= refireAt &&
                     (videoId != null || query != null)
                 ) {
-                    refiredSwitch = true
+                    refired = true
                     logOp(entry, "nudge→refireSwitch(clearTask)", targetPkg)
                     Log.w(TAG, "nudge: $targetPkg still on prior video — re-firing deep link with CLEAR_TASK")
                     fireYoutubeIntent(appCtx, videoId, query, entry, forceRestart = true)
@@ -919,6 +990,25 @@ object MediaOrchestrator {
         priorTitle == null ||
             verdict == YoutubeVerify.Verdict.CONFIRMED_TARGET ||
             verdict == YoutubeVerify.Verdict.SWITCHED
+
+    /**
+     * v1.4.5 — should this poll tick escalate a launch that has produced no session at all?
+     * Pure so a JVM test can lock the rule without a Handler or a live MediaSession; the
+     * instrumented half (does the CLEAR_TASK re-fire actually land?) is the Acceptance Suite's.
+     *
+     * @param sawSession whether the target has shown a controller at ANY point in this window.
+     *   True means this is "opened then stopped", not "never opened" — a different fact, and
+     *   restarting it would only hit the same keyguard again.
+     * @param haveLinkTarget false when we have neither a video id nor a query, i.e. nothing
+     *   to re-fire.
+     */
+    internal fun shouldRefireNoSession(
+        alreadyRefired: Boolean,
+        sawSession: Boolean,
+        nowMs: Long,
+        refireAt: Long,
+        haveLinkTarget: Boolean,
+    ): Boolean = !alreadyRefired && !sawSession && haveLinkTarget && nowMs >= refireAt
 
     /** Which honest line a blocked launch should speak. Named so a JVM test can lock it. */
     internal enum class BlockedLine { SwitchNotLanded, LockedNoFsi, NoSession, SessionLost }

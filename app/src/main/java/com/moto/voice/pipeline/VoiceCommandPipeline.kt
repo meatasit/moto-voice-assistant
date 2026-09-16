@@ -38,6 +38,7 @@ import com.moto.voice.nlu.ErrorSpeech
 import com.moto.voice.media.FmPlaybackState
 import com.moto.voice.media.FmPlayerService
 import com.moto.voice.media.MediaOrchestrator
+import com.moto.voice.media.MediaSessionMemory
 import com.moto.voice.media.LockScreenLauncher
 import com.moto.voice.network.WebhookClient
 import com.moto.voice.network.WebhookResponse
@@ -146,6 +147,26 @@ private const val INTERACTION_WATCHDOG_MS = 45_000L
  * felt off before adjusting timings again.
  */
 private const val FOLLOWUP_LISTEN_MS = 4_000L
+
+/** Prefix stamped into [DebugEntry.error] when the MAIN listen of an interaction fails. */
+private const val STT_ERROR_LABEL_MAIN = "STT"
+
+/**
+ * v1.4.5 — prefix for a failure of the passive 4 s follow-up listen, which is a different
+ * fact from a failure of the interaction.
+ *
+ * The follow-up window reuses the interaction's own [DebugEntry] (it has to — a follow-up
+ * command continues the same interaction), so when the rider simply had nothing more to say
+ * and the recognizer dropped, `error: "STT 11"` was stamped onto an interaction that had
+ * already completed successfully. In field log 1789561893967 every single entry carrying
+ * `error: "STT 11"` is an `action=chat` with `finishReason=ok`, a correct `sttFinal` and
+ * `sttRetryCount=0` — five entries that read as failures and were not. Chat is exactly the
+ * action that sets `followupEligible`.
+ *
+ * Deliberately NOT a substring of [STT_ERROR_LABEL_MAIN]: a `grep "STT 11"` over an export
+ * must not match these.
+ */
+private const val STT_ERROR_LABEL_FOLLOWUP = "followup_stt"
 
 class VoiceCommandPipeline(
     private val context: Context,
@@ -600,7 +621,39 @@ class VoiceCommandPipeline(
                 // Refired deep link — nudge polls until STATE_PLAYING then speaks
                 // MEDIA_PLAY_CONFIRMED itself. Speaking here would double up.
             }
+            // v1.4.5 — "เล่น Spotify ต่อ" with Spotify cold used to land in the else below
+            // and say "เล่นแล้ว" over an app that had opened paused.
+            is MediaOrchestrator.Result.AppLaunchedNotPlaying ->
+                speakAndRemember(ErrorSpeech.SPOTIFY_OPENED_NOT_PLAYING)
             else -> speakAndRemember(ErrorSpeech.MEDIA_PLAY_CONFIRMED)
+        }
+    }
+
+    /**
+     * v1.4.5 — `action=spotify_play`: resume Spotify. Rule #2's target resolution is what
+     * "ต่อจากเดิม" means, and the rider named the app so the hint wins over lastOpenedApp.
+     *
+     * Every branch speaks, and speaks only what we can actually observe — the reason this
+     * was worth fixing is that the un-handled version claimed success unconditionally.
+     */
+    private suspend fun handleSpotifyPlay(resp: WebhookResponse, entry: DebugEntry) {
+        MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
+        MediaOrchestrator.webLinkPreferred = settings.youtubeWebLink
+        releaseScoBeforeMedia(entry)
+        val result = MediaOrchestrator.playContinue(context, appHint = "spotify", entry = entry)
+        when (result) {
+            is MediaOrchestrator.Result.CommandDispatched -> {
+                // Rule #2 — "เล่นต่อ" after this should come back to Spotify, not YouTube.
+                MediaSessionMemory.rememberOpenedApp(MediaOrchestrator.SPOTIFY_PKG, null)
+                speakAndRememberWithOpener(resp.speak.ifBlank { ErrorSpeech.MEDIA_PLAY_CONFIRMED })
+                mediaActionStarted = true
+            }
+            is MediaOrchestrator.Result.AppLaunchedNotPlaying -> {
+                MediaSessionMemory.rememberOpenedApp(MediaOrchestrator.SPOTIFY_PKG, null)
+                speakAndRemember(ErrorSpeech.SPOTIFY_OPENED_NOT_PLAYING)
+                mediaActionStarted = true
+            }
+            else -> speakAndRemember(ErrorSpeech.SPOTIFY_LAUNCH_FAILED)
         }
     }
 
@@ -777,7 +830,9 @@ class VoiceCommandPipeline(
         // v1.3.14 — reverted v1.3.13's pre-listen breathe + mid-window ping +
         // shortened window. Back to a plain listenOnce over the full 4s window
         // per rider feedback that the v1.3.13 changes felt worse than v1.3.12.
-        val text = listenOnce(entry, minListenMs = FOLLOWUP_LISTEN_MS)
+        // v1.4.5 — label this listen's errors so they can't be read as the interaction's.
+        // See [STT_ERROR_LABEL_FOLLOWUP].
+        val text = listenOnce(entry, minListenMs = FOLLOWUP_LISTEN_MS, errorLabel = STT_ERROR_LABEL_FOLLOWUP)
         PipelineState.setThinking()
         if (text.isBlank()) {
             // Spec §1.3 — silent-timeout is a real interaction exit; fire the
@@ -887,6 +942,16 @@ class VoiceCommandPipeline(
                 handleCallByName(name, resp.speak, entry)
             }
             "youtube_play" -> handleYoutube(resp, entry)
+            // v1.4.5 — the workflow has emitted `spotify_play` since v1.3.20 and NOTHING in
+            // this `when` handled it: it fell through to the `else` at the bottom, which only
+            // speaks. Field log 1789561893967 entry 1789559688055 caught the cost — the rider
+            // asked "เปิดเพลงจาก spotify ได้ไหม", heard "เปิดสปอติฟายต่อจากเดิมให้ได้ค่ะ", and the
+            // entry recorded finishReason=ok, mediaCtrlUsed=false, no mediaTargetPkg and no
+            // mediaOperations at all. Nothing played, and Rule #3 had no trace to explain it.
+            //
+            // Rule #1 is satisfied by construction here: the rider named the app, so the
+            // orchestrator gets an explicit target package and never a bare media key.
+            "spotify_play" -> handleSpotifyPlay(resp, entry)
             "fm" -> {
                 if (!resp.streamUrl.isNullOrBlank()) {
                     val name = resp.stationName ?: resp.frequency?.let { "FM $it" } ?: "วิทยุ"
@@ -1356,11 +1421,18 @@ class VoiceCommandPipeline(
      * transient recognizer errors. Does NOT retry on real silence — for that use
      * [listenMainWithMissRetry] which speaks a prompt between attempts.
      */
-    private suspend fun listenOnce(entry: DebugEntry?, minListenMs: Long = DEFAULT_MIN_LISTEN_MS): String =
-        listenOnceDetailed(entry, minListenMs).text
+    private suspend fun listenOnce(
+        entry: DebugEntry?,
+        minListenMs: Long = DEFAULT_MIN_LISTEN_MS,
+        errorLabel: String = STT_ERROR_LABEL_MAIN,
+    ): String = listenOnceDetailed(entry, minListenMs, errorLabel).text
 
     /** Exposes the outcome so the main-flow retry logic can decide what to do next. */
-    private suspend fun listenOnceDetailed(entry: DebugEntry?, minListenMs: Long = DEFAULT_MIN_LISTEN_MS): SttOutcome {
+    private suspend fun listenOnceDetailed(
+        entry: DebugEntry?,
+        minListenMs: Long = DEFAULT_MIN_LISTEN_MS,
+        errorLabel: String = STT_ERROR_LABEL_MAIN,
+    ): SttOutcome {
         // Settle delay so TTS audio finishes draining and the recognizer isn't still
         // holding the mic from a previous session. See bug report §1.
         delay(350)
@@ -1376,12 +1448,12 @@ class VoiceCommandPipeline(
             entry?.sttRecreated = true
             delay(400L)
         }
-        val first = listenOnceRaw(entry, isRetry = false, minListenMs = minListenMs)
+        val first = listenOnceRaw(entry, isRetry = false, minListenMs = minListenMs, errorLabel = errorLabel)
         if (first.text.isNotBlank()) return first
         if (first.wasTransientError) {
             Log.d(TAG, "STT transient error — retrying once")
             delay(400)
-            return listenOnceRaw(entry, isRetry = true, minListenMs = minListenMs)
+            return listenOnceRaw(entry, isRetry = true, minListenMs = minListenMs, errorLabel = errorLabel)
         }
         return first
     }
@@ -1456,6 +1528,7 @@ class VoiceCommandPipeline(
         isRetry: Boolean,
         minListenMs: Long = DEFAULT_MIN_LISTEN_MS,
         onPartial: ((String) -> BargeInPartialAction)? = null,
+        errorLabel: String = STT_ERROR_LABEL_MAIN,
     ): SttOutcome =
         suspendCancellableCoroutine { cont ->
             recognizer?.destroy()
@@ -1524,7 +1597,8 @@ class VoiceCommandPipeline(
                 override fun onError(error: Int) {
                     if (!resumed.compareAndSet(false, true)) return
                     Log.w(TAG, "STT error $error after ${System.currentTimeMillis() - startedAt}ms")
-                    entry?.error = "STT $error"
+                    // v1.4.5 — WHICH listen dropped matters. See [STT_ERROR_LABEL_FOLLOWUP].
+                    entry?.error = "$errorLabel $error"
                     // If it errored within 800ms it almost certainly never actually listened —
                     // classify as transient so the outer layer can retry once.
                     val transient = !isRetry && (System.currentTimeMillis() - startedAt) < 800 && error in setOf(

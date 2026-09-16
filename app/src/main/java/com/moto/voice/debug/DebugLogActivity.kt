@@ -42,7 +42,9 @@ class DebugLogActivity : AppCompatActivity() {
             // Spec §9.2: filter to entries that actually have an error attached OR whose
             // finishReason indicates a non-happy path (timeout, http 401, etc.). Rider
             // usually just wants to see what went wrong on the last ride.
-            if (errorsOnly) all.filter { it.error != null || (it.finishReason != null && it.finishReason != "ok" && it.finishReason != "intercepted") }
+            // v1.4.5 — the rule moved to DebugEntry.isErrorlike so the shipped filter and the
+            // filter the tests lock cannot drift apart.
+            if (errorsOnly) all.filter { it.isErrorlike() }
             else all
         }
         if (entries.isEmpty()) {
