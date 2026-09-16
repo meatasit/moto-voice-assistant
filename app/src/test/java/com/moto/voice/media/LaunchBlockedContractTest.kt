@@ -60,6 +60,21 @@ class LaunchBlockedContractTest {
         }
     }
 
+    @Test fun sessionLostIsItsOwnLine() {
+        // v1.4.2 — field log 1789518388540: YouTube started the right video, then its
+        // session vanished before the window closed. "Couldn't open" was false; the rider
+        // unlocked and found it open. Regardless of lock / FSI state this must say so.
+        for (locked in listOf(true, false)) {
+            for (fsi in listOf(true, false)) {
+                assertEquals(
+                    "sessionLost locked=$locked fsi=$fsi",
+                    MediaOrchestrator.BlockedLine.SessionLost,
+                    MediaOrchestrator.blockedLineFor("sessionLost", locked, fsi),
+                )
+            }
+        }
+    }
+
     // ─── How long we wait before declaring failure ───────────────────────────
 
     @Test fun coldTargetWaitsLongerThanWarmSwitch() {
