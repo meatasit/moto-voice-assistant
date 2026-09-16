@@ -192,6 +192,16 @@ object ErrorSpeech {
      * doesn't stack on top of the media audio the rider just wanted to hear.
      * Pre-synthesized.
      */
+    /**
+     * v1.4.4 — `action=seek` arrived without an amount. `frequency=0` means "resume" by
+     * contract, but a NULL amount was read as 0 and restarted the video from the top while
+     * the rider was told it had rewound (review finding). Ask instead of guessing.
+     */
+    val SEEK_AMOUNT_UNKNOWN: String get() = pick(
+        "ไม่แน่ใจว่าจะเลื่อนไปเท่าไหร่ค่ะ ลองบอกเป็นวินาทีหรือนาทีนะคะ",
+        "ไม่แน่ใจว่าจะเลื่อนไปเท่าไหร่ครับ ลองบอกเป็นวินาทีหรือนาทีนะครับ",
+    )
+
     val MEDIA_PLAY_CONFIRMED: String get() = pick("เล่นแล้วค่ะ", "เล่นแล้วครับ")
 
     /**
@@ -277,7 +287,7 @@ object ErrorSpeech {
         SERVER_UNAVAILABLE,
         SEEK_ATTEMPTED, MEDIA_PLAY_CONFIRMED, MEDIA_OPENED_NOT_PLAYING,
         LAUNCH_BLOCKED_LOCKED, LAUNCH_FAILED_NO_SESSION, SWITCH_NOT_LANDED,
-        MEDIA_STOPPED_AFTER_OPEN,
+        MEDIA_STOPPED_AFTER_OPEN, SEEK_AMOUNT_UNKNOWN,
     )
 
     private fun pick(feminine: String, masculine: String): String =

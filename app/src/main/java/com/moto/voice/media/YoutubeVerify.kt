@@ -40,10 +40,18 @@ internal object YoutubeVerify {
      * `titlesMatch` said no, the verdict stayed SWITCHED until the window ran out, and the
      * rider heard "ยังเปลี่ยนคลิปไม่ทัน" for a live stream that was audibly playing.
      */
-    private val WS = Regex("""[\s\p{Z}\u200B\u200C\u200D\uFEFF]+""")
+    /**
+     * v1.4.4 — "dropped" means dropped. The v1.4.3 cut put zero-width characters in the SAME
+     * class as whitespace, so `กรรมกร\u200Bข่าว` (ZWSP as a Thai line-break hint) became
+     * `กรรมกร ข่าว` — a different word sequence from the workflow's `กรรมกรข่าว` (review
+     * finding). Strip them first, then collapse real whitespace. U+00AD SOFT HYPHEN is in
+     * the same bucket.
+     */
+    private val ZERO_WIDTH = Regex("""[\u200B\u200C\u200D\uFEFF\u00AD]""")
+    private val WS = Regex("""[\s\p{Z}]+""")
 
     fun normalize(s: String?): String =
-        s?.replace(WS, " ")?.trim()?.lowercase() ?: ""
+        s?.replace(ZERO_WIDTH, "")?.replace(WS, " ")?.trim()?.lowercase() ?: ""
 
     /**
      * True when two titles plausibly refer to the SAME video. Two ways to match:

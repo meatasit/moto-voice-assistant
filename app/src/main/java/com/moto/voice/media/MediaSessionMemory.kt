@@ -24,6 +24,13 @@ object MediaSessionMemory {
     @Volatile private var videos: List<WebhookResponse.Video> = emptyList()
     @Volatile private var currentIndex: Int = -1
     @Volatile private var currentTitle: String = ""
+    /**
+     * v1.4.4 — the untruncated title to VERIFY playback against. [currentTitle] is the
+     * 60-char speech title ("เมื่อกี้อะไร" reads it aloud); "เล่นต่อ" re-fires must verify
+     * against the full one or a long title fails the 70% prefix rule (review finding on
+     * field log 1789518388540, reproduced on the refire path).
+     */
+    @Volatile private var currentVerifyTitle: String = ""
 
     /**
      * v1.3.20 — the package name of the media app we most-recently deep-linked into.
@@ -38,10 +45,14 @@ object MediaSessionMemory {
     @Volatile private var lastVideoId: String? = null
 
     /** Called by the pipeline right after a successful [WebhookResponse] youtube_play resolves. */
-    fun rememberYoutube(videos: List<WebhookResponse.Video>, playedId: String, playedTitle: String) {
+    fun rememberYoutube(
+        videos: List<WebhookResponse.Video>, playedId: String, playedTitle: String,
+        playedVerifyTitle: String = playedTitle,
+    ) {
         this.videos = videos
         this.currentIndex = videos.indexOfFirst { it.id == playedId }.coerceAtLeast(0)
         this.currentTitle = playedTitle
+        this.currentVerifyTitle = playedVerifyTitle.ifBlank { playedTitle }
         this.lastOpenedApp = MediaSessions.YOUTUBE_PKG
         this.lastVideoId = playedId
     }
@@ -51,6 +62,7 @@ object MediaSessionMemory {
         this.videos = emptyList()
         this.currentIndex = -1
         this.currentTitle = stationName
+        this.currentVerifyTitle = stationName
         // FM is our own service, not a "deep-linkable app" — clear lastOpenedApp
         // so a later "เล่นต่อ" doesn't try to refire an FM deep link (there isn't one).
         this.lastOpenedApp = null
@@ -86,10 +98,14 @@ object MediaSessionMemory {
         val idx = list.indexOfFirst { it.id == video.id }
         if (idx >= 0) currentIndex = idx
         currentTitle = video.title.ifBlank { currentTitle }
+        currentVerifyTitle = video.verifyTitle.ifBlank { currentVerifyTitle }
     }
 
     /** Read-only view of what was last opened — used by "เมื่อกี้อะไร" replies. */
     fun currentTitle(): String = currentTitle
+
+    /** v1.4.4 — the title a re-fire must verify against (full when known, else the spoken one). */
+    fun currentVerifyTitle(): String = currentVerifyTitle.ifBlank { currentTitle }
 
     /** Whether we have anything to talk about — true after any rememberXxx call. */
     fun hasContext(): Boolean = currentTitle.isNotBlank()
@@ -99,6 +115,7 @@ object MediaSessionMemory {
         videos = emptyList()
         currentIndex = -1
         currentTitle = ""
+        currentVerifyTitle = ""
         lastOpenedApp = null
         lastVideoId = null
     }

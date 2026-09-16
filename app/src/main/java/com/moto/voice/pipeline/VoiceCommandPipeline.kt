@@ -325,6 +325,11 @@ class VoiceCommandPipeline(
 
     private suspend fun runPipelineBody(entry: DebugEntry) {
         val t0 = System.currentTimeMillis()
+        // v1.4.4 — a new interaction supersedes any nudge still polling from the previous
+        // one. Left alone it re-paused our own radio, CLEAR_TASK-restarted YouTube over a
+        // seek and spoke "เปิดไม่สำเร็จ" over a call confirmation (review findings). The
+        // cancel is logged into the previous entry as nudge→cancelled(newInteraction).
+        MediaOrchestrator.supersedePendingNudge("newInteraction")
 
         val availability = PhoneStateGuard.availability(context)
         if (availability != PhoneStateGuard.Availability.Available) {
@@ -589,6 +594,8 @@ class VoiceCommandPipeline(
         when (result) {
             is MediaOrchestrator.Result.NoTarget ->
                 speakAndRemember(ErrorSpeech.WHAT_IS_PLAYING_NONE)
+            is MediaOrchestrator.Result.LaunchFailed ->
+                speakAndRemember(ErrorSpeech.LAUNCH_FAILED_NO_SESSION)  // v1.4.4 — never silent
             is MediaOrchestrator.Result.Success -> {
                 // Refired deep link — nudge polls until STATE_PLAYING then speaks
                 // MEDIA_PLAY_CONFIRMED itself. Speaking here would double up.
@@ -631,8 +638,12 @@ class VoiceCommandPipeline(
         releaseScoBeforeMedia(entry)
         MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
         MediaOrchestrator.webLinkPreferred = settings.youtubeWebLink
-        MediaOrchestrator.openYoutube(context, next.id, null, entry, expectedTitle = next.verifyTitle)
+        val result = MediaOrchestrator.openYoutube(context, next.id, null, entry, expectedTitle = next.verifyTitle)
         recordHistory(HistoryAction.YoutubeOpen(next.id, next.title))
+        if (result is MediaOrchestrator.Result.LaunchFailed) {
+            speakAndRemember(ErrorSpeech.LAUNCH_FAILED_NO_SESSION)  // v1.4.4 — never silent
+            return
+        }
         mediaActionStarted = true  // spec v1.3.9 §1.3
     }
 
@@ -726,7 +737,9 @@ class VoiceCommandPipeline(
                 val t2 = System.currentTimeMillis()
                 executeWebhookAction(result.response, entry)
                 entry.actionTimeMs = System.currentTimeMillis() - t2
-                entry.finishReason = FinishReason.OK
+                // v1.4.4 — a synchronous launch failure (Result.LaunchFailed) already stamped
+                // LAUNCH_BLOCKED; "ok" here would erase the one honest word in the entry.
+                if (!entry.launchBlocked) entry.finishReason = FinishReason.OK
                 // Spec v1.3.8 B2 — after finish-eligible action handlers, open a 4s
                 // follow-up window. Media handlers (youtube_play, fm) leave
                 // followupEligible = false so this is a no-op there.
@@ -912,22 +925,31 @@ class VoiceCommandPipeline(
                 // v1.3.20 sprint — n==0 goes through the same rule-#2 path as the local
                 // "เล่นต่อ" intercept so the target-package decision (last-opened-app +
                 // refire deep link if no session) is unified.
-                val n = (resp.frequency ?: 0.0).toInt()
-                if (n == 0) {
-                    MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
-        MediaOrchestrator.webLinkPreferred = settings.youtubeWebLink
-                    val result = MediaOrchestrator.playContinue(context, appHint = null, entry = entry)
-                    // Only speak here if the nudge WON'T also speak — i.e. we didn't
-                    // fire a fresh deep link. Result.Success means "deep link refired,
-                    // nudge will confirm on STATE_PLAYING" so double-speech is avoided.
-                    if (result !is MediaOrchestrator.Result.Success) {
-                        speakAndRemember(resp.speak.ifBlank { ErrorSpeech.MEDIA_PLAY_CONFIRMED })
-                    } else if (resp.speak.isNotBlank()) {
-                        speakAndRemember(resp.speak)
+                // v1.4.4 — a MISSING amount is not "0 = resume". It was read as 0, and a
+                // frequency-less seek restarted the video from the top while speaking
+                // "ย้อนกลับให้ค่ะ" (review finding). SeekAmount is the pure decision.
+                when (val amount = SeekAmount.decide(resp.frequency)) {
+                    SeekAmount.Decision.Unknown -> speakAndRemember(ErrorSpeech.SEEK_AMOUNT_UNKNOWN)
+                    SeekAmount.Decision.Resume -> {
+                        MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
+                        MediaOrchestrator.webLinkPreferred = settings.youtubeWebLink
+                        val result = MediaOrchestrator.playContinue(context, appHint = null, entry = entry)
+                        // Only speak here if the nudge WON'T also speak — i.e. we didn't
+                        // fire a fresh deep link. Result.Success means "deep link refired,
+                        // nudge will confirm on STATE_PLAYING" so double-speech is avoided.
+                        // v1.4.4 — LaunchFailed: the re-fire never fired, say so.
+                        if (result is MediaOrchestrator.Result.LaunchFailed) {
+                            speakAndRemember(ErrorSpeech.LAUNCH_FAILED_NO_SESSION)
+                        } else if (result !is MediaOrchestrator.Result.Success) {
+                            speakAndRemember(resp.speak.ifBlank { ErrorSpeech.MEDIA_PLAY_CONFIRMED })
+                        } else if (resp.speak.isNotBlank()) {
+                            speakAndRemember(resp.speak)
+                        }
                     }
-                } else {
-                    handleSeek(n, entry)
-                    if (resp.speak.isNotBlank()) speakAndRemember(resp.speak)
+                    is SeekAmount.Decision.Seek -> {
+                        handleSeek(amount.seconds, entry)
+                        if (resp.speak.isNotBlank()) speakAndRemember(resp.speak)
+                    }
                 }
             }
             else -> speakAndRemember(resp.speak.ifBlank { "เข้าใจแล้ว" })
@@ -1131,10 +1153,20 @@ class VoiceCommandPipeline(
             releaseScoBeforeMedia(entry)
             MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
         MediaOrchestrator.webLinkPreferred = settings.youtubeWebLink
-            MediaOrchestrator.openYoutube(context, chosen.id, resp.query, entry, expectedTitle = chosen.verifyTitle)
+            val result = MediaOrchestrator.openYoutube(context, chosen.id, resp.query, entry, expectedTitle = chosen.verifyTitle)
             recordHistory(HistoryAction.YoutubeOpen(chosen.id, chosen.title))
             // Spec v1.3.8 B5 — remember the videos list so "อันต่อไป" can advance.
-            com.moto.voice.media.MediaSessionMemory.rememberYoutube(candidates, chosen.id, chosen.title)
+            // v1.4.4 — and the FULL title for verification: "เล่นต่อ" re-fires against it,
+            // and the 60-char speech title failed the 70% rule (review finding).
+            com.moto.voice.media.MediaSessionMemory.rememberYoutube(
+                candidates, chosen.id, chosen.title, playedVerifyTitle = chosen.verifyTitle,
+            )
+            if (result is MediaOrchestrator.Result.LaunchFailed) {
+                // v1.4.4 — never silent: the deep link never fired, nothing is polling, and
+                // the optimistic "กำลังเปิด" line above is all the rider would have heard.
+                speakAndRemember(ErrorSpeech.LAUNCH_FAILED_NO_SESSION)
+                return
+            }
             mediaActionStarted = true  // spec v1.3.9 §1.3 — skip end-interaction earcon
             return
         }
@@ -1374,7 +1406,9 @@ class VoiceCommandPipeline(
         // which is common when wind noise gets recognised as a single syllable).
         val shouldPrompt = first.wasNoSpeech || firstText.isNotEmpty()
         if (!shouldPrompt) {
-            lastListenWasServerError = first.wasTransientError
+            // v1.4.4 — wasTransientError EXCLUDES the server family, so this was never true
+            // for STT 11 and the rider heard "ไม่ได้ยินเลย" (review finding). Read the class.
+            lastListenWasServerError = lastListenErrorClass == ListenErrorClass.ServerError
             return ""
         }
 
@@ -1388,7 +1422,7 @@ class VoiceCommandPipeline(
         // (ERROR_SERVER_DISCONNECTED) returns instantly, so the rider hears the retry prompt
         // and the giving-up line back to back with no chance to speak; blaming him for
         // silence is also wrong when it was the recognizer that dropped.
-        lastListenWasServerError = second.wasTransientError
+        lastListenWasServerError = lastListenErrorClass == ListenErrorClass.ServerError  // v1.4.4
         return if (secondText.length < MIN_MEANINGFUL_LEN) "" else secondText
     }
 

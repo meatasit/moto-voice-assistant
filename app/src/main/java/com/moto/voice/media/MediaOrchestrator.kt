@@ -7,6 +7,7 @@ import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import com.moto.voice.actions.MediaStopper
 import com.moto.voice.data.NetworkState
@@ -116,6 +117,8 @@ object MediaOrchestrator {
     // test because android.os.Looper isn't mocked.
     private val handler: Handler by lazy { Handler(Looper.getMainLooper()) }
     @Volatile private var pendingNudge: Runnable? = null
+    /** v1.4.4 — the entry the pending nudge writes into, so a cancel can be logged there. */
+    @Volatile private var pendingEntry: DebugEntry? = null
 
     /**
      * v1.3.25 diagnostic breadcrumb for the locked-screen FSI path. [LockLaunchActivity]
@@ -169,6 +172,13 @@ object MediaOrchestrator {
         object Success : Result()
         /** Deep link succeeded but the target app's session never registered. */
         object LaunchBlocked : Result()
+        /**
+         * v1.4.4 — the deep link could not even be fired (no resolvable intent,
+         * startActivity threw, or the lock-screen notification could not be posted).
+         * Nothing is polling, so the CALLER must speak — the review found both openYoutube
+         * call sites discarding the Result, leaving the rider with "กำลังเปิด…" and silence.
+         */
+        object LaunchFailed : Result()
         /** Target session found + [MediaController.TransportControls] call fired. */
         object CommandDispatched : Result()
         /** No target could be identified (e.g. seek with no lastOpenedApp). */
@@ -230,7 +240,15 @@ object MediaOrchestrator {
         prepauseForeignPlayers(context, entry)
 
         val launched = fireYoutubeIntent(context, videoId, query, entry)
-        if (!launched) return@withLock Result.NoTarget
+        if (!launched) {
+            // v1.4.4 — never silent (Rule #3). Stamp the entry like a blocked launch so the
+            // field log categorizes it, and hand the caller a Result it cannot mistake for
+            // "the nudge will speak for me".
+            entry.launchBlocked = true
+            entry.finishReason = FinishReason.LAUNCH_BLOCKED
+            logOp(entry, "openYoutube→launchFailed", MediaSessions.YOUTUBE_PKG)
+            return@withLock Result.LaunchFailed
+        }
 
         // Remember what we opened for rule #2 lookups.
         MediaSessionMemory.rememberOpenedApp(MediaSessions.YOUTUBE_PKG, videoId)
@@ -272,14 +290,21 @@ object MediaOrchestrator {
                 val lastVideo = MediaSessionMemory.lastVideoId()
                 if (!lastVideo.isNullOrBlank()) {
                     logOp(entry, "playContinue→refireDeeplink", target)
-                    val expectedTitle = MediaSessionMemory.currentTitle().ifBlank { null }
+                    // v1.4.4 — verify against the FULL title. currentTitle() is the 60-char
+                    // speech title and failed the 70% rule on long titles (review finding).
+                    val expectedTitle = MediaSessionMemory.currentVerifyTitle().ifBlank { null }
                     entry.mediaExpectedTitle = expectedTitle
                     entry.screenLocked = isScreenLocked(context)
                     // v1.3.25 — same focus-steal guard as openYoutube: we only reach here
                     // because YouTube had no session, so a foreign player (Spotify auto-resumed
                     // on BT reconnect) may be holding audio focus. Pause it before refiring.
                     prepauseForeignPlayers(context, entry)
-                    fireYoutubeIntent(context, lastVideo, null, entry)
+                    if (!fireYoutubeIntent(context, lastVideo, null, entry)) {
+                        entry.launchBlocked = true
+                        entry.finishReason = FinishReason.LAUNCH_BLOCKED
+                        logOp(entry, "playContinue→launchFailed", target)
+                        return@withLock Result.LaunchFailed
+                    }
                     // priorTitle = null: we only reach here because YouTube had no active
                     // session, so there's no old video to guard against.
                     scheduleTargetedNudge(
@@ -344,6 +369,10 @@ object MediaOrchestrator {
     suspend fun seek(
         context: Context, deltaSeconds: Int, appHint: String?, entry: DebugEntry,
     ): Result = mutex.withLock {
+        // v1.4.4 — seek was the one op that skipped this; an in-flight warm-switch nudge
+        // survived the seek and its CLEAR_TASK re-fire then restarted YouTube on top of the
+        // position the rider had just been told was set (review finding).
+        cancelPendingNudge()
         val target = resolveTarget(appHint) ?: MediaSessionMemory.lastOpenedApp()
         logOp(entry, "seek:${deltaSeconds}s", target ?: "unknown")
 
@@ -431,10 +460,19 @@ object MediaOrchestrator {
         context: Context,
     ): List<android.media.session.MediaController> =
         MediaSessions.activeControllers(context).filter {
-            it.packageName != MediaSessions.YOUTUBE_PKG &&
+            isForeignPackage(it.packageName, context.packageName) &&
                 (it.playbackState?.state == PlaybackState.STATE_PLAYING ||
                     it.playbackState?.state == PlaybackState.STATE_BUFFERING)
         }
+
+    /**
+     * v1.4.4 — a "foreign" player is neither the target (YouTube) nor US. Our own
+     * FmPlayerService registers a media3 session under the app's package; without this
+     * check the per-tick re-pause killed the radio every 500 ms while a YouTube nudge was
+     * still polling (review finding).
+     */
+    internal fun isForeignPackage(pkg: String?, selfPkg: String?): Boolean =
+        pkg != null && pkg != MediaSessions.YOUTUBE_PKG && pkg != selfPkg
 
     /** Pause the [targetPkg] session directly. No-op if the controller doesn't exist. */
     private suspend fun prepauseTarget(context: Context, targetPkg: String) {
@@ -577,7 +615,10 @@ object MediaOrchestrator {
         videoId: String?, query: String?,
     ) {
         val appCtx = context.applicationContext
-        val pollStartAt = System.currentTimeMillis() + POLL_INITIAL_DELAY_MS
+        // v1.4.4 — uptimeMillis, the clock Handler.postDelayed and NudgeDecider run on. The
+        // wall clock kept ticking through a deep sleep between two 500 ms ticks and expired
+        // the window with almost no CPU time spent (review finding).
+        val pollStartAt = SystemClock.uptimeMillis() + POLL_INITIAL_DELAY_MS
         // var: a CLEAR_TASK re-fire restarts YouTube from scratch and gets the window
         // extended below — v1.3.36 shipped the escalation but kept judging it on the warm
         // clock, so it was declared failed while it was still working.
@@ -594,6 +635,12 @@ object MediaOrchestrator {
         // appeared", and it points at the keyguard (YouTube pauses when its player is not
         // visible), so it gets its own reason and its own line.
         var sawSession = false
+        // v1.4.4 — sawSession fires on ANY controller, which on a warm switch is the PRIOR
+        // video's session, so "sessionLost" was reachable for switches that never landed and
+        // the rider was told "it opened and then stopped" about a video that never opened
+        // (review finding). sessionLost now needs a session that was demonstrably not the
+        // old one — see [countsAsNewSession]. sawSession stays for the sessionSeen op log.
+        var sawNewSession = false
         // v1.3.31 — packages we've already logged a mid-window re-pause for (log once each).
         val foreignRepaused = mutableSetOf<String>()
         lateinit var poll: Runnable
@@ -623,10 +670,10 @@ object MediaOrchestrator {
                 // Rule #1: NO media-key fallback here. If YouTube's session isn't there,
                 // dispatching MEDIA_PLAY would wake Spotify (per field log 1784028862496).
                 // If the poll window has elapsed with no controller, mark launch_blocked.
-                if (System.currentTimeMillis() >= pollWindowEndAt) {
+                if (SystemClock.uptimeMillis() >= pollWindowEndAt) {
                     declareLaunchBlocked(
                         appCtx, targetPkg, entry,
-                        reason = if (sawSession) "sessionLost" else "noSession",
+                        reason = if (sawNewSession) "sessionLost" else "noSession",
                     )
                     return@Runnable
                 }
@@ -647,7 +694,8 @@ object MediaOrchestrator {
             val currentTitle = sessionTitle(ctrl)
             entry.mediaActualTitle = currentTitle
             val verdict = YoutubeVerify.classify(currentTitle, priorTitle, expectedTitle)
-            val windowExhausted = System.currentTimeMillis() >= pollWindowEndAt
+            if (!sawNewSession && countsAsNewSession(verdict, priorTitle)) sawNewSession = true
+            val windowExhausted = SystemClock.uptimeMillis() >= pollWindowEndAt
 
             if (verdict == YoutubeVerify.Verdict.STILL_PRIOR) {
                 // The session is still showing the OLD video — the requested switch did not
@@ -665,7 +713,7 @@ object MediaOrchestrator {
                 // down and restarted at the requested video instead of merely being brought
                 // forward. Logged under a distinct op name so the next field log says which
                 // kind of re-fire ran.
-                if (!refiredSwitch && System.currentTimeMillis() >= refireAt &&
+                if (!refiredSwitch && SystemClock.uptimeMillis() >= refireAt &&
                     (videoId != null || query != null)
                 ) {
                     refiredSwitch = true
@@ -677,7 +725,7 @@ object MediaOrchestrator {
                     // NEXT interaction 57s later found YouTube playing -CXDKsZY80I — exactly the
                     // video that "failed". Tearing the task down and starting it again is a full
                     // cold start, so give it a cold start's worth of time from this moment.
-                    pollWindowEndAt = System.currentTimeMillis() + POLL_WINDOW_COLD_MS
+                    pollWindowEndAt = SystemClock.uptimeMillis() + POLL_WINDOW_COLD_MS
                 }
                 // Give it until the window ends in case the new video is still loading; then
                 // speak the honest "can't open while locked" instead.
@@ -720,7 +768,7 @@ object MediaOrchestrator {
             }
             when (NudgeDecider.decide(
                 state = state,
-                nowMs = System.currentTimeMillis(),
+                nowMs = SystemClock.uptimeMillis(),
                 pollStartAt = pollStartAt,
                 pollWindowEndAt = pollWindowEndAt,
                 playAttempts = playAttempts,
@@ -731,7 +779,7 @@ object MediaOrchestrator {
             )) {
                 NudgeDecider.Action.PlayNow -> {
                     playAttempts++
-                    lastPlayAttemptAt = System.currentTimeMillis()
+                    lastPlayAttemptAt = SystemClock.uptimeMillis()
                     entry.youtubeNudged = true
                     logOp(entry, "nudge→play#$playAttempts", targetPkg)
                     Log.w(TAG, "nudge: state=${MediaSessions.stateName(state)} — controller.play() attempt $playAttempts/$NUDGE_MAX_ATTEMPTS on $targetPkg")
@@ -750,6 +798,7 @@ object MediaOrchestrator {
             }
         }
         pendingNudge = poll
+        pendingEntry = entry
         handler.postDelayed(poll, POLL_INITIAL_DELAY_MS)
     }
 
@@ -860,6 +909,17 @@ object MediaOrchestrator {
         else -> PlayingDecision.KeepPolling
     }
 
+    /**
+     * v1.4.4 — does this poll tick prove the TARGET's own session exists, as opposed to the
+     * session of whatever was playing before we fired? Cold launch (no prior): any session
+     * is new. Warm switch: only a title that moved away from the prior one counts; a blank
+     * title could still be the old session mid-transition.
+     */
+    internal fun countsAsNewSession(verdict: YoutubeVerify.Verdict, priorTitle: String?): Boolean =
+        priorTitle == null ||
+            verdict == YoutubeVerify.Verdict.CONFIRMED_TARGET ||
+            verdict == YoutubeVerify.Verdict.SWITCHED
+
     /** Which honest line a blocked launch should speak. Named so a JVM test can lock it. */
     internal enum class BlockedLine { SwitchNotLanded, LockedNoFsi, NoSession, SessionLost }
 
@@ -880,9 +940,27 @@ object MediaOrchestrator {
             else -> BlockedLine.NoSession
         }
 
-    private fun cancelPendingNudge() {
-        pendingNudge?.let { handler.removeCallbacks(it) }
+    /**
+     * v1.4.4 — a new interaction supersedes an in-flight nudge. The poll lived up to ~16 s
+     * after its own interaction and no non-media command cancelled it, so it could re-pause
+     * our own radio, CLEAR_TASK-restart YouTube over a seek, or QUEUE_FLUSH a call
+     * confirmation with "เปิดไม่สำเร็จ" (review findings). The pipeline calls this at the top
+     * of every interaction; the cancel is logged into the superseded launch's own entry.
+     */
+    fun supersedePendingNudge(reason: String) {
+        if (pendingNudge != null) Log.d(TAG, "pending nudge cancelled: $reason")
+        cancelPendingNudge(reason)
+    }
+
+    private fun cancelPendingNudge(reason: String = "newOp") {
+        pendingNudge?.let {
+            handler.removeCallbacks(it)
+            // Rule #3 — the superseded launch's entry records that nobody watched it to the
+            // end, so a missing nudge→confirmed / launchBlocked is explained, not a mystery.
+            pendingEntry?.let { e -> logOp(e, "nudge→cancelled($reason)", MediaSessions.YOUTUBE_PKG) }
+        }
         pendingNudge = null
+        pendingEntry = null
         // Drop any stale FSI breadcrumb so a later non-FSI (unlocked) open can't be
         // stamped with a previous locked launch's trampoline result. Every op calls
         // this at its top; the FSI branch re-arms a fresh crumb when it fires.
