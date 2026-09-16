@@ -214,6 +214,21 @@ data class DebugEntry(
     var mediaExpectedTitle: String? = null,
 
     /**
+     * v1.4.1 — what YouTube's session was showing at the instant we fired the launch, or
+     * null when YouTube had no session at all (a COLD launch). Field logs 1789440952407 and
+     * 1789483749397 line up as: every `launchBlocked(noSession)` was a cold launch, every
+     * success had a prior session (`refireSwitch` / direct confirm). This makes that split
+     * explicit instead of inferred from which ops appear.
+     */
+    var mediaPriorTitle: String? = null,
+
+    /**
+     * v1.4.1 — active network transport at launch ("wifi" / "cellular" / "other" / "none").
+     * See [com.moto.voice.data.NetworkState.transportName] for the hypothesis it tests.
+     */
+    var netTransport: String? = null,
+
+    /**
      * v1.3.25 — any OTHER app's session that was PLAYING when we fired the YouTube
      * intent and that we pre-paused to free audio focus (e.g. "com.spotify.music=playing").
      * Field log 1784173407858 morning session: every youtube_play failed with

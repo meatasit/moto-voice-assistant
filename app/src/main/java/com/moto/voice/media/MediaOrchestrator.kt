@@ -9,6 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.moto.voice.actions.MediaStopper
+import com.moto.voice.data.NetworkState
 import com.moto.voice.debug.DebugEntry
 import com.moto.voice.debug.FinishReason
 import com.moto.voice.nlu.ErrorSpeech
@@ -196,6 +197,9 @@ object MediaOrchestrator {
         // happened (Background-Activity-Launch block while locked, per field log
         // 1784074856214) and we must NOT resume it — that masked the failure as success.
         val priorTitle = sessionTitle(MediaSessions.controllerFor(context, MediaSessions.YOUTUBE_PKG))
+        // v1.4.1 — diagnostics for the cold-launch failures (see DebugEntry.mediaPriorTitle).
+        entry.mediaPriorTitle = priorTitle
+        entry.netTransport = runCatching { NetworkState.transportName(context) }.getOrNull()
 
         // Rule #1: pre-clean via targeted controller.pause() (NOT media key which
         // would go to Spotify per field-log evidence). Only for YouTube — leaves
