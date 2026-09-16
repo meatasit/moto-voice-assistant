@@ -31,7 +31,19 @@ internal object YoutubeVerify {
      */
     const val MIN_PREFIX_RATIO = 0.7
 
-    fun normalize(s: String?): String = s?.trim()?.lowercase() ?: ""
+    /**
+     * v1.4.3 — every run of whitespace (including U+00A0 NO-BREAK SPACE, which Kotlin's `\s`
+     * does NOT match) collapses to one plain space, and zero-width characters are dropped.
+     * Field log 1789524511710, entry 1789522604183: YouTube's session reported
+     * `Live "กรรมกรข่าว คุยนอกจอ" 16 กันยายน 2569` while the Data API (via n8n) sent the
+     * same title with an ordinary space. Character-for-character they differ at index 30, so
+     * `titlesMatch` said no, the verdict stayed SWITCHED until the window ran out, and the
+     * rider heard "ยังเปลี่ยนคลิปไม่ทัน" for a live stream that was audibly playing.
+     */
+    private val WS = Regex("[\s\p{Z}\u200B\u200C\u200D\uFEFF]+")
+
+    fun normalize(s: String?): String =
+        s?.replace(WS, " ")?.trim()?.lowercase() ?: ""
 
     /**
      * True when two titles plausibly refer to the SAME video. Two ways to match:
