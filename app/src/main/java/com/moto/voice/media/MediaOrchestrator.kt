@@ -200,6 +200,14 @@ object MediaOrchestrator {
         // v1.4.1 — diagnostics for the cold-launch failures (see DebugEntry.mediaPriorTitle).
         entry.mediaPriorTitle = priorTitle
         entry.netTransport = runCatching { NetworkState.transportName(context) }.getOrNull()
+        // v1.4.2 — see DebugEntry.keyguardSecure / mediaBrowserAvail.
+        entry.keyguardSecure = runCatching {
+            context.getSystemService(android.app.KeyguardManager::class.java)?.isDeviceSecure
+        }.getOrNull()
+        entry.screenInteractive = runCatching {
+            context.getSystemService(android.os.PowerManager::class.java)?.isInteractive
+        }.getOrNull()
+        entry.mediaBrowserAvail = runCatching { probeMediaBrowsers(context) }.getOrNull()
 
         // Rule #1: pre-clean via targeted controller.pause() (NOT media key which
         // would go to Spotify per field-log evidence). Only for YouTube — leaves
@@ -445,8 +453,26 @@ object MediaOrchestrator {
      * Split out of [fireYoutubeIntent] so both the direct-launch and over-lock-screen
      * paths choose the exact same target.
      */
+    /**
+     * v1.4.2 — does [pkg] declare a MediaBrowserService? Needs the manifest `<queries>`.
+     * "absent" when the package is not installed at all.
+     */
+    private fun probeMediaBrowsers(context: Context): String {
+        val pm = context.packageManager
+        fun probe(pkg: String): String {
+            val installed = runCatching { pm.getPackageInfo(pkg, 0) }.isSuccess
+            if (!installed) return "absent"
+            val svc = Intent("android.media.browse.MediaBrowserService").setPackage(pkg)
+            return runCatching { pm.queryIntentServices(svc, 0).isNotEmpty() }.getOrDefault(false).toString()
+        }
+        return "yt=${probe(MediaSessions.YOUTUBE_PKG)},ytm=${probe(YOUTUBE_MUSIC_PKG)}"
+    }
+
+    private const val YOUTUBE_MUSIC_PKG = "com.google.android.apps.youtube.music"
+
     private fun buildYoutubeIntent(
         context: Context, videoId: String?, query: String?, forceRestart: Boolean = false,
+        entry: DebugEntry? = null,
     ): Intent? {
         // v1.3.36 — CLEAR_TASK (only legal alongside NEW_TASK) tears down YouTube's existing
         // task and starts it fresh at the requested video. That is the difference between the
@@ -463,14 +489,26 @@ object MediaOrchestrator {
             // AppSettings.youtubeWebLink for the evidence. Package-targeted so no chooser can
             // appear, and we only use it if YouTube actually claims it — otherwise this falls
             // through to exactly what shipped before.
+            // v1.4.2 — log WHICH form fires. Until the manifest <queries> block landed in this
+            // same version, every resolveActivity() here most likely answered null on the
+            // rider's Android 14 phone, i.e. the untargeted https fallback was what ran.
             if (webLinkPreferred) {
                 val web = view(Uri.parse("https://www.youtube.com/watch?v=$videoId"))
                     .setPackage(MediaSessions.YOUTUBE_PKG)
-                if (web.resolveActivity(pm) != null) return web
+                if (web.resolveActivity(pm) != null) {
+                    entry?.let { logOp(it, "link→webTargeted", MediaSessions.YOUTUBE_PKG) }
+                    return web
+                }
             }
             val app = view(Uri.parse("vnd.youtube:$videoId"))
             val web = view(Uri.parse("https://www.youtube.com/watch?v=$videoId"))
-            return if (app.resolveActivity(pm) != null) app else web
+            return if (app.resolveActivity(pm) != null) {
+                entry?.let { logOp(it, "link→vnd", MediaSessions.YOUTUBE_PKG) }
+                app
+            } else {
+                entry?.let { logOp(it, "link→webUntargeted", MediaSessions.YOUTUBE_PKG) }
+                web
+            }
         }
         val q = query?.takeIf { it.isNotBlank() } ?: return null
         val search = Intent(Intent.ACTION_SEARCH).apply {
@@ -478,8 +516,13 @@ object MediaOrchestrator {
             putExtra("query", q)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or restartFlag)
         }
-        return if (search.resolveActivity(pm) != null) search
-        else view(Uri.parse("https://www.youtube.com/results?search_query=${Uri.encode(q)}"))
+        return if (search.resolveActivity(pm) != null) {
+            entry?.let { logOp(it, "link→search", MediaSessions.YOUTUBE_PKG) }
+            search
+        } else {
+            entry?.let { logOp(it, "link→searchWeb", MediaSessions.YOUTUBE_PKG) }
+            view(Uri.parse("https://www.youtube.com/results?search_query=${Uri.encode(q)}"))
+        }
     }
 
     /**
@@ -491,7 +534,7 @@ object MediaOrchestrator {
         context: Context, videoId: String?, query: String?, entry: DebugEntry,
         forceRestart: Boolean = false,
     ): Boolean {
-        val target = buildYoutubeIntent(context, videoId, query, forceRestart) ?: run {
+        val target = buildYoutubeIntent(context, videoId, query, forceRestart, entry) ?: run {
             entry.error = ((entry.error ?: "") + " youtube_launch_failed").trim()
             return false
         }
@@ -543,6 +586,14 @@ object MediaOrchestrator {
         var playAttempts = 0
         var lastPlayAttemptAt = 0L
         var refiredSwitch = false
+        // v1.4.2 — did the target EVER show a session during this window? Field log
+        // 1789518388540 (entry 1789518322022): the poll saw YouTube PLAYING the right video
+        // mid-window (mediaActualTitle / playbackState were stamped), then the session was
+        // gone by window end and the rider heard "เปิดไม่สำเร็จ" — for a video that HAD
+        // started. "It started and then stopped" is a different fact from "it never
+        // appeared", and it points at the keyguard (YouTube pauses when its player is not
+        // visible), so it gets its own reason and its own line.
+        var sawSession = false
         // v1.3.31 — packages we've already logged a mid-window re-pause for (log once each).
         val foreignRepaused = mutableSetOf<String>()
         lateinit var poll: Runnable
@@ -573,7 +624,10 @@ object MediaOrchestrator {
                 // dispatching MEDIA_PLAY would wake Spotify (per field log 1784028862496).
                 // If the poll window has elapsed with no controller, mark launch_blocked.
                 if (System.currentTimeMillis() >= pollWindowEndAt) {
-                    declareLaunchBlocked(appCtx, targetPkg, entry, reason = "noSession")
+                    declareLaunchBlocked(
+                        appCtx, targetPkg, entry,
+                        reason = if (sawSession) "sessionLost" else "noSession",
+                    )
                     return@Runnable
                 }
                 handler.postDelayed(poll, POLL_INTERVAL_MS)
@@ -582,6 +636,10 @@ object MediaOrchestrator {
             val state = ctrl.playbackState?.state
             entry.playbackState = MediaSessions.stateName(state)
             entry.mediaCtrlUsed = true
+            if (!sawSession) {
+                sawSession = true
+                logOp(entry, "nudge→sessionSeen(${MediaSessions.stateName(state)})", targetPkg)
+            }
 
             // v1.3.21 — verify by TITLE, not mediaId (YouTube leaves mediaId blank). The
             // decisive signal is whether the title moved away from what was playing before
@@ -754,6 +812,7 @@ object MediaOrchestrator {
             BlockedLine.SwitchNotLanded -> ErrorSpeech.SWITCH_NOT_LANDED
             BlockedLine.LockedNoFsi -> ErrorSpeech.LAUNCH_BLOCKED_LOCKED
             BlockedLine.NoSession -> ErrorSpeech.LAUNCH_FAILED_NO_SESSION
+            BlockedLine.SessionLost -> ErrorSpeech.MEDIA_STOPPED_AFTER_OPEN
         }
         speakOutOfPipeline(appCtx, line)
         pendingNudge = null
@@ -802,7 +861,7 @@ object MediaOrchestrator {
     }
 
     /** Which honest line a blocked launch should speak. Named so a JVM test can lock it. */
-    internal enum class BlockedLine { SwitchNotLanded, LockedNoFsi, NoSession }
+    internal enum class BlockedLine { SwitchNotLanded, LockedNoFsi, NoSession, SessionLost }
 
     /**
      * Pure decision behind [declareLaunchBlocked]'s TTS. The rule that matters:
@@ -815,6 +874,8 @@ object MediaOrchestrator {
             // something IS audible, it just isn't what was asked for. "Can't open" would
             // contradict what he can hear.
             reason == "stillPrior" || reason == "wrongVideo" -> BlockedLine.SwitchNotLanded
+            // v1.4.2 — it opened and then stopped: say that, not "couldn't open".
+            reason == "sessionLost" -> BlockedLine.SessionLost
             locked && !fsiHonored -> BlockedLine.LockedNoFsi
             else -> BlockedLine.NoSession
         }

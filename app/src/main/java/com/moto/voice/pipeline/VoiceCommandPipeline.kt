@@ -631,7 +631,7 @@ class VoiceCommandPipeline(
         releaseScoBeforeMedia(entry)
         MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
         MediaOrchestrator.webLinkPreferred = settings.youtubeWebLink
-        MediaOrchestrator.openYoutube(context, next.id, null, entry, expectedTitle = next.title)
+        MediaOrchestrator.openYoutube(context, next.id, null, entry, expectedTitle = next.verifyTitle)
         recordHistory(HistoryAction.YoutubeOpen(next.id, next.title))
         mediaActionStarted = true  // spec v1.3.9 §1.3
     }
@@ -1131,7 +1131,7 @@ class VoiceCommandPipeline(
             releaseScoBeforeMedia(entry)
             MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
         MediaOrchestrator.webLinkPreferred = settings.youtubeWebLink
-            MediaOrchestrator.openYoutube(context, chosen.id, resp.query, entry, expectedTitle = chosen.title)
+            MediaOrchestrator.openYoutube(context, chosen.id, resp.query, entry, expectedTitle = chosen.verifyTitle)
             recordHistory(HistoryAction.YoutubeOpen(chosen.id, chosen.title))
             // Spec v1.3.8 B5 — remember the videos list so "อันต่อไป" can advance.
             com.moto.voice.media.MediaSessionMemory.rememberYoutube(candidates, chosen.id, chosen.title)
@@ -1154,7 +1154,7 @@ class VoiceCommandPipeline(
     private fun collectYoutubeCandidates(resp: WebhookResponse): List<WebhookResponse.Video> {
         val out = linkedMapOf<String, WebhookResponse.Video>()
         extractYoutubeId(resp.videoId)?.let {
-            out[it] = WebhookResponse.Video(it, resp.videoTitle ?: "")
+            out[it] = WebhookResponse.Video(it, resp.videoTitle ?: "", resp.videoTitleFull)
         }
         resp.videos?.forEach { v ->
             val id = extractYoutubeId(v.id)

@@ -232,6 +232,17 @@ object ErrorSpeech {
     )
 
     /**
+     * v1.4.2 — the `sessionLost` variant: YouTube DID start the requested video and then
+     * stopped within the window (field log 1789518388540). Telling the rider it "couldn't
+     * open" was false — he unlocked and found it open. Say what happened and the one thing
+     * that is known to make it play: looking at it.
+     */
+    val MEDIA_STOPPED_AFTER_OPEN: String get() = pick(
+        "เปิดยูทูบแล้วแต่วิดีโอหยุดเองค่ะ ลองปลดล็อคจอดูนะคะ",
+        "เปิดยูทูบแล้วแต่วิดีโอหยุดเองครับ ลองปลดล็อคจอดูนะครับ",
+    )
+
+    /**
      * v1.3.30 — the `stillPrior` variant of a blocked switch. Field log 1784551582120:
      * every launch_blocked entry was a locked YouTube→YouTube switch where YouTube was
      * ALREADY open and playing the previous clip — the new clip just didn't navigate
@@ -266,6 +277,7 @@ object ErrorSpeech {
         SERVER_UNAVAILABLE,
         SEEK_ATTEMPTED, MEDIA_PLAY_CONFIRMED, MEDIA_OPENED_NOT_PLAYING,
         LAUNCH_BLOCKED_LOCKED, LAUNCH_FAILED_NO_SESSION, SWITCH_NOT_LANDED,
+        MEDIA_STOPPED_AFTER_OPEN,
     )
 
     private fun pick(feminine: String, masculine: String): String =

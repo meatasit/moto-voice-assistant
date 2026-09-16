@@ -224,9 +224,33 @@ data class DebugEntry(
 
     /**
      * v1.4.1 — active network transport at launch ("wifi" / "cellular" / "other" / "none").
-     * See [com.moto.voice.data.NetworkState.transportName] for the hypothesis it tests.
+     * The Wi‑Fi / cast-prompt hypothesis this was added for died the same day — the rider
+     * was riding, no Wi‑Fi (16 Sep 2026) — but the field stays: it is cheap and rules things
+     * out.
      */
     var netTransport: String? = null,
+
+    /**
+     * v1.4.2 — `KeyguardManager.isDeviceSecure` at launch. The surviving hypothesis for
+     * `launchBlocked(noSession)` on a COLD launch: an activity started from our trampoline
+     * lands BEHIND a secure keyguard, never becomes visible, and YouTube does not begin
+     * playback (= no MediaSession) until it is seen. A warm YouTube already has its playback
+     * service running, so the new video is delivered to that instead — which is why every
+     * warm switch lands (logs 1789440952407, 1789483749397).
+     */
+    var keyguardSecure: Boolean? = null,
+
+    /** v1.4.2 — `PowerManager.isInteractive` at launch (screen on/off). */
+    var screenInteractive: Boolean? = null,
+
+    /**
+     * v1.4.2 — whether YouTube / YouTube Music expose a `MediaBrowserService`, e.g.
+     * "yt=false,ytm=true". If one does, playback can be started through
+     * `MediaBrowser.connect()` + `playFromSearch()` with no activity at all — the route
+     * around the keyguard entirely. Probed once per launch; requires the manifest
+     * `<queries>` block.
+     */
+    var mediaBrowserAvail: String? = null,
 
     /**
      * v1.3.25 — any OTHER app's session that was PLAYING when we fired the YouTube

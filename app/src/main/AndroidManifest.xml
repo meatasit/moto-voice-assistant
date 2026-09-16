@@ -18,6 +18,21 @@
          it's granted at install. See LockScreenLauncher / LockLaunchActivity. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
+    <!-- v1.4.2 — package visibility. Without this, on Android 11+ every
+         `resolveActivity()` in MediaOrchestrator.buildYoutubeIntent answers null for the
+         YouTube package (implicit-intent resolution is filtered to visible packages), so the
+         app has most likely been firing the UNTARGETED https fallback all along and the
+         v1.3.42 "targeted App Link" never executed. Declaring the two YouTube packages makes
+         the targeted forms resolvable and lets the new diagnostics ask whether either app
+         exposes a MediaBrowserService (the UI-less playback path Assistant / Android Auto use). -->
+    <queries>
+        <package android:name="com.google.android.youtube" />
+        <package android:name="com.google.android.apps.youtube.music" />
+        <intent>
+            <action android:name="android.media.browse.MediaBrowserService" />
+        </intent>
+    </queries>
+
     <application
         android:name=".MotoVoiceApplication"
         android:allowBackup="false"
