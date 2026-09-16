@@ -590,6 +590,7 @@ class VoiceCommandPipeline(
     private suspend fun handlePlayContinue(appHint: String?, entry: DebugEntry) {
         MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
         MediaOrchestrator.webLinkPreferred = settings.youtubeWebLink
+        MediaOrchestrator.browserPreferred = settings.youtubeMediaBrowser
         val result = MediaOrchestrator.playContinue(context, appHint, entry)
         when (result) {
             is MediaOrchestrator.Result.NoTarget ->
@@ -638,6 +639,7 @@ class VoiceCommandPipeline(
         releaseScoBeforeMedia(entry)
         MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
         MediaOrchestrator.webLinkPreferred = settings.youtubeWebLink
+        MediaOrchestrator.browserPreferred = settings.youtubeMediaBrowser
         val result = MediaOrchestrator.openYoutube(context, next.id, null, entry, expectedTitle = next.verifyTitle)
         recordHistory(HistoryAction.YoutubeOpen(next.id, next.title))
         if (result is MediaOrchestrator.Result.LaunchFailed) {
@@ -933,6 +935,7 @@ class VoiceCommandPipeline(
                     SeekAmount.Decision.Resume -> {
                         MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
                         MediaOrchestrator.webLinkPreferred = settings.youtubeWebLink
+                        MediaOrchestrator.browserPreferred = settings.youtubeMediaBrowser
                         val result = MediaOrchestrator.playContinue(context, appHint = null, entry = entry)
                         // Only speak here if the nudge WON'T also speak — i.e. we didn't
                         // fire a fresh deep link. Result.Success means "deep link refired,
@@ -1152,7 +1155,8 @@ class VoiceCommandPipeline(
             speakAndRememberWithOpener(spoken)
             releaseScoBeforeMedia(entry)
             MediaOrchestrator.speakPlayConfirmed = settings.confirmMediaStart
-        MediaOrchestrator.webLinkPreferred = settings.youtubeWebLink
+            MediaOrchestrator.webLinkPreferred = settings.youtubeWebLink
+            MediaOrchestrator.browserPreferred = settings.youtubeMediaBrowser
             val result = MediaOrchestrator.openYoutube(context, chosen.id, resp.query, entry, expectedTitle = chosen.verifyTitle)
             recordHistory(HistoryAction.YoutubeOpen(chosen.id, chosen.title))
             // Spec v1.3.8 B5 — remember the videos list so "อันต่อไป" can advance.

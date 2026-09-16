@@ -188,6 +188,32 @@ class AppSettings(context: Context) {
         get() = prefs.getBoolean("youtube_web_link", true)
         set(v) { prefs.edit().putBoolean("youtube_web_link", v).apply() }
 
+    /**
+     * v1.4.5 — when the screen is LOCKED and YouTube is COLD, start playback by binding to
+     * YouTube's MediaBrowserService instead of firing a deep link. Default ON.
+     *
+     * This is the case that has never worked. An Activity started from the full-screen-intent
+     * trampoline is created behind a secure keyguard and never becomes visible, and YouTube
+     * only starts playing once its player is visible — so no playback, no MediaSession, and
+     * the rider hears "เปิดยูทูบไม่สำเร็จ". Field log 1789561893967 caught it twice with the
+     * same video id 40 seconds apart: cold attempt `launchBlocked(noSession)`, warm attempt
+     * `nudge→confirmed`. It is also why unlocking the phone later reveals YouTube sitting
+     * open — the Activity was there all along, waiting for a window.
+     *
+     * A MediaBrowser binds to a Service, so there is no Activity and nothing for the keyguard
+     * to block. Every recent field entry reports `mediaBrowserAvail=yt=true`, i.e. the app
+     * does publish one.
+     *
+     * The trade is precision: the browser API plays a SEARCH, not a video id, so YouTube
+     * chooses. We search the full video title and let the existing title verification judge
+     * the result. Switch this off if the headless start starts landing on the wrong video —
+     * behaviour then reverts exactly to v1.4.4. Warm switches and unlocked launches never
+     * take this path either way.
+     */
+    var youtubeMediaBrowser: Boolean
+        get() = prefs.getBoolean("youtube_media_browser", true)
+        set(v) { prefs.edit().putBoolean("youtube_media_browser", v).apply() }
+
     var greetOnConnect: Boolean
         get() = prefs.getBoolean("greet_on_connect", true)
         set(v) { prefs.edit().putBoolean("greet_on_connect", v).apply() }
