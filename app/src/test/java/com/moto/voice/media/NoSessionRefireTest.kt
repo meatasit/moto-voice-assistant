@@ -31,7 +31,7 @@ class NoSessionRefireTest {
 
     @Test fun refiresOnceTheDeadlinePasses() = assertTrue(
         MediaOrchestrator.shouldRefireNoSession(
-            alreadyRefired = false, sawSession = false,
+            alreadyRefired = false, sawSession = false, behindSecureKeyguard = false,
             nowMs = refireAt, refireAt = refireAt, haveLinkTarget = true,
         )
     )
@@ -39,7 +39,7 @@ class NoSessionRefireTest {
     @Test fun waitsWhileTheColdStartStillHasTime() = assertFalse(
         "a cold start is documented at 800ms-3s; tearing it down early is the bug we would be adding",
         MediaOrchestrator.shouldRefireNoSession(
-            alreadyRefired = false, sawSession = false,
+            alreadyRefired = false, sawSession = false, behindSecureKeyguard = false,
             nowMs = refireAt - 1, refireAt = refireAt, haveLinkTarget = true,
         )
     )
@@ -47,7 +47,7 @@ class NoSessionRefireTest {
     @Test fun neverRefiresTwice() = assertFalse(
         "two CLEAR_TASK restarts racing each other is a re-fire war — v1.3.36 paid for that once",
         MediaOrchestrator.shouldRefireNoSession(
-            alreadyRefired = true, sawSession = false,
+            alreadyRefired = true, sawSession = false, behindSecureKeyguard = false,
             nowMs = refireAt + 9_000, refireAt = refireAt, haveLinkTarget = true,
         )
     )
@@ -55,14 +55,14 @@ class NoSessionRefireTest {
     @Test fun leavesTheSessionLostCaseAlone() = assertFalse(
         "a session that appeared and vanished is 'opened then stopped' — restarting it hits the same keyguard",
         MediaOrchestrator.shouldRefireNoSession(
-            alreadyRefired = false, sawSession = true,
+            alreadyRefired = false, sawSession = true, behindSecureKeyguard = false,
             nowMs = refireAt + 1_000, refireAt = refireAt, haveLinkTarget = true,
         )
     )
 
     @Test fun nothingToRefireWithoutAnIdOrQuery() = assertFalse(
         MediaOrchestrator.shouldRefireNoSession(
-            alreadyRefired = false, sawSession = false,
+            alreadyRefired = false, sawSession = false, behindSecureKeyguard = false,
             nowMs = refireAt + 1_000, refireAt = refireAt, haveLinkTarget = false,
         )
     )
@@ -76,4 +76,30 @@ class NoSessionRefireTest {
         assertTrue("re-fire must happen while the poll is still alive", 6_000L < coldWindow)
         assertTrue("re-fire must be past a normal 800ms-3s cold start", 6_000L > 3_000L)
     }
+
+    // ─── v1.4.7: disproven behind a secure keyguard ──────────────────────────
+
+    /**
+     * Field log 1789649814596 — this escalation ran for the first time and failed all three
+     * times: `refireNoSession(clearTask)` → a second honored FSI launch → still
+     * `launchBlocked(noSession)`, every one `keyguardSecure=true`. The rider then unlocked and
+     * YouTube played by itself, which says the video was loaded the whole time and YouTube
+     * simply will not start behind a secure keyguard. Re-delivering the link cannot change
+     * that; it only buys another POLL_WINDOW_COLD_MS of silence before he is told anything.
+     */
+    @Test fun neverRefiresBehindASecureKeyguard() = assertFalse(
+        "proven 0 for 3 — it cannot work, and it costs the rider a second window of silence",
+        MediaOrchestrator.shouldRefireNoSession(
+            alreadyRefired = false, sawSession = false, behindSecureKeyguard = true,
+            nowMs = refireAt + 1_000, refireAt = refireAt, haveLinkTarget = true,
+        )
+    )
+
+    @Test fun stillRefiresOnceTheRiderUnlocks() = assertTrue(
+        "the gate reads the LIVE keyguard, so unlocking mid-window puts the retry back in play",
+        MediaOrchestrator.shouldRefireNoSession(
+            alreadyRefired = false, sawSession = false, behindSecureKeyguard = false,
+            nowMs = refireAt + 1_000, refireAt = refireAt, haveLinkTarget = true,
+        )
+    )
 }

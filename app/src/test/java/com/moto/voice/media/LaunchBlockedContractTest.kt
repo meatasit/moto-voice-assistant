@@ -8,10 +8,19 @@ import org.junit.Test
  * v1.3.36 — locks the two decisions that made the rider distrust what the assistant said
  * about a failed launch, both taken from field logs 1786072158662 / 1786104958601.
  *
- * 1. **Never say "ปลดล็อคก่อน" when the full-screen intent was honored.** The locked opens
- *    that failed in the field had `fsiTrampolineRan=true` + `fsiTrampolineLaunchOk=true` —
- *    YouTube WAS launched over the keyguard, the session was just slow. Telling the rider
- *    to unlock is advice he can hear is wrong, and it was on his own bug list.
+ * 1. ~~**Never say "ปลดล็อคก่อน" when the full-screen intent was honored.**~~ **Reversed in
+ *    v1.4.7 for `noSession` behind a SECURE keyguard.** v1.3.36 *inferred* from
+ *    `fsiTrampolineLaunchOk=true` that the launch had worked and the session was merely slow,
+ *    so unlocking could not have helped. Field log 1789649814596 replaced that inference with
+ *    an observation: three `noSession` blocks with the FSI honored, and the rider reported
+ *    that **unlocking the screen made YouTube start playing by itself**. The video was loaded
+ *    and waiting the whole time; YouTube just will not start its player behind a secure
+ *    keyguard. So "ลองสั่งใหม่อีกครั้ง" is advice that provably cannot work (three for three),
+ *    and "ปลดล็อคก่อน" is what the rider had already found does.
+ *
+ *    v1.3.36's actual complaint is still honored: it was about being told to unlock while
+ *    audio was audibly playing. That is `stillPrior` / `sessionLost`, and both keep their own
+ *    lines below, unchanged and unconditional.
  *
  * 2. **A cold target gets a longer window than a warm switch.** Three separate `noSession`
  *    blocks happened with `mediaCtrlPkgMiss=none` (nothing else playing at all) inside the
@@ -35,28 +44,74 @@ class LaunchBlockedContractTest {
         }
     }
 
-    @Test fun lockedWithFsiHonoredDoesNotTellRiderToUnlock() {
+    @Test fun secureKeyguardNoSessionSaysItIsWaitingForAnUnlock() {
+        // v1.4.7, field log 1789649814596 — the FSI was honored, the launch fired twice, and
+        // YouTube still never registered a session. The rider unlocked and it played, so it
+        // WAS open: "เปิดไม่ได้" would be false and "ลองสั่งใหม่" cannot work.
         assertEquals(
-            MediaOrchestrator.BlockedLine.NoSession,
-            MediaOrchestrator.blockedLineFor("noSession", locked = true, fsiHonored = true),
+            MediaOrchestrator.BlockedLine.WaitingForUnlock,
+            MediaOrchestrator.blockedLineFor(
+                "noSession", locked = true, fsiHonored = true, keyguardSecure = true,
+            ),
         )
     }
 
-    @Test fun lockedWithoutFsiKeepsTheUnlockAdvice() {
-        // No full-screen-intent path taken → the keyguard genuinely is the obstacle, and
-        // unlocking really is what fixes it (acceptance scenario C-denied).
+    @Test fun lockedWithoutFsiSaysTheLaunchItselfWasBlocked() {
+        // No full-screen-intent path taken → the keyguard stopped the INTENT, so nothing is
+        // open and "เปิดไม่ได้ตอนจอล็อค" is literally true (acceptance scenario C-denied).
+        // Distinct from the case above, where YouTube is open and merely paused.
         assertEquals(
             MediaOrchestrator.BlockedLine.LockedNoFsi,
             MediaOrchestrator.blockedLineFor("noSession", locked = true, fsiHonored = false),
         )
     }
 
+    @Test fun theTwoLockedCasesAreNotTheSameLine() {
+        // They are different facts — one never opened, the other is open and waiting — and
+        // the rider can tell which is which by unlocking.
+        assertTrue(
+            MediaOrchestrator.blockedLineFor("noSession", true, fsiHonored = false) !=
+                MediaOrchestrator.blockedLineFor("noSession", true, true, keyguardSecure = true),
+        )
+    }
+
+    @Test fun nonSecureKeyguardWithFsiHonoredStillDoesNotSayUnlock() {
+        // A swipe keyguard IS dismissed by the trampoline's requestDismissKeyguard, so it is
+        // not the obstacle and telling the rider to unlock would be the wrong advice again.
+        assertEquals(
+            MediaOrchestrator.BlockedLine.NoSession,
+            MediaOrchestrator.blockedLineFor(
+                "noSession", locked = true, fsiHonored = true, keyguardSecure = false,
+            ),
+        )
+    }
+
+    @Test fun audibleCasesNeverSayUnlockHoweverSecureTheKeyguard() {
+        // v1.3.36's real complaint: something IS playing, so "can't open, unlock first"
+        // contradicts what the rider hears. Unchanged by the v1.4.7 reversal.
+        for (reason in listOf("stillPrior", "wrongVideo", "sessionLost")) {
+            val line = MediaOrchestrator.blockedLineFor(
+                reason, locked = true, fsiHonored = true, keyguardSecure = true,
+            )
+            assertTrue(
+                "$reason must not send the rider to unlock",
+                line != MediaOrchestrator.BlockedLine.WaitingForUnlock &&
+                    line != MediaOrchestrator.BlockedLine.LockedNoFsi,
+            )
+        }
+    }
+
     @Test fun unlockedNeverGetsTheLockedLine() {
         for (fsi in listOf(true, false)) {
-            assertEquals(
-                MediaOrchestrator.BlockedLine.NoSession,
-                MediaOrchestrator.blockedLineFor("noSession", locked = false, fsiHonored = fsi),
-            )
+            for (secure in listOf(true, false)) {
+                assertEquals(
+                    "unlocked fsi=$fsi secure=$secure — a locked-screen line would be nonsense",
+                    MediaOrchestrator.BlockedLine.NoSession,
+                    MediaOrchestrator.blockedLineFor(
+                        "noSession", locked = false, fsiHonored = fsi, keyguardSecure = secure,
+                    ),
+                )
+            }
         }
     }
 

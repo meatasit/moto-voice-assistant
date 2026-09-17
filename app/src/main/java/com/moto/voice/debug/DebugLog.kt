@@ -182,6 +182,27 @@ data class DebugEntry(
     var mediaCtrlPkgMiss: String? = null,
 
     /**
+     * v1.4.7 — the LIVE keyguard state at the moment a launch was declared blocked, as
+     * "locked=<b>,secure=<b>". [screenLocked] is stamped when the intent fires; this is what
+     * was true ~16 s later when we gave up, which is the state the spoken line is advice
+     * about. Field log 1789649814596 is the reason it matters: three noSession blocks, the
+     * rider unlocked, and YouTube started playing by itself.
+     */
+    var mediaBlockedKeyguard: String? = null,
+
+    /**
+     * v1.4.7 — result of a probe connect to the target's MediaBrowserService on the
+     * noSession path: connected(token) / connected(noToken) / refused / noService / …
+     *
+     * [mediaBrowserAvail] has said `yt=true` since v1.4.2 and nobody had checked whether
+     * that service will actually talk to US — YouTube's is built for Android Auto and may
+     * well refuse an unknown caller. It is the only route left to starting playback without
+     * YouTube's Activity being resumed, so this measures whether the route exists at all.
+     * Probe only: it connects, records, and disconnects. Nothing is dispatched through it.
+     */
+    var mediaBrowserConnect: String? = null,
+
+    /**
      * v1.3.20 sprint rule #3 — the package name each media operation targeted.
      * Populated by [com.moto.voice.media.MediaOrchestrator] on every op so the debug
      * log can answer "who did we command, and what happened" without ambiguity.
@@ -343,6 +364,8 @@ data class DebugEntry(
         if (mediaCtrlUsed) append("  mediaCtrl:used")
         if (playbackState != null) append("  playback:${playbackState}")
         if (mediaCtrlPkgMiss != null) append("  pkgMiss:${mediaCtrlPkgMiss}")
+        if (mediaBlockedKeyguard != null) append("  kg:${mediaBlockedKeyguard}")
+        if (mediaBrowserConnect != null) append("  browser:${mediaBrowserConnect}")
         if (mediaTargetPkg != null) append("  target:${mediaTargetPkg}")
         if (mediaOperations != null) append("  ops:${mediaOperations}")
         if (screenLocked == true) append("  🔒locked")
