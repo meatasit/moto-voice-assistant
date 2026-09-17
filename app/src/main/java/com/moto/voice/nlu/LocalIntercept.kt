@@ -81,7 +81,9 @@ object LocalIntercept {
         // an odd match candidate for STOP-adjacent patterns, so we check the media
         // ones AFTER Stop to keep "หยุด/เปลี่ยน" resolution unambiguous even if a
         // rider says both in the same sentence.
-        if (matchesAsPhrase(t, NEXT_VIDEO_PATTERNS)) return Intercept.NextVideo
+        if (matchesAsPhrase(t, NEXT_VIDEO_PATTERNS) || NEXT_ITEM_REGEX.containsMatchIn(t)) {
+            return Intercept.NextVideo
+        }
         if (matchesAsPhrase(t, WHAT_IS_PLAYING_PATTERNS)) return Intercept.WhatIsPlaying
 
         // v1.3.20 sprint — "เล่นต่อ" / "เล่น youtube ต่อ" / "กดเล่นต่อ" — caught
@@ -171,6 +173,26 @@ object LocalIntercept {
     /** Spec v1.3.8 B5 — advance to next video in the current webhook's `videos` array. */
     private val NEXT_VIDEO_PATTERNS = listOf(
         "อันต่อไป", "เปลี่ยน", "อันอื่น", "ไม่เอาอันนี้", "ต่อไป", "ถัดไป"
+    )
+
+    /**
+     * v1.4.6 — a next-item phrase that is buried mid-sentence.
+     *
+     * [matchesAsPhrase] only accepts a pattern at index 0 or after a SPACE, and Thai does
+     * not put spaces between words, so any next-item phrase with something in front of it
+     * was invisible. Field log 1789637279880, entry 1789610009315: "เปิดรายการถัดไปของไอ้อาร์"
+     * — "ถัดไป" sits at index 10 preceded by "ร", so it missed, went to the webhook, which
+     * searched for the phrase literally, found nothing, and the rider was told
+     * "หาวิดีโอไม่เจอ". [MediaSessionMemory] was holding that channel's list from 23 minutes
+     * earlier and `nextVideo()` would have answered "หนี้ทางเทคนิค (Technical Debt)".
+     *
+     * Deliberately narrower than relaxing [matchesAsPhrase], which would let bare "เปลี่ยน"
+     * or "ต่อไป" fire from inside any word. A NOUN immediately followed by ถัดไป/ต่อไป is
+     * unambiguous, and requiring the noun is what keeps "เล่นต่อไป" out — that is a resume,
+     * it belongs to [PLAY_CONTINUE_REGEX] below, and it must keep reaching it.
+     */
+    private val NEXT_ITEM_REGEX = Regex(
+        "(?:อัน|คลิป|รายการ|ตอน|เพลง|วิดีโอ|วีดีโอ)\\s?(?:ถัดไป|ต่อไป)"
     )
     /** Spec v1.3.8 B5 — read back what's currently playing (from MediaSessionMemory). */
     private val WHAT_IS_PLAYING_PATTERNS = listOf(

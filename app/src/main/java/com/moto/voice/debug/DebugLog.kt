@@ -486,6 +486,21 @@ object FinishReason {
  */
 const val FOLLOWUP_STT_ERROR_PREFIX = "followup_stt"
 
+/**
+ * v1.4.6 — format an STT failure for [DebugEntry.error] as `label code@elapsedms`.
+ *
+ * The elapsed time is the diagnostic. Across field logs 1789561893967 and 1789637279880 the
+ * 4 s follow-up window has dropped with error 11 on EVERY chat it opened after — 8 for 8,
+ * `followupUsed: false` every time — so spec v1.3.8 B2's passive window has never once
+ * worked for the rider. Nothing in the log says whether the recognizer died instantly or
+ * sat open for the full window first, and those point at different causes. Measure before
+ * fixing (ห้ามแก้ก่อนพิสูจน์); this is the measurement.
+ *
+ * It also makes [com.moto.voice.pipeline.VoiceCommandPipeline]'s "errored inside 800ms so it
+ * never really listened" transient rule auditable from the export instead of inferred.
+ */
+fun sttErrorStamp(label: String, code: Int, elapsedMs: Long): String = "$label $code@${elapsedMs}ms"
+
 object DebugLog {
     private const val MAX = 50  // spec §9
     private val list = CopyOnWriteArrayList<DebugEntry>()

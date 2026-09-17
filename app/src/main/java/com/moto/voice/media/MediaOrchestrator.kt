@@ -271,7 +271,20 @@ object MediaOrchestrator {
         // foreign player explicitly (Rule #1: targeted controller, never a media key).
         prepauseForeignPlayers(context, entry)
 
-        val launched = fireYoutubeIntent(context, videoId, query, entry)
+        // v1.4.6 — a WARM switch fires with CLEAR_TASK from the start. Two field logs
+        // agree that a plain NEW_TASK delivery to a YouTube task that is already running
+        // never navigates: 11/11 stillPrior in 1786104958601, and in 1789637279880 all four
+        // warm switches logged sessionSeen(playing) → refireSwitch(clearTask) → confirmed,
+        // i.e. the first delivery did nothing and the escalation is what landed every one.
+        // We already know at fire time which case this is — priorTitle is non-null exactly
+        // when YouTube has a live session — so spending the first delivery on a known no-op
+        // costs the rider REFIRE_STILL_PRIOR_MS plus a wasted trampoline for nothing.
+        //
+        // The stillPrior escalation stays armed: `refired` is untouched here, so a switch
+        // that somehow still misses gets its one re-fire exactly as before.
+        val launched = fireYoutubeIntent(
+            context, videoId, query, entry, forceRestart = firstFireNeedsRestart(priorTitle),
+        )
         if (!launched) {
             // v1.4.4 — never silent (Rule #3). Stamp the entry like a blocked launch so the
             // field log categorizes it, and hand the caller a Result it cannot mistake for
@@ -990,6 +1003,21 @@ object MediaOrchestrator {
         priorTitle == null ||
             verdict == YoutubeVerify.Verdict.CONFIRMED_TARGET ||
             verdict == YoutubeVerify.Verdict.SWITCHED
+
+    /**
+     * v1.4.6 — should the FIRST deep-link delivery already carry CLEAR_TASK?
+     *
+     * Yes exactly when YouTube is already playing something ([priorTitle] non-null), because
+     * that is the case in which a plain NEW_TASK intent is delivered to a task that is
+     * already running and Android simply brings it forward without handing over the new
+     * intent. A cold target has no task to clear, so it keeps the plain intent — tearing
+     * down a launch that is merely slow is the mistake [REFIRE_NO_SESSION_MS] is careful to
+     * avoid, and it should not be made here either.
+     *
+     * Pure so a JVM test can lock it; whether it saves the rider the wait is the Acceptance
+     * Suite's to confirm.
+     */
+    internal fun firstFireNeedsRestart(priorTitle: String?): Boolean = priorTitle != null
 
     /**
      * v1.4.5 — should this poll tick escalate a launch that has produced no session at all?
