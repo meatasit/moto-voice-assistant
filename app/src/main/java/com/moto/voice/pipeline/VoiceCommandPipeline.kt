@@ -33,6 +33,7 @@ import com.moto.voice.debug.AudioRoute
 import com.moto.voice.debug.DebugEntry
 import com.moto.voice.debug.DebugLog
 import com.moto.voice.debug.FinishReason
+import com.moto.voice.debug.sttErrorStamp
 import com.moto.voice.debug.ScoState
 import com.moto.voice.nlu.ErrorSpeech
 import com.moto.voice.media.FmPlaybackState
@@ -1598,7 +1599,8 @@ class VoiceCommandPipeline(
                     if (!resumed.compareAndSet(false, true)) return
                     Log.w(TAG, "STT error $error after ${System.currentTimeMillis() - startedAt}ms")
                     // v1.4.5 — WHICH listen dropped matters. See [STT_ERROR_LABEL_FOLLOWUP].
-                    entry?.error = "$errorLabel $error"
+                    // v1.4.6 — and HOW LONG it lasted. See [com.moto.voice.debug.sttErrorStamp].
+                    entry?.error = sttErrorStamp(errorLabel, error, System.currentTimeMillis() - startedAt)
                     // If it errored within 800ms it almost certainly never actually listened —
                     // classify as transient so the outer layer can retry once.
                     val transient = !isRetry && (System.currentTimeMillis() - startedAt) < 800 && error in setOf(
