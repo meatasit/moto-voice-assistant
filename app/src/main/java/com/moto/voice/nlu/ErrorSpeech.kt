@@ -282,6 +282,22 @@ object ErrorSpeech {
         "เปิดสปอติฟายไม่สำเร็จครับ ลองสั่งใหม่อีกครั้งนะครับ",
     )
 
+    /**
+     * v1.4.7 — the deep link fired, YouTube is open with the video loaded, and it simply will
+     * not start playing while the Activity is held behind a secure keyguard.
+     *
+     * Field log 1789649814596 plus the rider's own report: three `noSession` blocks with
+     * `fsiTrampolineLaunchOk=true`, and **unlocking the screen made YouTube play by itself**.
+     * So neither of the older lines is true here — [LAUNCH_BLOCKED_LOCKED] ("เปิดไม่ได้") is
+     * false because it did open, and [LAUNCH_FAILED_NO_SESSION] ("ลองสั่งใหม่อีกครั้ง") asks for
+     * something that provably cannot work: three for three, saying it again reproduced the
+     * same block. This says the true thing, and the true thing is also the useful thing.
+     */
+    val MEDIA_WAITING_FOR_UNLOCK: String get() = pick(
+        "เปิดยูทูบไว้ให้แล้ว แต่ยังเล่นไม่ได้ตอนจอล็อคค่ะ ปลดล็อคจอแล้วจะเล่นเลยนะคะ",
+        "เปิดยูทูบไว้ให้แล้ว แต่ยังเล่นไม่ได้ตอนจอล็อคครับ ปลดล็อคจอแล้วจะเล่นเลยนะครับ",
+    )
+
     fun allSystemLines(): List<String> = listOf(
         THINKING, ONE_MORE_MOMENT,
         OFFLINE_LIMITED, TIMEOUT_WITH_FALLBACK, TIMEOUT_NO_FALLBACK,
@@ -304,6 +320,7 @@ object ErrorSpeech {
         LAUNCH_BLOCKED_LOCKED, LAUNCH_FAILED_NO_SESSION, SWITCH_NOT_LANDED,
         MEDIA_STOPPED_AFTER_OPEN, SEEK_AMOUNT_UNKNOWN,
         SPOTIFY_OPENED_NOT_PLAYING, SPOTIFY_LAUNCH_FAILED,
+        MEDIA_WAITING_FOR_UNLOCK,
     )
 
     private fun pick(feminine: String, masculine: String): String =

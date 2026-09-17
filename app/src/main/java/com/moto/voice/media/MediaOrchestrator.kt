@@ -1,5 +1,6 @@
 package com.moto.voice.media
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
@@ -558,6 +559,70 @@ object MediaOrchestrator {
         return "yt=${probe(MediaSessions.YOUTUBE_PKG)},ytm=${probe(YOUTUBE_MUSIC_PKG)}"
     }
 
+    /**
+     * v1.4.7 — try to CONNECT to [targetPkg]'s MediaBrowserService and record what happened.
+     *
+     * Field log 1789649814596 established that re-delivering the deep link cannot start
+     * playback behind a secure keyguard: YouTube holds the video loaded and only plays once
+     * its Activity resumes, which is what the rider saw when he unlocked. A MediaBrowser
+     * connection would reach YouTube's session without its Activity ever resuming — but
+     * [probeMediaBrowsers] only ever asked whether the service is DECLARED, and `yt=true` has
+     * sat in the log since v1.4.2 with nobody checking whether it will talk to us. YouTube's
+     * is built for Android Auto and may well refuse an unknown caller.
+     *
+     * So: measure first (ห้ามแก้ก่อนพิสูจน์). This connects, writes the outcome, and
+     * disconnects. **Nothing is dispatched through it** — if the next log says `refused` the
+     * lead is closed for good, and if it says `connected(token)` we have a real fix to build.
+     *
+     * Framework [android.media.browse.MediaBrowser], not the androidx wrapper, so this adds
+     * no dependency. Runs on the nudge's Handler, i.e. the main thread, as it requires.
+     */
+    private fun probeMediaBrowserConnect(appCtx: Context, targetPkg: String, entry: DebugEntry) {
+        val svcIntent = Intent("android.media.browse.MediaBrowserService").setPackage(targetPkg)
+        val service = runCatching {
+            appCtx.packageManager.queryIntentServices(svcIntent, 0).firstOrNull()?.serviceInfo
+        }.getOrNull()
+        if (service == null) {
+            entry.mediaBrowserConnect = "noService"
+            return
+        }
+        val component = ComponentName(service.packageName, service.name)
+        var browser: android.media.browse.MediaBrowser? = null
+        val callback = object : android.media.browse.MediaBrowser.ConnectionCallback() {
+            override fun onConnected() {
+                val token = runCatching { browser?.sessionToken }.getOrNull()
+                entry.mediaBrowserConnect = if (token != null) "connected(token)" else "connected(noToken)"
+                Log.w(TAG, "mediaBrowser probe: CONNECTED to $component token=${token != null}")
+                runCatching { browser?.disconnect() }
+            }
+
+            override fun onConnectionFailed() {
+                entry.mediaBrowserConnect = "refused"
+                Log.w(TAG, "mediaBrowser probe: $component refused the connection")
+                runCatching { browser?.disconnect() }
+            }
+
+            override fun onConnectionSuspended() {
+                entry.mediaBrowserConnect = "suspended"
+                runCatching { browser?.disconnect() }
+            }
+        }
+        browser = runCatching {
+            android.media.browse.MediaBrowser(appCtx, component, callback, null)
+        }.getOrNull()
+        if (browser == null) {
+            entry.mediaBrowserConnect = "ctorFailed"
+            return
+        }
+        // Overwritten by whichever callback lands; "connecting" surviving into the export
+        // means neither ever did, which is itself the answer.
+        entry.mediaBrowserConnect = "connecting"
+        runCatching { browser.connect() }.onFailure {
+            entry.mediaBrowserConnect = "connectThrew:${it.javaClass.simpleName}"
+            Log.w(TAG, "mediaBrowser probe: connect() threw", it)
+        }
+    }
+
     private const val YOUTUBE_MUSIC_PKG = "com.google.android.apps.youtube.music"
 
     private fun buildYoutubeIntent(
@@ -743,6 +808,10 @@ object MediaOrchestrator {
                         nowMs = SystemClock.uptimeMillis(),
                         refireAt = refireNoSessionAt,
                         haveLinkTarget = videoId != null || query != null,
+                        // Live, not the fire-time stamp: if the rider unlocked mid-window the
+                        // escalation becomes worth trying again.
+                        behindSecureKeyguard = isScreenLocked(appCtx) == true &&
+                            entry.keyguardSecure == true,
                     )
                 ) {
                     refired = true
@@ -932,18 +1001,29 @@ object MediaOrchestrator {
         //                is true when the rider hears the line — and never tell an unlocked rider
         //                to unlock.
         //
-        // v1.3.36 — "ปลดล็อคก่อน" is only true advice when the keyguard actually stopped us.
-        // Field log 1786104958601 (entries 1786100870242 / 1786100948949) has locked opens
-        // where fsiTrampolineRan=true AND fsiTrampolineLaunchOk=true — the full-screen intent
-        // was honored and YouTube was launched over the lock screen — yet the rider still
-        // heard "เปิดไม่ได้ตอนจอล็อค ลองปลดล็อคก่อน", which he logged as a bug. Unlocking would
-        // not have helped: the launch fired, the session was just slow to appear. Keep the
-        // unlock advice for the case it describes (no FSI path taken) and otherwise use the
-        // honest "didn't start, say it again" line.
+        // v1.3.36 — "เปิดไม่ได้ตอนจอล็อค" is only true when the keyguard stopped the launch
+        // itself. Field log 1786104958601 has locked opens with fsiTrampolineRan=true AND
+        // fsiTrampolineLaunchOk=true where the rider heard it anyway and logged it as a bug:
+        // the intent HAD fired, so "couldn't open" was false.
+        //
+        // v1.4.7 — but the conclusion drawn from that ("so the session was merely slow, and
+        // unlocking would not have helped") was an inference, and field log 1789649814596
+        // overturned it with an observation: three noSession blocks with the FSI honored, and
+        // the rider unlocking made YouTube play by itself. Both facts are true at once —
+        // the launch fired AND the keyguard is what stops playback — so they get two separate
+        // lines. See [blockedLineFor].
         val fsiHonored = entry.fsiTrampolineRan == true && entry.fsiTrampolineLaunchOk == true
-        val line = when (blockedLineFor(reason, isScreenLocked(appCtx) == true, fsiHonored)) {
+        // v1.4.7 — what is true NOW, at the moment the line is spoken, not at fire time.
+        val lockedNow = isScreenLocked(appCtx) == true
+        val secure = entry.keyguardSecure == true
+        entry.mediaBlockedKeyguard = "locked=$lockedNow,secure=$secure"
+        // v1.4.7 — the one route left to starting playback without YouTube's Activity being
+        // resumed. Probe only; see [DebugEntry.mediaBrowserConnect].
+        if (reason == "noSession") probeMediaBrowserConnect(appCtx, targetPkg, entry)
+        val line = when (blockedLineFor(reason, lockedNow, fsiHonored, secure)) {
             BlockedLine.SwitchNotLanded -> ErrorSpeech.SWITCH_NOT_LANDED
             BlockedLine.LockedNoFsi -> ErrorSpeech.LAUNCH_BLOCKED_LOCKED
+            BlockedLine.WaitingForUnlock -> ErrorSpeech.MEDIA_WAITING_FOR_UNLOCK
             BlockedLine.NoSession -> ErrorSpeech.LAUNCH_FAILED_NO_SESSION
             BlockedLine.SessionLost -> ErrorSpeech.MEDIA_STOPPED_AFTER_OPEN
         }
@@ -1029,6 +1109,18 @@ object MediaOrchestrator {
      *   restarting it would only hit the same keyguard again.
      * @param haveLinkTarget false when we have neither a video id nor a query, i.e. nothing
      *   to re-fire.
+     * @param behindSecureKeyguard v1.4.7 — **disproven here, so we stop paying for it.** In
+     *   field log 1789649814596 this escalation fired for the first time and failed all three
+     *   times it ran: `refireNoSession(clearTask)` → a second honored FSI launch → still
+     *   `launchBlocked(noSession)`, every one with `keyguardSecure=true` and
+     *   `screenInteractive=false`. The rider then reported the decisive part: **unlocking the
+     *   screen made YouTube start playing on its own.** So the video was loaded and waiting the
+     *   whole time — YouTube simply does not start its player, or register a MediaSession,
+     *   while its Activity is held behind a secure keyguard, and re-delivering the link cannot
+     *   change that. Re-firing there only buys a second wasted trampoline and
+     *   POLL_WINDOW_COLD_MS more silence before the rider is told anything.
+     *
+     *   Kept for the unlocked / non-secure case, where it has never been tried.
      */
     internal fun shouldRefireNoSession(
         alreadyRefired: Boolean,
@@ -1036,17 +1128,24 @@ object MediaOrchestrator {
         nowMs: Long,
         refireAt: Long,
         haveLinkTarget: Boolean,
-    ): Boolean = !alreadyRefired && !sawSession && haveLinkTarget && nowMs >= refireAt
+        behindSecureKeyguard: Boolean,
+    ): Boolean = !alreadyRefired && !sawSession && haveLinkTarget && !behindSecureKeyguard &&
+        nowMs >= refireAt
 
     /** Which honest line a blocked launch should speak. Named so a JVM test can lock it. */
-    internal enum class BlockedLine { SwitchNotLanded, LockedNoFsi, NoSession, SessionLost }
+    internal enum class BlockedLine { SwitchNotLanded, LockedNoFsi, WaitingForUnlock, NoSession, SessionLost }
 
     /**
      * Pure decision behind [declareLaunchBlocked]'s TTS. The rule that matters:
-     * **never tell the rider to unlock when the full-screen-intent path was honored** —
-     * unlocking would not have changed anything, and he can hear that it is wrong.
+     * **the line must match what actually happened**, because the rider can check every one
+     * of these against what he hears and sees.
      */
-    internal fun blockedLineFor(reason: String, locked: Boolean, fsiHonored: Boolean): BlockedLine =
+    internal fun blockedLineFor(
+        reason: String,
+        locked: Boolean,
+        fsiHonored: Boolean,
+        keyguardSecure: Boolean = false,
+    ): BlockedLine =
         when {
             // v1.3.41 — "wrongVideo" is the same rider-facing situation as "stillPrior":
             // something IS audible, it just isn't what was asked for. "Can't open" would
@@ -1054,7 +1153,27 @@ object MediaOrchestrator {
             reason == "stillPrior" || reason == "wrongVideo" -> BlockedLine.SwitchNotLanded
             // v1.4.2 — it opened and then stopped: say that, not "couldn't open".
             reason == "sessionLost" -> BlockedLine.SessionLost
+            // v1.4.7 — the keyguard IS the obstacle after all, and v1.3.36 read it backwards.
+            // That version inferred from `fsiTrampolineLaunchOk=true` that unlocking would not
+            // have helped and the session was merely slow. Field log 1789649814596 replaced
+            // that inference with an observation: three blocks with the FSI honored, and the
+            // rider unlocking made YouTube play by itself. "ลองสั่งใหม่อีกครั้ง" is advice that
+            // cannot work — saying it again reproduces the same block, three for three — while
+            // "ปลดล็อคก่อน" is the thing he had already found does work.
+            //
+            // Scoped to exactly that shape: the target never registered a session AND the
+            // screen is still locked AND the keyguard is secure (a swipe keyguard the
+            // trampoline can dismiss is not this case). `stillPrior` keeps SwitchNotLanded and
+            // `sessionLost` keeps its own line, so v1.3.36's real complaint — being told to
+            // unlock while audio was audibly playing — stays fixed.
+            // Genuinely could not launch: no FSI path was taken, so the keyguard stopped
+            // the intent itself. "เปิดไม่ได้ตอนจอล็อค" is literally true here.
             locked && !fsiHonored -> BlockedLine.LockedNoFsi
+            // v1.4.7 — the launch DID fire and YouTube IS sitting there with the video
+            // loaded; it just will not start playing behind a secure keyguard. Saying
+            // "เปิดไม่ได้" would be false — the rider unlocks and finds it open. Its own line
+            // says the true thing: it's ready, unlock and it plays.
+            locked && keyguardSecure -> BlockedLine.WaitingForUnlock
             else -> BlockedLine.NoSession
         }
 
