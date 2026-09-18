@@ -27,21 +27,52 @@ import org.junit.Test
  */
 class WarmSwitchRestartTest {
 
-    @Test fun warmSwitchRestartsTheTask() = assertTrue(
-        "YouTube is already playing something — a plain delivery is a proven no-op",
-        MediaOrchestrator.firstFireNeedsRestart(priorTitle = "GTA6 โดนแฮ็คมาโชว์แบบแปลกๆ"),
+    private val prior = "GTA6 โดนแฮ็คมาโชว์แบบแปลกๆ"
+
+    @Test fun playingWarmSwitchRestartsTheTask() = assertTrue(
+        "YouTube is playing — a plain delivery is a proven no-op, CLEAR_TASK landed 2/2 in 1789697284287",
+        MediaOrchestrator.firstFireNeedsRestart(prior, priorPlaying = true, behindSecureKeyguard = true),
     )
 
     @Test fun coldLaunchKeepsThePlainIntent() = assertFalse(
         "nothing to clear, and CLEAR_TASK on a slow cold start would tear down a working launch",
-        MediaOrchestrator.firstFireNeedsRestart(priorTitle = null),
+        MediaOrchestrator.firstFireNeedsRestart(null, priorPlaying = false, behindSecureKeyguard = true),
     )
 
+    // ─── v1.4.8: the paused case ─────────────────────────────────────────────
+
     /**
-     * The cold path is the one that reached `sessionSeen(none);confirmed` on its FIRST
-     * delivery in the same log (entry 1789608398866) — it must not be disturbed.
+     * Field log 1789697284287 — the rider paused YouTube from the helmet, then asked for a
+     * different clip. Our CLEAR_TASK at that paused, keyguard-held task could not land AND
+     * turned the session from paused to stopped, so his play button went dead too. 4 for 4.
      */
-    @Test fun theColdPathThatWorksIsLeftAlone() = assertFalse(
-        MediaOrchestrator.firstFireNeedsRestart(priorTitle = null),
+    @Test fun pausedBehindSecureKeyguardNeverRestarts() = assertFalse(
+        "a restart cannot land here and destroys the session he could still resume",
+        MediaOrchestrator.firstFireNeedsRestart(prior, priorPlaying = false, behindSecureKeyguard = true),
     )
+
+    @Test fun pausedButUnlockedStillRestarts() = assertTrue(
+        "unlocked, the restarted task can resume, so the restart is the fast path again",
+        MediaOrchestrator.firstFireNeedsRestart(prior, priorPlaying = false, behindSecureKeyguard = false),
+    )
+
+    // ─── clearTaskCanLand, all four cells ────────────────────────────────────
+
+    @Test fun clearTaskCanLandTruthTable() {
+        assertTrue(MediaOrchestrator.clearTaskCanLand(targetPlaying = true, behindSecureKeyguard = true))
+        assertTrue(MediaOrchestrator.clearTaskCanLand(targetPlaying = true, behindSecureKeyguard = false))
+        assertTrue(MediaOrchestrator.clearTaskCanLand(targetPlaying = false, behindSecureKeyguard = false))
+        assertFalse(
+            "the one cell that is proven fatal",
+            MediaOrchestrator.clearTaskCanLand(targetPlaying = false, behindSecureKeyguard = true),
+        )
+    }
+
+    @Test fun bufferingCountsAsAlive() {
+        assertTrue(MediaOrchestrator.isActivelyPlaying(android.media.session.PlaybackState.STATE_PLAYING))
+        assertTrue(MediaOrchestrator.isActivelyPlaying(android.media.session.PlaybackState.STATE_BUFFERING))
+        assertFalse(MediaOrchestrator.isActivelyPlaying(android.media.session.PlaybackState.STATE_PAUSED))
+        assertFalse(MediaOrchestrator.isActivelyPlaying(android.media.session.PlaybackState.STATE_STOPPED))
+        assertFalse(MediaOrchestrator.isActivelyPlaying(null))
+    }
 }

@@ -298,6 +298,19 @@ object ErrorSpeech {
         "เปิดยูทูบไว้ให้แล้ว แต่ยังเล่นไม่ได้ตอนจอล็อคครับ ปลดล็อคจอแล้วจะเล่นเลยนะครับ",
     )
 
+    /**
+     * v1.4.8 — the rider paused YouTube from the helmet, then asked for a different clip
+     * while the screen was locked. Behind a secure keyguard a paused YouTube cannot take the
+     * switch (the restarted task never resumes — v1.4.7), so [SWITCH_NOT_LANDED]'s
+     * "ลองสั่งเปลี่ยนอีกครั้ง" is advice that provably cannot work: four for four in field
+     * log 1789697284287. What does work: the helmet's play button resumes the clip he paused
+     * (we no longer destroy that session), or an unlock lets the switch land.
+     */
+    val SWITCH_NEEDS_UNLOCK: String get() = pick(
+        "คลิปที่หยุดไว้เปลี่ยนตอนจอล็อคไม่ได้ค่ะ กดเล่นต่อได้เลย หรือปลดล็อคจอแล้วสั่งใหม่นะคะ",
+        "คลิปที่หยุดไว้เปลี่ยนตอนจอล็อคไม่ได้ครับ กดเล่นต่อได้เลย หรือปลดล็อคจอแล้วสั่งใหม่นะครับ",
+    )
+
     fun allSystemLines(): List<String> = listOf(
         THINKING, ONE_MORE_MOMENT,
         OFFLINE_LIMITED, TIMEOUT_WITH_FALLBACK, TIMEOUT_NO_FALLBACK,
@@ -320,7 +333,7 @@ object ErrorSpeech {
         LAUNCH_BLOCKED_LOCKED, LAUNCH_FAILED_NO_SESSION, SWITCH_NOT_LANDED,
         MEDIA_STOPPED_AFTER_OPEN, SEEK_AMOUNT_UNKNOWN,
         SPOTIFY_OPENED_NOT_PLAYING, SPOTIFY_LAUNCH_FAILED,
-        MEDIA_WAITING_FOR_UNLOCK,
+        MEDIA_WAITING_FOR_UNLOCK, SWITCH_NEEDS_UNLOCK,
     )
 
     private fun pick(feminine: String, masculine: String): String =

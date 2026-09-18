@@ -148,4 +148,27 @@ class LaunchBlockedContractTest {
         // A genuine failed switch must still be reported quickly — the rider is riding.
         assertTrue(MediaOrchestrator.pollWindowMsFor(priorTitle = "anything") <= 9_000L)
     }
+
+    // ─── v1.4.8: a paused switch behind a secure keyguard ────────────────────
+
+    @Test fun pausedSwitchBehindSecureKeyguardHasItsOwnLine() {
+        // Field log 1789697284287 — paused from the helmet, then four switch attempts, all
+        // stillPrior. "ลองสั่งเปลี่ยนอีกครั้ง" cannot work; play-to-resume or unlock can.
+        assertEquals(
+            MediaOrchestrator.BlockedLine.SwitchNeedsUnlock,
+            MediaOrchestrator.blockedLineFor(
+                "stillPriorPaused", locked = true, fsiHonored = true, keyguardSecure = true,
+            ),
+        )
+    }
+
+    @Test fun playingStillPriorKeepsSwitchNotLanded() {
+        // Something IS audible: the old clip. Unchanged.
+        assertEquals(
+            MediaOrchestrator.BlockedLine.SwitchNotLanded,
+            MediaOrchestrator.blockedLineFor(
+                "stillPrior", locked = true, fsiHonored = true, keyguardSecure = true,
+            ),
+        )
+    }
 }

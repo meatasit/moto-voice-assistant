@@ -239,9 +239,15 @@ object MediaOrchestrator {
         // session still shows this same title after the poll window, the switch never
         // happened (Background-Activity-Launch block while locked, per field log
         // 1784074856214) and we must NOT resume it — that masked the failure as success.
-        val priorTitle = sessionTitle(MediaSessions.controllerFor(context, MediaSessions.YOUTUBE_PKG))
+        val priorCtrl = MediaSessions.controllerFor(context, MediaSessions.YOUTUBE_PKG)
+        val priorTitle = sessionTitle(priorCtrl)
+        // v1.4.8 — and whether it was actually PLAYING. A paused session behind a secure
+        // keyguard is the one shape a CLEAR_TASK must never be fired at; see
+        // [clearTaskCanLand].
+        val priorPlaying = isActivelyPlaying(priorCtrl?.playbackState?.state)
         // v1.4.1 — diagnostics for the cold-launch failures (see DebugEntry.mediaPriorTitle).
         entry.mediaPriorTitle = priorTitle
+        entry.mediaPriorState = priorCtrl?.let { MediaSessions.stateName(it.playbackState?.state) }
         entry.netTransport = runCatching { NetworkState.transportName(context) }.getOrNull()
         // v1.4.2 — see DebugEntry.keyguardSecure / mediaBrowserAvail.
         entry.keyguardSecure = runCatching {
@@ -283,8 +289,10 @@ object MediaOrchestrator {
         //
         // The stillPrior escalation stays armed: `refired` is untouched here, so a switch
         // that somehow still misses gets its one re-fire exactly as before.
+        val behindSecureKeyguard = entry.screenLocked == true && entry.keyguardSecure == true
+        val firstFireRestarted = firstFireNeedsRestart(priorTitle, priorPlaying, behindSecureKeyguard)
         val launched = fireYoutubeIntent(
-            context, videoId, query, entry, forceRestart = firstFireNeedsRestart(priorTitle),
+            context, videoId, query, entry, forceRestart = firstFireRestarted,
         )
         if (!launched) {
             // v1.4.4 — never silent (Rule #3). Stamp the entry like a blocked launch so the
@@ -301,7 +309,7 @@ object MediaOrchestrator {
 
         scheduleTargetedNudge(
             context, MediaSessions.YOUTUBE_PKG, expectedTitle, priorTitle, entry,
-            videoId = videoId, query = query,
+            videoId = videoId, query = query, firstFireRestarted = firstFireRestarted,
         )
         Result.Success
     }
@@ -355,7 +363,7 @@ object MediaOrchestrator {
                     // session, so there's no old video to guard against.
                     scheduleTargetedNudge(
                         context, target, expectedTitle, priorTitle = null, entry = entry,
-                        videoId = lastVideo, query = null,
+                        videoId = lastVideo, query = null, firstFireRestarted = false,
                     )
                     Result.Success
                 } else {
@@ -730,6 +738,8 @@ object MediaOrchestrator {
         context: Context, targetPkg: String,
         expectedTitle: String?, priorTitle: String?, entry: DebugEntry,
         videoId: String?, query: String?,
+        /** v1.4.8 — whether the first delivery already carried CLEAR_TASK (see [firstFireNeedsRestart]). */
+        firstFireRestarted: Boolean,
     ) {
         val appCtx = context.applicationContext
         // v1.4.4 — uptimeMillis, the clock Handler.postDelayed and NudgeDecider run on. The
@@ -866,6 +876,36 @@ object MediaOrchestrator {
                 // down and restarted at the requested video instead of merely being brought
                 // forward. Logged under a distinct op name so the next field log says which
                 // kind of re-fire ran.
+                // v1.4.8 — but NOT at a target that is paused or stopped behind a secure
+                // keyguard. Field log 1789697284287, entries 1789695568166 → 1789695850981: the
+                // rider paused YouTube from the helmet, then asked for a different clip four
+                // times. Every attempt: `sessionSeen(paused|stopped)` → CLEAR_TASK →
+                // `launchBlocked(stillPrior)`, and the state went paused → stopped after the
+                // first one — the restart tore down a task that, behind the keyguard, could
+                // never come back up (v1.4.7's finding), so his Play/Pause button went dead
+                // too. A CLEAR_TASK here cannot land AND costs him the session he still had.
+                // Both warm switches in the same log with the target PLAYING landed on the
+                // first delivery, so this is precisely the paused case and nothing wider.
+                //
+                // If the first delivery did not restart either (the gate said no at fire
+                // time), a plain intent to a paused task is a known no-op and there is
+                // nothing left to wait for: give the honest answer at refireAt, ~6 s earlier
+                // than the window end, rather than sit silent hoping.
+                val targetPlaying = isActivelyPlaying(state)
+                val behindSecure = isScreenLocked(appCtx) == true && entry.keyguardSecure == true
+                if (!clearTaskCanLand(targetPlaying, behindSecure)) {
+                    if (!firstFireRestarted && SystemClock.uptimeMillis() >= refireAt) {
+                        logOp(entry, "nudge→switchNeedsUnlock(${MediaSessions.stateName(state)})", targetPkg)
+                        declareLaunchBlocked(appCtx, targetPkg, entry, reason = "stillPriorPaused")
+                        return@Runnable
+                    }
+                    if (windowExhausted) {
+                        declareLaunchBlocked(appCtx, targetPkg, entry, reason = "stillPriorPaused")
+                        return@Runnable
+                    }
+                    handler.postDelayed(poll, POLL_INTERVAL_MS)
+                    return@Runnable
+                }
                 if (!refired && SystemClock.uptimeMillis() >= refireAt &&
                     (videoId != null || query != null)
                 ) {
@@ -1019,9 +1059,15 @@ object MediaOrchestrator {
         entry.mediaBlockedKeyguard = "locked=$lockedNow,secure=$secure"
         // v1.4.7 — the one route left to starting playback without YouTube's Activity being
         // resumed. Probe only; see [DebugEntry.mediaBrowserConnect].
-        if (reason == "noSession") probeMediaBrowserConnect(appCtx, targetPkg, entry)
+        // v1.4.8 — and on the stillPrior family: it is the same question (can we reach the
+        // session without the Activity), and field log 1789697284287 had four stillPrior
+        // blocks and zero noSession ones, so the probe never ran.
+        if (reason == "noSession" || reason.startsWith("stillPrior")) {
+            probeMediaBrowserConnect(appCtx, targetPkg, entry)
+        }
         val line = when (blockedLineFor(reason, lockedNow, fsiHonored, secure)) {
             BlockedLine.SwitchNotLanded -> ErrorSpeech.SWITCH_NOT_LANDED
+            BlockedLine.SwitchNeedsUnlock -> ErrorSpeech.SWITCH_NEEDS_UNLOCK
             BlockedLine.LockedNoFsi -> ErrorSpeech.LAUNCH_BLOCKED_LOCKED
             BlockedLine.WaitingForUnlock -> ErrorSpeech.MEDIA_WAITING_FOR_UNLOCK
             BlockedLine.NoSession -> ErrorSpeech.LAUNCH_FAILED_NO_SESSION
@@ -1087,17 +1133,41 @@ object MediaOrchestrator {
     /**
      * v1.4.6 — should the FIRST deep-link delivery already carry CLEAR_TASK?
      *
-     * Yes exactly when YouTube is already playing something ([priorTitle] non-null), because
-     * that is the case in which a plain NEW_TASK intent is delivered to a task that is
-     * already running and Android simply brings it forward without handing over the new
-     * intent. A cold target has no task to clear, so it keeps the plain intent — tearing
+     * Yes when YouTube already has a session ([priorTitle] non-null) — the case in which a
+     * plain NEW_TASK intent is delivered to a task that is already running and Android simply
+     * brings it forward without handing over the new intent — AND the restart can actually
+     * land ([clearTaskCanLand], v1.4.8: not at a paused target behind a secure keyguard). A cold target has no task to clear, so it keeps the plain intent — tearing
      * down a launch that is merely slow is the mistake [REFIRE_NO_SESSION_MS] is careful to
      * avoid, and it should not be made here either.
      *
      * Pure so a JVM test can lock it; whether it saves the rider the wait is the Acceptance
      * Suite's to confirm.
      */
-    internal fun firstFireNeedsRestart(priorTitle: String?): Boolean = priorTitle != null
+    internal fun firstFireNeedsRestart(
+        priorTitle: String?,
+        priorPlaying: Boolean,
+        behindSecureKeyguard: Boolean,
+    ): Boolean = priorTitle != null && clearTaskCanLand(priorPlaying, behindSecureKeyguard)
+
+    /**
+     * v1.4.8 — can a CLEAR_TASK restart of the target actually land right now?
+     *
+     * Yes if the target is actively playing (its player is alive and handles the new intent —
+     * field log 1789697284287, both warm switches, first delivery), and yes if the screen is
+     * not behind a secure keyguard (the restarted activity can resume). **No** when it is
+     * paused/stopped AND behind a secure keyguard: the restarted task can never resume
+     * (v1.4.7's finding), so the switch cannot land, and the restart destroys the paused
+     * session the rider could still have resumed from the helmet — in that log the state went
+     * paused → stopped after our first CLEAR_TASK and his Play/Pause button went silent.
+     *
+     * Pure so a JVM test can lock all four cells.
+     */
+    internal fun clearTaskCanLand(targetPlaying: Boolean, behindSecureKeyguard: Boolean): Boolean =
+        targetPlaying || !behindSecureKeyguard
+
+    /** PLAYING or BUFFERING — the states in which a target's player is demonstrably alive. */
+    internal fun isActivelyPlaying(state: Int?): Boolean =
+        state == PlaybackState.STATE_PLAYING || state == PlaybackState.STATE_BUFFERING
 
     /**
      * v1.4.5 — should this poll tick escalate a launch that has produced no session at all?
@@ -1133,7 +1203,7 @@ object MediaOrchestrator {
         nowMs >= refireAt
 
     /** Which honest line a blocked launch should speak. Named so a JVM test can lock it. */
-    internal enum class BlockedLine { SwitchNotLanded, LockedNoFsi, WaitingForUnlock, NoSession, SessionLost }
+    internal enum class BlockedLine { SwitchNotLanded, SwitchNeedsUnlock, LockedNoFsi, WaitingForUnlock, NoSession, SessionLost }
 
     /**
      * Pure decision behind [declareLaunchBlocked]'s TTS. The rule that matters:
@@ -1150,6 +1220,11 @@ object MediaOrchestrator {
             // v1.3.41 — "wrongVideo" is the same rider-facing situation as "stillPrior":
             // something IS audible, it just isn't what was asked for. "Can't open" would
             // contradict what he can hear.
+            // v1.4.8 — the target is paused/stopped on the old clip behind a secure keyguard.
+            // "ลองสั่งเปลี่ยนอีกครั้ง" cannot work (four for four in field log 1789697284287);
+            // what works is the helmet's play button (the session is still there — we no
+            // longer destroy it) or an unlock.
+            reason == "stillPriorPaused" -> BlockedLine.SwitchNeedsUnlock
             reason == "stillPrior" || reason == "wrongVideo" -> BlockedLine.SwitchNotLanded
             // v1.4.2 — it opened and then stopped: say that, not "couldn't open".
             reason == "sessionLost" -> BlockedLine.SessionLost
