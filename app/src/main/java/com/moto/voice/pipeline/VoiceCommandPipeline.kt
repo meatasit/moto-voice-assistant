@@ -1434,6 +1434,24 @@ class VoiceCommandPipeline(
         minListenMs: Long = DEFAULT_MIN_LISTEN_MS,
         errorLabel: String = STT_ERROR_LABEL_MAIN,
     ): SttOutcome {
+        // v1.4.8 — retire the previous recognizer BEFORE the settle, not after it.
+        //
+        // Field log 1789697284287 finally measured the follow-up window that had failed
+        // 11 for 11 across three logs: `followup_stt 11@8ms`. Eight milliseconds — the
+        // recognizer never opened the mic at all. The difference between the main listen
+        // (works) and the follow-up (never has) is in this file: a new interaction's main
+        // listen finds `recognizer == null` because cleanup() retired the last one minutes
+        // ago, so listenOnceRaw binds a fresh service cleanly. The follow-up finds the main
+        // listen's recognizer still alive and bound, and listenOnceRaw did
+        // `destroy()` → `createSpeechRecognizer()` → `startListening()` in one synchronous
+        // block — the new bind raced the old unbind and the service dropped it on the spot.
+        // The 350 ms below was meant as that gap, but it ran BEFORE the destroy, where it
+        // gapped nothing. The v1.3.8 A2 "degrading recognizer" branch below already does
+        // destroy → wait → create in the right order; this makes every listen do it.
+        recognizer?.let {
+            runCatching { it.destroy() }
+            recognizer = null
+        }
         // Settle delay so TTS audio finishes draining and the recognizer isn't still
         // holding the mic from a previous session. See bug report §1.
         delay(350)

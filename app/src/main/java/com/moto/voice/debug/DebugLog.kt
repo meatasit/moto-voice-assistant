@@ -254,6 +254,13 @@ data class DebugEntry(
      * explicit instead of inferred from which ops appear.
      */
     var mediaPriorTitle: String? = null,
+    /**
+     * v1.4.8 — the target's playback state at fire time, next to [mediaPriorTitle]. Field log
+     * 1789697284287: the four blocked switches all began from a PAUSED/STOPPED YouTube (the
+     * rider had pressed the helmet's play/pause), the two that landed began from PLAYING —
+     * that state is the whole difference, and until now it was only visible mid-window.
+     */
+    var mediaPriorState: String? = null,
 
     /**
      * v1.4.1 — active network transport at launch ("wifi" / "cellular" / "other" / "none").
@@ -371,6 +378,7 @@ data class DebugEntry(
         if (screenLocked == true) append("  🔒locked")
         if (mediaExpectedTitle != null) append("  want:\"${mediaExpectedTitle}\"")
         if (mediaActualTitle != null) append("  got:\"${mediaActualTitle}\"")
+        if (mediaPriorState != null) append("  priorState:${mediaPriorState}")
         if (mediaForeignPaused != null) append("  fgPaused:${mediaForeignPaused}")
         if (fsiTrampolineRan != null) append("  fsiRan:${fsiTrampolineRan}")
         if (fsiTrampolineLaunchOk != null) append("  fsiLaunch:${fsiTrampolineLaunchOk}")
