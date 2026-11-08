@@ -1,31 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  v1.4.0 — "night ride" palette. One dark theme on purpose: the app is used at a bike, at
-  night, through a helmet visor. Amber is the accent because it is what every motorcycle
-  dashboard already uses for "look here".
+  v1.4.9 — Material 3 ("Google style") colour scheme.
+
+  On Android 12+ the whole palette comes from the wallpaper (DynamicColors, applied in
+  MotoVoiceApplication) and nothing in this file is seen. Below 12 these values are the
+  fallback: a Material 3 tonal scheme generated from the amber seed (#FFB000) the app has
+  used since v1.4.0, so the brand survives on older phones. Light values live here, dark
+  values in values-night/colors.xml. Layouts reference theme attributes (?attr/colorSurface…)
+  rather than these names, so dynamic colour can replace them wholesale.
 -->
 <resources>
-    <!-- Surfaces (darkest → lightest) -->
-    <color name="bg">#FF0B0F14</color>
-    <color name="surface">#FF151B23</color>
-    <color name="surface_2">#FF1C242E</color>
-    <color name="outline">#FF2A3441</color>
+    <color name="md_theme_primary">#FF785A00</color>
+    <color name="md_theme_onPrimary">#FFFFFFFF</color>
+    <color name="md_theme_primaryContainer">#FFFFDF9E</color>
+    <color name="md_theme_onPrimaryContainer">#FF261A00</color>
+    <color name="md_theme_secondary">#FF6B5D3F</color>
+    <color name="md_theme_onSecondary">#FFFFFFFF</color>
+    <color name="md_theme_secondaryContainer">#FFF5E0BB</color>
+    <color name="md_theme_onSecondaryContainer">#FF241A04</color>
+    <color name="md_theme_tertiary">#FF4A6547</color>
+    <color name="md_theme_onTertiary">#FFFFFFFF</color>
+    <color name="md_theme_tertiaryContainer">#FFCCEBC5</color>
+    <color name="md_theme_onTertiaryContainer">#FF072109</color>
+    <color name="md_theme_error">#FFBA1A1A</color>
+    <color name="md_theme_onError">#FFFFFFFF</color>
+    <color name="md_theme_errorContainer">#FFFFDAD6</color>
+    <color name="md_theme_onErrorContainer">#FF410002</color>
+    <color name="md_theme_surface">#FFFFF8F2</color>
+    <color name="md_theme_onSurface">#FF1E1B16</color>
+    <color name="md_theme_surfaceVariant">#FFECE1CF</color>
+    <color name="md_theme_onSurfaceVariant">#FF4D4639</color>
+    <color name="md_theme_outline">#FF7E7667</color>
+    <color name="md_theme_outlineVariant">#FFD0C5B4</color>
+    <color name="md_theme_surfaceContainerLowest">#FFFFFFFF</color>
+    <color name="md_theme_surfaceContainerLow">#FFF9F2E6</color>
+    <color name="md_theme_surfaceContainer">#FFF3ECE0</color>
+    <color name="md_theme_surfaceContainerHigh">#FFEDE6DA</color>
+    <color name="md_theme_surfaceContainerHighest">#FFE8E1D5</color>
+    <color name="md_theme_inverseSurface">#FF34302A</color>
+    <color name="md_theme_inverseOnSurface">#FFF8EFE7</color>
+    <color name="md_theme_inversePrimary">#FFF0C048</color>
 
-    <!-- Accent -->
-    <color name="accent">#FFFFB000</color>
-    <color name="on_accent">#FF1A1200</color>
-    <color name="accent_soft">#33FFB000</color>
-    <color name="info">#FF4CC9F0</color>
-
-    <!-- Text -->
-    <color name="text_primary">#FFF2F5F8</color>
-    <color name="text_secondary">#FF9AA7B4</color>
-    <color name="text_tertiary">#FF6B7784</color>
-
-    <!-- Status -->
-    <color name="ok">#FF3DDC84</color>
-    <color name="warn">#FFFFC857</color>
-    <color name="bad">#FFFF5C5C</color>
+    <!-- Semantic status colours (not part of the dynamic scheme — must stay recognisable). -->
+    <color name="ok">#FF1B873F</color>
+    <color name="warn">#FF9A5B00</color>
+    <color name="bad">#FFBA1A1A</color>
 
     <!-- Legacy names still referenced by a few widgets -->
     <color name="black">#FF000000</color>

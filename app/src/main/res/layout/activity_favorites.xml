@@ -4,7 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="@color/bg">
+    android:background="?attr/colorSurface">
 
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
@@ -29,7 +29,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="16dp"
-                app:cardBackgroundColor="@color/accent_soft"
+                app:cardBackgroundColor="?attr/colorPrimaryContainer"
                 app:strokeWidth="0dp">
 
                 <LinearLayout
@@ -41,12 +41,13 @@
                     <TextView
                         style="@style/Widget.Moto.RowTitle"
                         android:text="โทรหาคนสำคัญด้วยเสียงคำเดียว"
+                        android:textColor="?attr/colorOnPrimaryContainer"
                         android:textStyle="bold" />
 
                     <TextView
                         style="@style/Widget.Moto.RowSub"
                         android:layout_width="match_parent"
-                        android:textColor="@color/text_primary"
+                        android:textColor="?attr/colorOnPrimaryContainer"
                         android:text="เพิ่มได้สูงสุด 5 คน — พูดว่า &quot;โทรหารายการโปรดหนึ่ง&quot; (หรือหมายเลข 1–5) ชื่อในรายการนี้จะถูกจับคู่ได้แม่นกว่าตอนพูด" />
 
                 </LinearLayout>
@@ -64,7 +65,8 @@
                 style="@style/Widget.Moto.Button"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="＋  เพิ่มจากรายชื่อ" />
+                android:text="เพิ่มจากรายชื่อ"
+                app:icon="@drawable/ic_add" />
 
             <TextView
                 android:id="@+id/tvFullWarning"

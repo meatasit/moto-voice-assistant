@@ -189,7 +189,7 @@ CI (`.github/workflows/build.yml`) runs unit tests + assembles a debug APK + cre
 
 - **Language:** Kotlin 1.9.24, AGP 8.4.2
 - **Min SDK:** 26 (Android 8.0) — **Target SDK:** 34 (Android 14)
-- **UI:** View Binding + Material3 theme (dark)
+- **UI:** View Binding + Material 3 (Material You dynamic colour on Android 12+, follows system light/dark; amber-seeded fallback below 12)
 - **Concurrency:** Kotlin Coroutines throughout the pipeline
 - **HTTP:** OkHttp 4.12 with `suspendCancellableCoroutine` wrapper
 - **Media:** androidx.media3 1.3.1 (ExoPlayer + MediaSession)

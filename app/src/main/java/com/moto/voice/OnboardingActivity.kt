@@ -41,6 +41,15 @@ class OnboardingActivity : AppCompatActivity() {
     private lateinit var binding: ActivityOnboardingBinding
     private lateinit var settings: AppSettings
 
+    /**
+     * v1.4.9 — outcome of the last webhook test in this screen. The step used to tick itself
+     * the moment a URL existed (always, since there is a default), so the ✅ never meant
+     * "reachable"; now it reflects an actual round-trip and the result reads inline instead
+     * of in a Toast that is gone before the rider looks up.
+     */
+    private var webhookTestResult: String? = null
+    private var webhookTestOk: Boolean = false
+
     private val requestSinglePermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { render() }
@@ -161,13 +170,18 @@ class OnboardingActivity : AppCompatActivity() {
     }
 
     private fun stepWebhook(): Step {
-        val ready = settings.webhookUrl.isNotBlank()
+        val configured = settings.webhookUrl.isNotBlank()
+        val reason = when {
+            !configured -> "ยังไม่ตั้ง URL — ตั้งได้ที่หน้าตั้งค่า"
+            webhookTestResult != null -> "สมอง AI (n8n): $webhookTestResult"
+            else -> "ตรวจว่าสมอง AI (n8n) เชื่อมได้ปกติ — กดทดสอบ"
+        }
         return Step(
-            title = "4. ทดสอบเชื่อม webhook",
-            reason = "ตรวจว่าสมองของระบบ (n8n) เชื่อมได้ปกติ",
-            done = ready,
-            actionLabel = "ทดสอบ",
-            action = { testWebhook() },
+            title = "4. ทดสอบเชื่อมสมอง AI",
+            reason = reason,
+            done = webhookTestOk,
+            actionLabel = if (configured) (if (webhookTestResult == null) "ทดสอบ" else "ทดสอบอีกครั้ง") else null,
+            action = if (configured) ({ testWebhook() }) else null,
         )
     }
 
@@ -200,16 +214,23 @@ class OnboardingActivity : AppCompatActivity() {
     // ─── Actions ─────────────────────────────────────────────────────────────
 
     private fun testWebhook() {
-        binding.btnFinishOnboarding.isEnabled = false
+        webhookTestResult = "กำลังทดสอบ…"
+        webhookTestOk = false
+        render()
         lifecycleScope.launch {
             val result = WebhookClient(settings.webhookUrl, settings.authToken, settings.timeoutSeconds, settings.llmProvider)
                 .call("ทดสอบระบบ")
-            val msg = when (result) {
-                is WebhookClient.Result.Success -> "✅ เชื่อมได้ (${result.elapsedMs}ms)"
-                is WebhookClient.Result.Failure -> "❌ ${result.error}"
+            when (result) {
+                is WebhookClient.Result.Success -> {
+                    webhookTestOk = true
+                    webhookTestResult = "เชื่อมได้ ตอบใน ${result.elapsedMs} ms"
+                }
+                is WebhookClient.Result.Failure -> {
+                    webhookTestOk = false
+                    webhookTestResult = "ไม่สำเร็จ — ${result.error}"
+                }
             }
-            binding.btnFinishOnboarding.isEnabled = true
-            android.widget.Toast.makeText(this@OnboardingActivity, msg, android.widget.Toast.LENGTH_LONG).show()
+            render()
         }
     }
 

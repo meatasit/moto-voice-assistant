@@ -42,6 +42,13 @@ data class StatusRow(
 
 class SystemStatusChecker(private val context: Context) {
 
+    private companion object {
+        // v1.4.9 — one label per row, used by the Pending placeholder AND the result, so the
+        // row no longer renames itself from "TTS" to "เสียงพูด (TTS)" when the check lands.
+        const val LABEL_WEBHOOK = "สมอง AI (Webhook)"
+        const val LABEL_TTS = "เสียงพูด (TTS)"
+    }
+
     /** Synchronous rows (everything except Webhook + TTS). Ordering matches the UI. */
     fun checkSync(): List<StatusRow> = listOf(
         checkDefaultAssistant(),
@@ -52,8 +59,8 @@ class SystemStatusChecker(private val context: Context) {
         checkMediaCtrl(),
         checkLockScreenLaunch(),
         // Placeholders for async rows so the UI can render them as Pending while the tests run.
-        StatusRow(StatusRow.Kind.Webhook, "Webhook", StatusRow.State.Pending, "กำลังทดสอบ..."),
-        StatusRow(StatusRow.Kind.Tts, "TTS", StatusRow.State.Pending, "กำลังทดสอบ..."),
+        StatusRow(StatusRow.Kind.Webhook, LABEL_WEBHOOK, StatusRow.State.Pending, "กำลังทดสอบ..."),
+        StatusRow(StatusRow.Kind.Tts, LABEL_TTS, StatusRow.State.Pending, "กำลังทดสอบ..."),
     )
 
     /** @return the freshly-tested Webhook row. Latency reported on success. */
@@ -61,7 +68,7 @@ class SystemStatusChecker(private val context: Context) {
         val settings = AppSettings(context)
         if (settings.webhookUrl.isBlank()) {
             return StatusRow(
-                StatusRow.Kind.Webhook, "Webhook", StatusRow.State.Yellow,
+                StatusRow.Kind.Webhook, LABEL_WEBHOOK, StatusRow.State.Yellow,
                 detail = "ยังไม่ตั้ง URL",
                 fixIntent = null,
             )
@@ -70,11 +77,11 @@ class SystemStatusChecker(private val context: Context) {
             .call("ทดสอบระบบ")
         return when (result) {
             is WebhookClient.Result.Success -> StatusRow(
-                StatusRow.Kind.Webhook, "Webhook", StatusRow.State.Green,
-                detail = "${result.elapsedMs}ms",
+                StatusRow.Kind.Webhook, LABEL_WEBHOOK, StatusRow.State.Green,
+                detail = "ตอบใน ${result.elapsedMs} ms",
             )
             is WebhookClient.Result.Failure -> StatusRow(
-                StatusRow.Kind.Webhook, "Webhook", StatusRow.State.Red,
+                StatusRow.Kind.Webhook, LABEL_WEBHOOK, StatusRow.State.Red,
                 detail = "${result.kind} — ${result.error}",
             )
         }
@@ -86,10 +93,10 @@ class SystemStatusChecker(private val context: Context) {
             .queryIntentServices(Intent("android.intent.action.TTS_SERVICE"), 0)
             .isNotEmpty()
         return if (hasAndroidEngine) StatusRow(
-            StatusRow.Kind.Tts, "เสียงพูด (TTS)", StatusRow.State.Green,
+            StatusRow.Kind.Tts, LABEL_TTS, StatusRow.State.Green,
             detail = "พร้อมใช้งาน",
         ) else StatusRow(
-            StatusRow.Kind.Tts, "เสียงพูด (TTS)", StatusRow.State.Red,
+            StatusRow.Kind.Tts, LABEL_TTS, StatusRow.State.Red,
             detail = "ไม่พบ TTS engine",
             fixIntent = runCatching { Intent("com.android.settings.TTS_SETTINGS") }
                 .getOrNull()?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
@@ -108,9 +115,9 @@ class SystemStatusChecker(private val context: Context) {
         val fix = runCatching { Intent(Settings.ACTION_VOICE_INPUT_SETTINGS) }.getOrNull()
             ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return StatusRow(
-            StatusRow.Kind.DefaultAssistant, "Default Assistant",
+            StatusRow.Kind.DefaultAssistant, "ผู้ช่วยหลัก (Default Assistant)",
             if (ok) StatusRow.State.Green else StatusRow.State.Red,
-            detail = if (ok) "ตั้งไว้แล้ว" else "ยังไม่ได้ตั้ง",
+            detail = if (ok) "ตั้งไว้แล้ว" else "ยังไม่ได้ตั้ง — ปุ่มบนหมวกจะไม่เรียกแอป",
             fixIntent = if (ok) null else fix,
         )
     }
@@ -132,7 +139,7 @@ class SystemStatusChecker(private val context: Context) {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         return StatusRow(
-            StatusRow.Kind.Permissions, "สิทธิ์",
+            StatusRow.Kind.Permissions, "สิทธิ์ของแอป",
             if (missing.isEmpty()) StatusRow.State.Green else StatusRow.State.Red,
             detail = if (missing.isEmpty()) "ครบทุกรายการ"
                      else "ขาด: " + missing.joinToString(", ") { it.second },
@@ -148,9 +155,9 @@ class SystemStatusChecker(private val context: Context) {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         return StatusRow(
-            StatusRow.Kind.Battery, "Battery unrestricted",
+            StatusRow.Kind.Battery, "แบตเตอรี่ไม่จำกัด (ทางเลือก)",
             if (ok) StatusRow.State.Green else StatusRow.State.Yellow,
-            detail = if (ok) "ยกเว้นแล้ว" else "อาจโดนฆ่าเมื่อจอปิด",
+            detail = if (ok) "ยกเว้นแล้ว" else "ระบบอาจปิดแอปเมื่อจอดับ — แตะเพื่อยกเว้น",
             fixIntent = if (ok) null else fix,
         )
     }

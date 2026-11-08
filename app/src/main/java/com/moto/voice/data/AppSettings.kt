@@ -260,6 +260,14 @@ class AppSettings(context: Context) {
         set(v) { prefs.edit().putBoolean("onboarding_done", v).apply() }
 
     /**
+     * v1.4.9 — whether the "พูดได้ว่า…" command card on the home screen is expanded.
+     * Per-install UI preference, deliberately not part of the backup schema.
+     */
+    var homeCommandsExpanded: Boolean
+        get() = prefs.getBoolean("home_commands_expanded", true)
+        set(v) { prefs.edit().putBoolean("home_commands_expanded", v).apply() }
+
+    /**
      * Which polite-particle set the assistant uses. Serialized as "feminine" / "masculine"
      * to keep exported backup JSON stable. Default feminine to match v1.x baseline behaviour.
      */
