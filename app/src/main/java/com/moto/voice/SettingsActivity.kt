@@ -15,6 +15,8 @@ import com.moto.voice.data.SettingsBackup
 import com.moto.voice.databinding.ActivitySettingsBinding
 import com.moto.voice.network.WebhookClient
 import com.moto.voice.nlu.ErrorSpeech
+import com.moto.voice.nlu.Persona
+import com.moto.voice.nlu.PersonaHolder
 import com.moto.voice.tts.ThaiTTS
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -85,6 +87,9 @@ class SettingsActivity : AppCompatActivity() {
             if (settings.llmProvider == AppSettings.LLM_LOCAL) R.id.btnLlmLocal else R.id.btnLlmApi
         )
         showLlmProviderHint()
+        binding.togglePersona.check(
+            if (settings.persona == AppSettings.PERSONA_MASCULINE) R.id.btnPersonaMasculine else R.id.btnPersonaFeminine
+        )
     }
 
     private fun showLlmProviderHint() {
@@ -112,6 +117,14 @@ class SettingsActivity : AppCompatActivity() {
             if (!isChecked) return@addOnButtonCheckedListener
             settings.llmProvider = if (checkedId == R.id.btnLlmLocal) AppSettings.LLM_LOCAL else AppSettings.LLM_API
             showLlmProviderHint()
+        }
+
+        binding.togglePersona.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            val masculine = checkedId == R.id.btnPersonaMasculine
+            settings.persona = if (masculine) AppSettings.PERSONA_MASCULINE else AppSettings.PERSONA_FEMININE
+            // Apply process-wide now, so the preview button and the next command use it.
+            PersonaHolder.set(if (masculine) Persona.Masculine else Persona.Feminine)
         }
 
         binding.switchLlm.setOnCheckedChangeListener { _, v -> settings.llmMode = v }

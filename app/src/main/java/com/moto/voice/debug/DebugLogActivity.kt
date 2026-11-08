@@ -8,6 +8,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
+import com.google.android.material.color.MaterialColors
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.moto.voice.databinding.ActivityDebugLogBinding
 
 class DebugLogActivity : AppCompatActivity() {
@@ -22,8 +24,13 @@ class DebugLogActivity : AppCompatActivity() {
         supportActionBar?.apply { title = "Debug Log"; setDisplayHomeAsUpEnabled(true) }
 
         binding.btnClear.setOnClickListener {
-            DebugLog.clear()
-            renderEntries()
+            // v1.4.9 — the log is the only evidence of what went wrong on a ride; confirm.
+            MaterialAlertDialogBuilder(this)
+                .setTitle("ล้าง Debug Log?")
+                .setMessage("ถ้ายังไม่ได้ส่งออก ข้อมูลรอบที่ผ่านมาจะหายไป")
+                .setNegativeButton("ยกเลิก", null)
+                .setPositiveButton("ล้าง") { _, _ -> DebugLog.clear(); renderEntries() }
+                .show()
         }
         binding.btnExport.setOnClickListener { exportLog() }
         binding.chipErrorsOnly.setOnCheckedChangeListener { _, _ -> renderEntries() }
@@ -71,7 +78,7 @@ class DebugLogActivity : AppCompatActivity() {
 
     private fun makeTv(text: String): TextView = TextView(this).apply {
         this.text = text
-        setTextColor(getColor(com.moto.voice.R.color.text_secondary))
+        setTextColor(MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurfaceVariant, 0))
         textSize = 14f
         setPadding(16, 16, 16, 16)
     }

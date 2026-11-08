@@ -1,78 +1,105 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <!--
-      v1.4.0 — a single dark theme (Material 3). Sub-screens carry their own MaterialToolbar,
-      so the theme stays NoActionBar.
+      v1.4.9 — Material 3 "Google style". Follows the system light/dark setting (DayNight)
+      and, on Android 12+, the wallpaper palette (DynamicColors in MotoVoiceApplication).
+      The colours below are only the pre-12 fallback (amber seed). Every widget style reads
+      theme attributes, never a fixed colour, so one definition serves both modes.
+      Sub-screens carry their own MaterialToolbar, so the theme stays NoActionBar.
     -->
-    <style name="Theme.MotoVoice" parent="Theme.Material3.Dark.NoActionBar">
-        <item name="colorPrimary">@color/accent</item>
-        <item name="colorOnPrimary">@color/on_accent</item>
-        <item name="colorPrimaryContainer">@color/accent_soft</item>
-        <item name="colorOnPrimaryContainer">@color/accent</item>
-        <item name="colorSecondary">@color/info</item>
-        <item name="colorOnSecondary">@color/bg</item>
-        <item name="colorSurface">@color/surface</item>
-        <item name="colorOnSurface">@color/text_primary</item>
-        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
-        <item name="colorOutline">@color/outline</item>
-        <item name="colorError">@color/bad</item>
-        <item name="android:windowBackground">@color/bg</item>
-        <item name="android:statusBarColor">@color/bg</item>
-        <item name="android:navigationBarColor">@color/bg</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:textColorPrimary">@color/text_primary</item>
-        <item name="android:textColorSecondary">@color/text_secondary</item>
+    <style name="Base.Theme.MotoVoice" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/md_theme_primary</item>
+        <item name="colorOnPrimary">@color/md_theme_onPrimary</item>
+        <item name="colorPrimaryContainer">@color/md_theme_primaryContainer</item>
+        <item name="colorOnPrimaryContainer">@color/md_theme_onPrimaryContainer</item>
+        <item name="colorSecondary">@color/md_theme_secondary</item>
+        <item name="colorOnSecondary">@color/md_theme_onSecondary</item>
+        <item name="colorSecondaryContainer">@color/md_theme_secondaryContainer</item>
+        <item name="colorOnSecondaryContainer">@color/md_theme_onSecondaryContainer</item>
+        <item name="colorTertiary">@color/md_theme_tertiary</item>
+        <item name="colorOnTertiary">@color/md_theme_onTertiary</item>
+        <item name="colorTertiaryContainer">@color/md_theme_tertiaryContainer</item>
+        <item name="colorOnTertiaryContainer">@color/md_theme_onTertiaryContainer</item>
+        <item name="colorError">@color/md_theme_error</item>
+        <item name="colorOnError">@color/md_theme_onError</item>
+        <item name="colorErrorContainer">@color/md_theme_errorContainer</item>
+        <item name="colorOnErrorContainer">@color/md_theme_onErrorContainer</item>
+        <item name="android:colorBackground">@color/md_theme_surface</item>
+        <item name="colorOnBackground">@color/md_theme_onSurface</item>
+        <item name="colorSurface">@color/md_theme_surface</item>
+        <item name="colorOnSurface">@color/md_theme_onSurface</item>
+        <item name="colorSurfaceVariant">@color/md_theme_surfaceVariant</item>
+        <item name="colorOnSurfaceVariant">@color/md_theme_onSurfaceVariant</item>
+        <item name="colorOutline">@color/md_theme_outline</item>
+        <item name="colorOutlineVariant">@color/md_theme_outlineVariant</item>
+        <item name="colorSurfaceContainerLowest">@color/md_theme_surfaceContainerLowest</item>
+        <item name="colorSurfaceContainerLow">@color/md_theme_surfaceContainerLow</item>
+        <item name="colorSurfaceContainer">@color/md_theme_surfaceContainer</item>
+        <item name="colorSurfaceContainerHigh">@color/md_theme_surfaceContainerHigh</item>
+        <item name="colorSurfaceContainerHighest">@color/md_theme_surfaceContainerHighest</item>
+        <item name="colorSurfaceInverse">@color/md_theme_inverseSurface</item>
+        <item name="colorOnSurfaceInverse">@color/md_theme_inverseOnSurface</item>
+        <item name="colorPrimaryInverse">@color/md_theme_inversePrimary</item>
+
+        <item name="android:windowBackground">?attr/colorSurface</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="materialCardViewStyle">@style/Widget.Moto.Card</item>
         <item name="toolbarStyle">@style/Widget.Moto.Toolbar</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.Material3.MaterialAlertDialog</item>
+    </style>
+
+    <!-- Light: dark icons on the (transparent → surface-coloured) system bars. values-night flips these. -->
+    <style name="Theme.MotoVoice" parent="Base.Theme.MotoVoice">
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">true</item>
     </style>
 
     <!-- ── Building blocks shared by every screen ─────────────────────────── -->
 
-    <style name="Widget.Moto.Toolbar" parent="Widget.Material3.Toolbar">
-        <item name="android:background">@color/bg</item>
-        <item name="titleTextColor">@color/text_primary</item>
-        <item name="navigationIconTint">@color/text_primary</item>
-        <item name="titleTextAppearance">@style/TextAppearance.Moto.Title</item>
+    <style name="Widget.Moto.Toolbar" parent="Widget.Material3.Toolbar.Surface">
+        <item name="titleTextAppearance">?attr/textAppearanceTitleLarge</item>
+        <item name="titleTextColor">?attr/colorOnSurface</item>
+        <item name="navigationIconTint">?attr/colorOnSurface</item>
     </style>
 
-    <style name="TextAppearance.Moto.Title" parent="TextAppearance.Material3.TitleLarge">
-        <item name="android:textSize">20sp</item>
-        <item name="android:textStyle">bold</item>
-    </style>
-
+    <!-- Filled tonal card: the Google Settings / Pixel look — no stroke, surfaceContainer fill. -->
     <style name="Widget.Moto.Card" parent="Widget.Material3.CardView.Filled">
-        <item name="cardBackgroundColor">@color/surface</item>
+        <item name="cardBackgroundColor">?attr/colorSurfaceContainer</item>
         <item name="cardCornerRadius">20dp</item>
         <item name="cardElevation">0dp</item>
-        <item name="strokeWidth">1dp</item>
-        <item name="strokeColor">@color/outline</item>
+        <item name="strokeWidth">0dp</item>
     </style>
 
-    <!-- Section label above a card: "การเชื่อมต่อ", "พฤติกรรม", … -->
+    <!-- Hero: extra-large shape on a brighter container so it reads first. -->
+    <style name="Widget.Moto.Card.Hero">
+        <item name="cardBackgroundColor">?attr/colorSurfaceContainerHigh</item>
+        <item name="cardCornerRadius">28dp</item>
+    </style>
+
+    <!-- Section label above a card — M3 titleSmall in primary, like Google Settings headers. -->
     <style name="Widget.Moto.Section" parent="Widget.AppCompat.TextView">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:textColor">@color/text_secondary</item>
-        <item name="android:textSize">12sp</item>
-        <item name="android:textAllCaps">true</item>
-        <item name="android:letterSpacing">0.12</item>
-        <item name="android:layout_marginStart">4dp</item>
-        <item name="android:layout_marginBottom">10dp</item>
-        <item name="android:layout_marginTop">6dp</item>
+        <item name="android:textAppearance">?attr/textAppearanceTitleSmall</item>
+        <item name="android:textColor">?attr/colorPrimary</item>
+        <item name="android:layout_marginStart">16dp</item>
+        <item name="android:layout_marginBottom">8dp</item>
+        <item name="android:layout_marginTop">8dp</item>
     </style>
 
     <style name="Widget.Moto.RowTitle" parent="Widget.AppCompat.TextView">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:textColor">@color/text_primary</item>
-        <item name="android:textSize">15sp</item>
+        <item name="android:textAppearance">?attr/textAppearanceBodyLarge</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
     </style>
 
     <style name="Widget.Moto.RowSub" parent="Widget.AppCompat.TextView">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:textColor">@color/text_secondary</item>
-        <item name="android:textSize">12.5sp</item>
+        <item name="android:textAppearance">?attr/textAppearanceBodyMedium</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
         <item name="android:layout_marginTop">2dp</item>
     </style>
 
@@ -80,8 +107,8 @@
     <style name="Widget.Moto.FieldLabel" parent="Widget.AppCompat.TextView">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:textColor">@color/text_secondary</item>
-        <item name="android:textSize">12sp</item>
+        <item name="android:textAppearance">?attr/textAppearanceLabelMedium</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
         <item name="android:layout_marginBottom">4dp</item>
     </style>
 
@@ -90,7 +117,7 @@
         <item name="android:layout_height">1dp</item>
         <item name="android:layout_marginStart">16dp</item>
         <item name="android:layout_marginEnd">16dp</item>
-        <item name="android:background">@color/outline</item>
+        <item name="android:background">?attr/colorOutlineVariant</item>
     </style>
 
     <!-- A settings row: [title/sub] ................ [switch] -->
@@ -107,58 +134,61 @@
     </style>
 
     <style name="Widget.Moto.Input" parent="Widget.Material3.TextInputLayout.OutlinedBox.Dense">
-        <item name="boxStrokeColor">@color/accent</item>
         <item name="boxCornerRadiusTopStart">12dp</item>
         <item name="boxCornerRadiusTopEnd">12dp</item>
         <item name="boxCornerRadiusBottomStart">12dp</item>
         <item name="boxCornerRadiusBottomEnd">12dp</item>
-        <item name="hintTextColor">@color/text_tertiary</item>
     </style>
 
+    <!-- Primary CTA: M3 filled button, full-pill. -->
     <style name="Widget.Moto.Button" parent="Widget.Material3.Button">
-        <item name="cornerRadius">14dp</item>
-        <item name="android:textSize">15sp</item>
+        <item name="android:textAppearance">?attr/textAppearanceLabelLarge</item>
         <item name="android:minHeight">52dp</item>
     </style>
 
+    <!-- Secondary action: M3 tonal button (secondaryContainer). -->
     <style name="Widget.Moto.Button.Tonal" parent="Widget.Material3.Button.TonalButton">
-        <item name="cornerRadius">14dp</item>
-        <item name="backgroundTint">@color/surface_2</item>
-        <item name="android:textColor">@color/text_primary</item>
-        <item name="android:textSize">15sp</item>
+        <item name="android:textAppearance">?attr/textAppearanceLabelLarge</item>
         <item name="android:minHeight">52dp</item>
+        <item name="iconGravity">textStart</item>
+        <item name="iconPadding">8dp</item>
     </style>
 
     <style name="Widget.Moto.Button.Outlined" parent="Widget.Material3.Button.OutlinedButton">
-        <item name="cornerRadius">14dp</item>
-        <item name="strokeColor">@color/outline</item>
-        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textAppearance">?attr/textAppearanceLabelLarge</item>
+    </style>
+
+    <!-- Round icon-only button for the header (settings, log). -->
+    <style name="Widget.Moto.IconButton" parent="Widget.Material3.Button.IconButton">
+        <item name="iconTint">?attr/colorOnSurfaceVariant</item>
+        <item name="android:minWidth">48dp</item>
+        <item name="android:minHeight">48dp</item>
     </style>
 
     <!-- Row-style text button inside a "links" card -->
     <style name="Widget.Moto.LinkRow" parent="Widget.Material3.Button.TextButton">
         <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">52dp</item>
+        <item name="android:layout_height">56dp</item>
         <item name="android:gravity">start|center_vertical</item>
-        <item name="android:textColor">@color/text_primary</item>
-        <item name="android:textSize">15sp</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+        <item name="android:textAppearance">?attr/textAppearanceBodyLarge</item>
         <item name="android:paddingStart">16dp</item>
         <item name="android:insetTop">0dp</item>
         <item name="android:insetBottom">0dp</item>
         <item name="cornerRadius">0dp</item>
     </style>
 
-    <!-- Pill chip used on the home hero card -->
+    <!-- Pill chip used on the home hero card (M3 assist-chip look, secondaryContainer). -->
     <style name="Widget.Moto.Chip" parent="Widget.AppCompat.TextView">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:background">@drawable/bg_chip</item>
-        <item name="android:paddingStart">10dp</item>
-        <item name="android:paddingEnd">10dp</item>
-        <item name="android:paddingTop">6dp</item>
-        <item name="android:paddingBottom">6dp</item>
-        <item name="android:textColor">@color/text_primary</item>
-        <item name="android:textSize">12.5sp</item>
+        <item name="android:paddingStart">12dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="android:paddingTop">7dp</item>
+        <item name="android:paddingBottom">7dp</item>
+        <item name="android:textAppearance">?attr/textAppearanceLabelLarge</item>
+        <item name="android:textColor">?attr/colorOnSecondaryContainer</item>
         <item name="android:layout_marginEnd">8dp</item>
     </style>
 </resources>

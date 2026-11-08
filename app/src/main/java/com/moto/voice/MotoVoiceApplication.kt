@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.content.ComponentCallbacks2
 import android.os.Build
 import android.util.Log
+import com.google.android.material.color.DynamicColors
 import com.moto.voice.bt.HelmetGreeter
 import com.moto.voice.data.AppSettings
 import com.moto.voice.debug.DebugLog
@@ -21,6 +22,9 @@ class MotoVoiceApplication : Application() {
         // v1.4.5 — before anything can log: every DebugEntry carries the build that made it,
         // so "was the rider even running the fixed build?" is answerable from the export.
         DebugLog.bindAppVersion(this)
+        // v1.4.9 — Material You: on Android 12+ every screen takes the wallpaper palette, the
+        // way Google's own apps do. Below 12 the amber-seeded scheme in res/values applies.
+        DynamicColors.applyToActivitiesIfAvailable(this)
         createChannels()
         applyPersonaFromSettings()
         greeter = HelmetGreeter(this).also { it.start() }

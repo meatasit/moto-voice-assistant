@@ -9,7 +9,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="@color/bg">
+    android:background="?attr/colorSurface">
 
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
@@ -61,7 +61,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
-                                android:text="☁️  Cloud AI" />
+                                android:text="Cloud AI" />
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btnLlmLocal"
@@ -69,7 +69,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
-                                android:text="🖥️  Local LLM" />
+                                android:text="Local LLM" />
 
                         </com.google.android.material.button.MaterialButtonToggleGroup>
 
@@ -142,7 +142,7 @@
                             style="@style/Widget.Material3.Button.TextButton"
                             android:layout_width="wrap_content" android:layout_height="wrap_content"
                             android:text="@string/token_show"
-                            android:textColor="@color/accent"
+                            android:textColor="?attr/colorPrimary"
                             android:layout_marginStart="4dp" />
                     </LinearLayout>
 
@@ -174,7 +174,7 @@
                     <TextView
                         android:id="@+id/tvTestResult"
                         android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:textColor="@color/text_secondary" android:textSize="12sp"
+                        android:textColor="?attr/colorOnSurfaceVariant" android:textSize="12sp"
                         android:fontFamily="monospace"
                         android:layout_marginTop="8dp"
                         android:text="" />
@@ -307,6 +307,34 @@
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:orientation="vertical" android:padding="16dp">
 
+                    <!-- v1.4.9 — persona (ค่ะ / ครับ). AppSettings.persona existed since the Azure
+                         days but had no control once the voice dropdown went; it was reachable only
+                         through a settings import. -->
+                    <TextView style="@style/Widget.Moto.RowTitle" android:text="คำลงท้าย" />
+                    <TextView style="@style/Widget.Moto.RowSub" android:layout_width="match_parent"
+                        android:text="ทุกประโยคที่จาวิสพูดจะลงท้ายตามที่เลือก"
+                        android:layout_marginBottom="10dp" />
+                    <com.google.android.material.button.MaterialButtonToggleGroup
+                        android:id="@+id/togglePersona"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        app:singleSelection="true"
+                        app:selectionRequired="true">
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnPersonaFeminine"
+                            style="?attr/materialButtonOutlinedStyle"
+                            android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:text="ค่ะ / นะคะ" />
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnPersonaMasculine"
+                            style="?attr/materialButtonOutlinedStyle"
+                            android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:text="ครับ / นะครับ" />
+                    </com.google.android.material.button.MaterialButtonToggleGroup>
+
+                    <View style="@style/Widget.Moto.Divider" android:layout_marginStart="0dp" android:layout_marginEnd="0dp"
+                        android:layout_marginTop="16dp" android:layout_marginBottom="16dp" />
+
                     <!-- Assistant volume 0.5 – 1.5 -->
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                         android:orientation="horizontal" android:gravity="center_vertical">
@@ -314,7 +342,7 @@
                             android:layout_weight="1" android:text="ระดับเสียงผู้ช่วย" />
                         <TextView android:id="@+id/tvAssistantVolumeValue"
                             android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="1.0x" android:textColor="@color/accent"
+                            android:text="1.0x" android:textColor="?attr/colorPrimary"
                             android:textSize="14sp" android:fontFamily="monospace" />
                     </LinearLayout>
                     <TextView style="@style/Widget.Moto.RowSub" android:text="แยกจากเสียงเพลง — ใช้กับเสียงพูดของแอปเท่านั้น" />
@@ -333,7 +361,7 @@
                             android:layout_weight="1" android:text="ความเร็วเสียงพูด" />
                         <TextView android:id="@+id/tvTtsRateValue"
                             android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="1.0x" android:textColor="@color/accent"
+                            android:text="1.0x" android:textColor="?attr/colorPrimary"
                             android:textSize="14sp" android:fontFamily="monospace" />
                     </LinearLayout>
                     <com.google.android.material.slider.Slider
@@ -345,7 +373,7 @@
                         android:id="@+id/btnPreviewTts"
                         style="@style/Widget.Moto.Button.Outlined"
                         android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="🔊  ทดลองฟัง" />
+                        android:text="ทดลองฟัง" />
 
                     <View style="@style/Widget.Moto.Divider" android:layout_marginStart="0dp" android:layout_marginEnd="0dp"
                         android:layout_marginTop="16dp" android:layout_marginBottom="16dp" />
@@ -357,7 +385,7 @@
                             android:layout_weight="1" android:text="รอฟังก่อนตัดจบ" />
                         <TextView android:id="@+id/tvListenPaceValue"
                             android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="2.0s" android:textColor="@color/accent"
+                            android:text="2.0s" android:textColor="?attr/colorPrimary"
                             android:textSize="14sp" android:fontFamily="monospace" />
                     </LinearLayout>
                     <TextView style="@style/Widget.Moto.RowSub" android:text="ค่ามาก = พูดเว้นจังหวะได้นานขึ้น แต่ตอบช้าลง" />
@@ -380,25 +408,25 @@
                     android:orientation="vertical" android:paddingTop="4dp" android:paddingBottom="4dp">
 
                     <com.google.android.material.button.MaterialButton android:id="@+id/btnSystemStatus"
-                        style="@style/Widget.Moto.LinkRow" android:text="🩺   สถานะระบบ" />
+                        style="@style/Widget.Moto.LinkRow" android:text="สถานะระบบ" />
                     <View style="@style/Widget.Moto.Divider" />
                     <com.google.android.material.button.MaterialButton android:id="@+id/btnDefaultAssistant"
-                        style="@style/Widget.Moto.LinkRow" android:text="🎙️   ตั้งเป็นผู้ช่วยหลัก (Digital Assistant)" />
+                        style="@style/Widget.Moto.LinkRow" android:text="ตั้งเป็นผู้ช่วยหลัก (Digital Assistant)" />
                     <View style="@style/Widget.Moto.Divider" />
                     <com.google.android.material.button.MaterialButton android:id="@+id/btnBatteryOpt"
-                        style="@style/Widget.Moto.LinkRow" android:text="🔋   ยกเว้นการประหยัดแบตเตอรี่" />
+                        style="@style/Widget.Moto.LinkRow" android:text="ยกเว้นการประหยัดแบตเตอรี่" />
                     <View style="@style/Widget.Moto.Divider" />
                     <com.google.android.material.button.MaterialButton android:id="@+id/btnAppPermissions"
-                        style="@style/Widget.Moto.LinkRow" android:text="🔐   สิทธิ์ของแอป" />
+                        style="@style/Widget.Moto.LinkRow" android:text="สิทธิ์ของแอป" />
                     <View style="@style/Widget.Moto.Divider" />
                     <com.google.android.material.button.MaterialButton android:id="@+id/btnReopenOnboarding"
-                        style="@style/Widget.Moto.LinkRow" android:text="🧭   ตั้งค่าครั้งแรกอีกรอบ" />
+                        style="@style/Widget.Moto.LinkRow" android:text="ตั้งค่าครั้งแรกอีกรอบ" />
                     <View style="@style/Widget.Moto.Divider" />
                     <com.google.android.material.button.MaterialButton android:id="@+id/btnExportSettings"
-                        style="@style/Widget.Moto.LinkRow" android:text="⬇   ส่งออกการตั้งค่า (JSON)" />
+                        style="@style/Widget.Moto.LinkRow" android:text="ส่งออกการตั้งค่า (JSON)" />
                     <View style="@style/Widget.Moto.Divider" />
                     <com.google.android.material.button.MaterialButton android:id="@+id/btnImportSettings"
-                        style="@style/Widget.Moto.LinkRow" android:text="⬆   นำเข้าการตั้งค่า (JSON)" />
+                        style="@style/Widget.Moto.LinkRow" android:text="นำเข้าการตั้งค่า (JSON)" />
 
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>

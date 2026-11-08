@@ -11,9 +11,11 @@ import android.os.Bundle
 import android.provider.Settings
 import android.view.View
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.google.android.material.color.MaterialColors
 import com.moto.voice.actions.HistoryReplay
 import com.moto.voice.data.AppHistory
 import com.moto.voice.data.AppSettings
@@ -24,6 +26,7 @@ import com.moto.voice.debug.DebugLogActivity
 import com.moto.voice.pipeline.HomeAlerts
 import com.moto.voice.pipeline.StatusRow
 import com.moto.voice.pipeline.SystemStatusChecker
+import com.moto.voice.service.VoiceCommandService
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -43,6 +46,18 @@ import java.util.Locale
  * (brain: Cloud/Local, helmet, network) so the day-to-day variables are visible without
  * opening anything. Everything is still recomputed in [onResume] so returning from an OS
  * settings screen immediately reflects the new grant.
+ *
+ * v1.4.9 — UX pass for the rider coming back after weeks away:
+ *  * **"ลองสั่งเลย"** on the hero card starts the same [VoiceCommandService] front door the
+ *    helmet button uses, so the whole chain (SCO → beep → STT → brain → TTS) can be checked
+ *    while parked, without a BVRA press. Hidden while RECORD_AUDIO is missing — a
+ *    microphone foreground service cannot be started without it.
+ *  * **Hero tap goes to the fix, not the status page**, while something blocking is
+ *    outstanding (assistant role → OS picker, permissions → system dialog). The hint text
+ *    under the chips says what the tap will do, so the two no longer disagree.
+ *  * **"พูดได้ว่า…" card** lists the voice commands; collapsible, state remembered.
+ *  * **Alert header severity**: optional Yellow-only rows (battery, media control) are
+ *    headed "แนะนำให้ตั้งค่า" in amber; only a Red row earns the red "ต้องแก้ก่อนใช้งาน".
  */
 class MainActivity : AppCompatActivity() {
 
@@ -92,7 +107,12 @@ class MainActivity : AppCompatActivity() {
         binding.btnFavorites.setOnClickListener { startActivity(Intent(this, FavoritesActivity::class.java)) }
         binding.btnHistoryAll.setOnClickListener { startActivity(Intent(this, HistoryActivity::class.java)) }
         binding.btnSystemStatus.setOnClickListener { openSystemStatus() }
-        binding.cardStatus.setOnClickListener { openSystemStatus() }
+        binding.cardStatus.setOnClickListener { onHeroTapped() }
+        binding.btnTryNow.setOnClickListener { startListeningFromHome() }
+        binding.btnToggleCommands.setOnClickListener {
+            settings.homeCommandsExpanded = !settings.homeCommandsExpanded
+            renderCommands()
+        }
     }
 
     override fun onResume() {
@@ -107,6 +127,7 @@ class MainActivity : AppCompatActivity() {
         val rows = SystemStatusChecker(this).checkSync()
         renderHero(rows)
         renderAlerts(rows)
+        renderCommands()
         renderHistory()
     }
 
@@ -134,11 +155,58 @@ class MainActivity : AppCompatActivity() {
         }
         binding.chipHelmet.text = if (helmetOn) "🪖 หมวกเชื่อมแล้ว" else "🪖 ยังไม่ต่อหมวก"
         binding.chipNet.text = if (online) "📶 ออนไลน์" else "📵 ออฟไลน์"
-        binding.tvHeroHint.text = when {
-            !isDefault -> "แตะเพื่อตั้งเป็นผู้ช่วยหลักก่อน ปุ่มบนหมวกถึงจะเรียกได้"
-            helmetOn -> "กดปุ่มบนหมวก แล้วพูดหลังเสียงบี๊บ"
-            else -> "ต่อหมวกแล้วกดปุ่ม BVRA หรือกดปุ่ม Home ค้างบนเครื่อง"
+        binding.tvHeroHint.text = getString(
+            when {
+                !isDefault -> R.string.hero_hint_not_default
+                !allGranted -> R.string.hero_hint_missing_perms
+                helmetOn -> R.string.hero_hint_helmet
+                else -> R.string.hero_hint_no_helmet
+            }
+        )
+        // The test button needs the mic; the service's own preflight speaks every other gap.
+        val hasMic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        binding.btnTryNow.visibility = if (hasMic) View.VISIBLE else View.GONE
+    }
+
+    /**
+     * The hero card is the biggest tap target on the screen; while something blocking is
+     * outstanding it should take the rider to the fix, mirroring the hint text above it.
+     * Only once the install is healthy does it open the full status page.
+     */
+    private fun onHeroTapped() {
+        when {
+            !isDefaultAssistant() -> openDefaultAssistantSettings()
+            missingPermissions().isNotEmpty() -> requestPermissions.launch(missingPermissions().toTypedArray())
+            else -> openSystemStatus()
         }
+    }
+
+    /**
+     * Same front door as the helmet button and the Quick Settings tile
+     * ([VoiceAssistActivity] → [VoiceCommandService]), started directly so no transparent
+     * activity flashes over home. The service runs its preflight and speaks the result, so
+     * even a half-configured install gets an audible answer rather than a silent no-op.
+     */
+    private fun startListeningFromHome() {
+        val svc = Intent(this, VoiceCommandService::class.java)
+        val started = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svc) else startService(svc)
+        }.isSuccess
+        if (started) {
+            Toast.makeText(this, R.string.home_try_now_started, Toast.LENGTH_SHORT).show()
+        } else {
+            openSystemStatus()
+        }
+    }
+
+    // ─── Commands card ───────────────────────────────────────────────────────
+
+    private fun renderCommands() {
+        val expanded = settings.homeCommandsExpanded
+        binding.tvCommands.visibility = if (expanded) View.VISIBLE else View.GONE
+        binding.btnToggleCommands.text =
+            getString(if (expanded) R.string.home_commands_hide else R.string.home_commands_show)
     }
 
     // ─── Alerts ──────────────────────────────────────────────────────────────
@@ -147,6 +215,14 @@ class MainActivity : AppCompatActivity() {
         val alerts = HomeAlerts.alerts(rows)
         binding.alertsContainer.removeAllViews()
         binding.alertsSection.visibility = if (alerts.isEmpty()) View.GONE else View.VISIBLE
+        // Header matches the worst row: a blocking Red gap reads as "must fix", while the
+        // optional Yellow rows (battery exemption, media control) read as a recommendation
+        // — so a healthy-but-not-perfect install isn't shouted at in red every time.
+        val anyRed = alerts.any { it.state == StatusRow.State.Red }
+        binding.tvAlertsHeader.text = getString(
+            if (anyRed) R.string.home_alerts_title else R.string.home_alerts_title_optional
+        )
+        binding.tvAlertsHeader.setTextColor(getColor(if (anyRed) R.color.bad else R.color.warn))
         alerts.forEach { row ->
             val v = layoutInflater.inflate(R.layout.item_status_row, binding.alertsContainer, false)
             v.findViewById<TextView>(R.id.tvStatusDot).apply {
@@ -185,7 +261,7 @@ class MainActivity : AppCompatActivity() {
         if (entries.isEmpty()) {
             binding.historyContainer.addView(TextView(this).apply {
                 text = getString(R.string.home_history_empty)
-                setTextColor(getColor(R.color.text_secondary))
+                setTextColor(MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurfaceVariant, 0))
                 textSize = 14f
                 setPadding(16, 16, 16, 16)
             })

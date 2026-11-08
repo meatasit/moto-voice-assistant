@@ -12,7 +12,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg"
+    android:background="?attr/colorSurface"
     android:fillViewport="true">
 
     <LinearLayout
@@ -42,43 +42,33 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Moto Voice"
-                    android:textColor="@color/text_primary"
-                    android:textSize="26sp"
-                    android:textStyle="bold"
-                    android:letterSpacing="-0.02" />
+                    android:textAppearance="?attr/textAppearanceHeadlineMedium"
+                    android:textColor="?attr/colorOnSurface" />
 
                 <TextView
                     android:id="@+id/tvVersion"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="จาวิส · ผู้ช่วยเสียงตอนขี่"
-                    android:textColor="@color/text_tertiary"
-                    android:textSize="12.5sp" />
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
 
             </LinearLayout>
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnDebugLog"
-                style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="wrap_content"
-                android:layout_height="44dp"
-                android:minWidth="44dp"
-                android:text="📋"
-                android:textSize="18sp"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp"
+                style="@style/Widget.Moto.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                app:icon="@drawable/ic_receipt_long"
                 android:contentDescription="@string/cd_debug_log" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnSettings"
-                style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="wrap_content"
-                android:layout_height="44dp"
-                android:minWidth="44dp"
-                android:text="⚙️"
-                android:textSize="18sp"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp"
+                style="@style/Widget.Moto.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                app:icon="@drawable/ic_settings"
                 android:contentDescription="@string/cd_settings" />
 
         </LinearLayout>
@@ -86,10 +76,10 @@
         <!-- Hero: readiness at a glance. Tap → full system-status page. -->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/cardStatus"
+            style="@style/Widget.Moto.Card.Hero"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="20dp"
-            app:cardCornerRadius="24dp"
             android:foreground="?attr/selectableItemBackground"
             android:clickable="true"
             android:focusable="true">
@@ -121,16 +111,14 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:text="กำลังตรวจสอบ..."
-                        android:textColor="@color/text_primary"
-                        android:textSize="20sp"
-                        android:textStyle="bold" />
+                        android:textAppearance="?attr/textAppearanceTitleLarge"
+                        android:textColor="?attr/colorOnSurface" />
 
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="›"
-                        android:textColor="@color/text_tertiary"
-                        android:textSize="24sp" />
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:src="@drawable/ic_chevron_right"
+                        android:importantForAccessibility="no" />
 
                 </LinearLayout>
 
@@ -168,7 +156,80 @@
                     android:id="@+id/tvHeroHint"
                     style="@style/Widget.Moto.RowSub"
                     android:layout_width="match_parent"
-                    android:text="กดปุ่มบนหมวก แล้วพูดหลังเสียงบี๊บ" />
+                    android:text="@string/hero_hint_helmet" />
+
+                <!--
+                  v1.4.9 — test from the phone while parked. Same front door as the helmet
+                  button (VoiceAssistActivity → VoiceCommandService), so what the rider hears
+                  here is exactly what the BVRA press will do. Hidden while the mic permission
+                  is missing: a microphone foreground service cannot start without it.
+                -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnTryNow"
+                    style="@style/Widget.Moto.Button"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    app:icon="@drawable/ic_mic"
+                    app:iconGravity="textStart"
+                    android:text="@string/home_try_now"
+                    android:visibility="gone" />
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!--
+          v1.4.9 — "what can I say" card. A rider back after weeks away has only the hero
+          hint ("speak after the beep") to go on; the command list lived in README. Kept
+          short, collapsible, and the collapsed state is remembered.
+        -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardCommands"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="20dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="16dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="10dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        style="@style/Widget.Moto.Section"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_marginStart="0dp"
+                        android:layout_marginTop="0dp"
+                        android:layout_marginBottom="0dp"
+                        android:text="@string/home_commands_title" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnToggleCommands"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:text="@string/home_commands_hide" />
+
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvCommands"
+                    style="@style/Widget.Moto.RowTitle"
+                    android:layout_width="match_parent"
+                    android:layout_marginTop="4dp"
+                    android:paddingEnd="8dp"
+                    android:lineSpacingMultiplier="1.45"
+                    android:text="@string/home_commands_body" />
 
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
@@ -213,7 +274,8 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:layout_marginEnd="6dp"
-                android:text="⭐  รายการโปรด" />
+                app:icon="@drawable/ic_star"
+                android:text="รายการโปรด" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnSystemStatus"
@@ -222,7 +284,8 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:layout_marginStart="6dp"
-                android:text="🩺  สถานะระบบ" />
+                app:icon="@drawable/ic_monitor_heart"
+                android:text="สถานะระบบ" />
 
         </LinearLayout>
 
@@ -247,9 +310,7 @@
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="36dp"
-                android:text="@string/home_see_all"
-                android:textSize="13sp"
-                android:textColor="@color/accent" />
+                android:text="@string/home_see_all" />
 
         </LinearLayout>
 

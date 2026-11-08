@@ -7,6 +7,7 @@ import android.view.View
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.color.MaterialColors
 import com.moto.voice.databinding.ActivitySystemStatusBinding
 import com.moto.voice.pipeline.StatusRow
 import com.moto.voice.pipeline.SystemStatusChecker
@@ -74,7 +75,7 @@ class SystemStatusActivity : AppCompatActivity() {
             val v = layoutInflater.inflate(R.layout.item_status_row, binding.statusRowsContainer, false)
             v.findViewById<TextView>(R.id.tvStatusDot).apply {
                 text = "●"
-                setTextColor(getColor(colorFor(row.state)))
+                setTextColor(colorFor(row.state))
             }
             v.findViewById<TextView>(R.id.tvStatusLabel).text = row.label
             v.findViewById<TextView>(R.id.tvStatusDetail).text = row.detail
@@ -83,11 +84,11 @@ class SystemStatusActivity : AppCompatActivity() {
         }
     }
 
-    private fun colorFor(state: StatusRow.State) = when (state) {
-        StatusRow.State.Green -> R.color.ok
-        StatusRow.State.Yellow -> R.color.warn
-        StatusRow.State.Red -> R.color.bad
-        StatusRow.State.Pending -> R.color.text_tertiary
+    private fun colorFor(state: StatusRow.State): Int = when (state) {
+        StatusRow.State.Green -> getColor(R.color.ok)
+        StatusRow.State.Yellow -> getColor(R.color.warn)
+        StatusRow.State.Red -> getColor(R.color.bad)
+        StatusRow.State.Pending -> MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOutline)
     }
 
     private fun handleRowTap(row: StatusRow) {

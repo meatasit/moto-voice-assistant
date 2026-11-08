@@ -3,7 +3,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="@color/bg">
+    android:background="?attr/colorSurface">
 
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
@@ -47,7 +47,7 @@
             android:layout_width="wrap_content"
             android:layout_height="40dp"
             android:text="ล้าง"
-            android:textColor="@color/text_secondary" />
+            android:textColor="?attr/colorOnSurfaceVariant" />
 
     </LinearLayout>
 

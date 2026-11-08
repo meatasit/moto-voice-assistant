@@ -23,7 +23,7 @@
             android:layout_height="40dp"
             android:background="@drawable/bg_icon_tile"
             android:gravity="center"
-            android:textColor="@color/accent"
+            android:textColor="?attr/colorPrimary"
             android:textSize="18sp"
             android:textStyle="bold"
             android:layout_marginEnd="12dp" />
@@ -41,7 +41,7 @@
             android:layout_width="wrap_content"
             android:layout_height="40dp"
             android:text="ลบ"
-            android:textColor="@color/text_secondary" />
+            android:textColor="?attr/colorOnSurfaceVariant" />
 
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

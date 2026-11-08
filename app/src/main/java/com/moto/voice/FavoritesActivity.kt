@@ -13,6 +13,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.color.MaterialColors
 import com.moto.voice.data.FavoritesStore
 import com.moto.voice.databinding.ActivityFavoritesBinding
 
@@ -68,7 +69,7 @@ class FavoritesActivity : AppCompatActivity() {
         if (items.isEmpty()) {
             binding.favoritesContainer.addView(TextView(this).apply {
                 text = "ยังไม่มีรายการโปรด"
-                setTextColor(getColor(R.color.text_secondary))
+                setTextColor(MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurfaceVariant, 0))
                 textSize = 14f
                 setPadding(8, 8, 8, 8)
             })

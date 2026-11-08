@@ -4,6 +4,8 @@ import android.os.Bundle
 import android.view.MenuItem
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.color.MaterialColors
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.moto.voice.actions.HistoryReplay
 import com.moto.voice.data.AppHistory
 import com.moto.voice.data.HistoryLabels
@@ -27,7 +29,13 @@ class HistoryActivity : AppCompatActivity() {
 
         history = AppHistory(this)
         binding.btnClearHistory.setOnClickListener {
-            history.clear(); render()
+            // v1.4.9 — destructive and one tap from the toolbar: confirm first.
+            MaterialAlertDialogBuilder(this)
+                .setTitle("ล้างประวัติทั้งหมด?")
+                .setMessage("รายการที่เคยสั่งจะหายไป และแตะสั่งซ้ำจากหน้าแรกไม่ได้อีก")
+                .setNegativeButton("ยกเลิก", null)
+                .setPositiveButton("ล้าง") { _, _ -> history.clear(); render() }
+                .show()
         }
         render()
     }
@@ -40,7 +48,7 @@ class HistoryActivity : AppCompatActivity() {
         if (entries.isEmpty()) {
             binding.historyContainer.addView(TextView(this).apply {
                 text = getString(R.string.home_history_empty)
-                setTextColor(getColor(R.color.text_secondary))
+                setTextColor(MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurfaceVariant, 0))
                 textSize = 14f
                 setPadding(16, 24, 16, 16)
             })

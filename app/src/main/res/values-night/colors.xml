@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v1.4.9 — dark half of the fallback Material 3 scheme (amber seed). See values/colors.xml. -->
+<resources>
+    <color name="md_theme_primary">#FFF0C048</color>
+    <color name="md_theme_onPrimary">#FF3F2E00</color>
+    <color name="md_theme_primaryContainer">#FF5B4300</color>
+    <color name="md_theme_onPrimaryContainer">#FFFFDF9E</color>
+    <color name="md_theme_secondary">#FFD8C4A0</color>
+    <color name="md_theme_onSecondary">#FF3B2F15</color>
+    <color name="md_theme_secondaryContainer">#FF52452A</color>
+    <color name="md_theme_onSecondaryContainer">#FFF5E0BB</color>
+    <color name="md_theme_tertiary">#FFB0CFAA</color>
+    <color name="md_theme_onTertiary">#FF1D361C</color>
+    <color name="md_theme_tertiaryContainer">#FF334D31</color>
+    <color name="md_theme_onTertiaryContainer">#FFCCEBC5</color>
+    <color name="md_theme_error">#FFFFB4AB</color>
+    <color name="md_theme_onError">#FF690005</color>
+    <color name="md_theme_errorContainer">#FF93000A</color>
+    <color name="md_theme_onErrorContainer">#FFFFDAD6</color>
+    <color name="md_theme_surface">#FF15130E</color>
+    <color name="md_theme_onSurface">#FFE9E1D8</color>
+    <color name="md_theme_surfaceVariant">#FF4D4639</color>
+    <color name="md_theme_onSurfaceVariant">#FFD0C5B4</color>
+    <color name="md_theme_outline">#FF999080</color>
+    <color name="md_theme_outlineVariant">#FF4D4639</color>
+    <color name="md_theme_surfaceContainerLowest">#FF100E09</color>
+    <color name="md_theme_surfaceContainerLow">#FF1E1B16</color>
+    <color name="md_theme_surfaceContainer">#FF22201A</color>
+    <color name="md_theme_surfaceContainerHigh">#FF2D2A24</color>
+    <color name="md_theme_surfaceContainerHighest">#FF38352E</color>
+    <color name="md_theme_inverseSurface">#FFE9E1D8</color>
+    <color name="md_theme_inverseOnSurface">#FF34302A</color>
+    <color name="md_theme_inversePrimary">#FF785A00</color>
+
+    <color name="ok">#FF6DD58C</color>
+    <color name="warn">#FFFFB95F</color>
+    <color name="bad">#FFFFB4AB</color>
+</resources>
