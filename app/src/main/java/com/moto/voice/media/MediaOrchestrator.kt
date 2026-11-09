@@ -758,6 +758,9 @@ object MediaOrchestrator {
         // (stillPrior and noSession). Two CLEAR_TASK restarts racing each other would be a
         // re-fire war, which is the failure mode v1.3.36 already paid for once.
         var refired = false
+        // v1.4.10 — set once when a paused/stopped prior session turns out to be our own
+        // CLEAR_TASK first delivery settling (see pausedPriorAction); extends the window once.
+        var restartSettling = false
         // v1.4.2 — did the target EVER show a session during this window? Field log
         // 1789518388540 (entry 1789518322022): the poll saw YouTube PLAYING the right video
         // mid-window (mediaActualTitle / playbackState were stamped), then the session was
@@ -894,17 +897,50 @@ object MediaOrchestrator {
                 val targetPlaying = isActivelyPlaying(state)
                 val behindSecure = isScreenLocked(appCtx) == true && entry.keyguardSecure == true
                 if (!clearTaskCanLand(targetPlaying, behindSecure)) {
-                    if (!firstFireRestarted && SystemClock.uptimeMillis() >= refireAt) {
-                        logOp(entry, "nudge→switchNeedsUnlock(${MediaSessions.stateName(state)})", targetPkg)
-                        declareLaunchBlocked(appCtx, targetPkg, entry, reason = "stillPriorPaused")
-                        return@Runnable
+                    // v1.4.10 — but WHO stopped it? Field log 1794208929620, entry
+                    // 1794188420595: `mediaPriorState: playing` at fire time, so the v1.4.6 rule
+                    // fired the first delivery WITH CLEAR_TASK — and the very first poll tick
+                    // then saw `sessionSeen(stopped)` on the old title. That `stopped` is OUR
+                    // restart in flight, not the rider's pause, yet this gate read the live
+                    // state, took the v1.4.8 paused branch, sat out the warm 9 s window and spoke
+                    // SWITCH_NEEDS_UNLOCK: "คลิปที่หยุดไว้เปลี่ยนตอนจอล็อคไม่ได้" to a rider who
+                    // had paused nothing. 77 s later (entry 1794188497352) he asked for the same
+                    // clip, screen still locked, and it went `sessionSeen(stopped)` → `confirmed`.
+                    // The v1.4.8 case is told apart by the fire-time stamp: `firstFireRestarted`
+                    // is true exactly when the target was PLAYING when we fired. Then the restart
+                    // is a cold start (v1.3.37) and gets a cold start's window; if it still has
+                    // not landed by then, the honest line is SWITCH_NOT_LANDED — "say it again",
+                    // which is what worked in this log — never the paused-clip line.
+                    when (pausedPriorAction(
+                        firstFireRestarted = firstFireRestarted,
+                        nowMs = SystemClock.uptimeMillis(),
+                        refireAt = refireAt,
+                        windowExhausted = windowExhausted,
+                    )) {
+                        PausedPriorAction.SettleRestart -> {
+                            if (!restartSettling) {
+                                restartSettling = true
+                                logOp(entry, "nudge→restartSettling(${MediaSessions.stateName(state)})", targetPkg)
+                                Log.w(TAG, "nudge: $targetPkg ${MediaSessions.stateName(state)} after our CLEAR_TASK first delivery — cold-start window")
+                                pollWindowEndAt = maxOf(pollWindowEndAt, pollStartAt + POLL_WINDOW_COLD_MS)
+                            }
+                            if (SystemClock.uptimeMillis() >= pollWindowEndAt) {
+                                declareLaunchBlocked(appCtx, targetPkg, entry, reason = "stillPrior")
+                                return@Runnable
+                            }
+                            handler.postDelayed(poll, POLL_INTERVAL_MS)
+                            return@Runnable
+                        }
+                        PausedPriorAction.GiveUpNeedsUnlock -> {
+                            logOp(entry, "nudge→switchNeedsUnlock(${MediaSessions.stateName(state)})", targetPkg)
+                            declareLaunchBlocked(appCtx, targetPkg, entry, reason = "stillPriorPaused")
+                            return@Runnable
+                        }
+                        PausedPriorAction.KeepPolling -> {
+                            handler.postDelayed(poll, POLL_INTERVAL_MS)
+                            return@Runnable
+                        }
                     }
-                    if (windowExhausted) {
-                        declareLaunchBlocked(appCtx, targetPkg, entry, reason = "stillPriorPaused")
-                        return@Runnable
-                    }
-                    handler.postDelayed(poll, POLL_INTERVAL_MS)
-                    return@Runnable
                 }
                 if (!refired && SystemClock.uptimeMillis() >= refireAt &&
                     (videoId != null || query != null)
@@ -1164,6 +1200,41 @@ object MediaOrchestrator {
      */
     internal fun clearTaskCanLand(targetPlaying: Boolean, behindSecureKeyguard: Boolean): Boolean =
         targetPlaying || !behindSecureKeyguard
+
+    /** v1.4.10 — what to do when the prior session is paused/stopped behind a secure keyguard. */
+    internal enum class PausedPriorAction { SettleRestart, GiveUpNeedsUnlock, KeepPolling }
+
+    /**
+     * v1.4.10 — the STILL_PRIOR branch has found the target paused or stopped behind a secure
+     * keyguard, where a CLEAR_TASK cannot land ([clearTaskCanLand]). Two different facts
+     * produce that state and they need two different answers:
+     *
+     *  * **We stopped it.** [firstFireRestarted] is true: the target was PLAYING when we fired,
+     *    so the first delivery carried CLEAR_TASK (v1.4.6) and the task is mid-restart. Field
+     *    log 1794208929620, entry 1794188420595: `mediaPriorState: playing`, then
+     *    `sessionSeen(stopped)` on the first tick, then `launchBlocked(stillPriorPaused)` and
+     *    the paused-clip line — to a rider who had paused nothing. The same clip, asked for
+     *    again 77 s later with the screen still locked, went `stopped` → `confirmed`. So:
+     *    treat the restart as the cold start it is (v1.3.37) and keep waiting;
+     *    [SettleRestart]. The caller extends the window once and, if it still runs out,
+     *    declares plain `stillPrior` (SWITCH_NOT_LANDED — "say it again", which worked).
+     *  * **The rider stopped it.** [firstFireRestarted] is false because the gate already said
+     *    no at fire time (prior state paused/stopped + secure keyguard — v1.4.8, field log
+     *    1789697284287). A plain intent to that task is a known no-op, so give the honest
+     *    paused-clip answer at [refireAt] rather than sit silent: [GiveUpNeedsUnlock].
+     *
+     * Pure so a JVM test can lock both shapes against their log lines.
+     */
+    internal fun pausedPriorAction(
+        firstFireRestarted: Boolean,
+        nowMs: Long,
+        refireAt: Long,
+        windowExhausted: Boolean,
+    ): PausedPriorAction = when {
+        firstFireRestarted -> PausedPriorAction.SettleRestart
+        nowMs >= refireAt || windowExhausted -> PausedPriorAction.GiveUpNeedsUnlock
+        else -> PausedPriorAction.KeepPolling
+    }
 
     /** PLAYING or BUFFERING — the states in which a target's player is demonstrably alive. */
     internal fun isActivelyPlaying(state: Int?): Boolean =
