@@ -136,6 +136,37 @@ object MediaOrchestrator {
     internal fun pollWindowMsFor(priorTitle: String?): Long =
         if (priorTitle == null) POLL_WINDOW_COLD_MS else POLL_WINDOW_MS
 
+    /**
+     * v1.4.11 — is this the one launch shape the deep link provably cannot do? Pure so a JVM
+     * test can pin the scope of the headless path ([YoutubeMediaBrowser]).
+     *
+     * Both conditions matter, and each one on its own would be wrong:
+     *   * **locked** — an unlocked launch puts YouTube's player on screen, it plays, and
+     *     nothing here is broken. Field log 1786763666528 is a clean unlocked run.
+     *   * **cold** (`priorTitle == null`) — a WARM YouTube already has its playback service
+     *     alive, so the new video reaches that service and starts with no UI needed. Warm
+     *     switches land (field log 1794208929620, 3 of 4 on the first delivery); they must
+     *     keep using the deep link, which can name an exact video id where the browser can
+     *     only search.
+     *
+     * Field log 1794225000029 is the shape this is for: five cold opens behind a secure
+     * keyguard, five `launchBlocked(noSession)`, five `mediaBrowserConnect: connected(token)`.
+     */
+    internal fun shouldTryMediaBrowser(
+        enabled: Boolean, locked: Boolean?, priorTitle: String?,
+    ): Boolean = enabled && locked == true && priorTitle == null
+
+    /**
+     * v1.4.11 — what a headless start should search for.
+     *
+     * The full title is the most specific string we hold, so it is far likelier to land on
+     * the exact video than the rider's own phrasing ("เพลงชิวๆ" would return anything). Falls
+     * back to the webhook's query when no title came through, and to null when we hold
+     * neither — nothing to search, so the deep link runs instead.
+     */
+    internal fun browserSearchTerm(expectedTitle: String?, query: String?): String? =
+        expectedTitle?.takeIf { it.isNotBlank() } ?: query?.takeIf { it.isNotBlank() }
+
     private val mutex = Mutex()
     // `lazy` so pure-JVM tests (which never schedule a nudge) don't trip on
     // Handler(Looper.getMainLooper()) — that call throws in a non-instrumented
@@ -184,6 +215,15 @@ object MediaOrchestrator {
      * op, same way [speakPlayConfirmed] works. Default true.
      */
     @Volatile var webLinkPreferred: Boolean = true
+
+    /**
+     * v1.4.11 — whether a cold launch behind a locked screen may start YouTube through its
+     * MediaBrowserService instead of a deep link. Set from
+     * [com.moto.voice.data.AppSettings.youtubeMediaBrowser] by the pipeline before each op,
+     * same way [webLinkPreferred] works. Default true; the rider can switch it off without a
+     * new build if the headless start ever picks the wrong video on the road.
+     */
+    @Volatile var browserPreferred: Boolean = true
 
     /**
      * Whether a successful nudge should speak [ErrorSpeech.MEDIA_PLAY_CONFIRMED].
@@ -291,17 +331,27 @@ object MediaOrchestrator {
         // that somehow still misses gets its one re-fire exactly as before.
         val behindSecureKeyguard = entry.screenLocked == true && entry.keyguardSecure == true
         val firstFireRestarted = firstFireNeedsRestart(priorTitle, priorPlaying, behindSecureKeyguard)
-        val launched = fireYoutubeIntent(
-            context, videoId, query, entry, forceRestart = firstFireRestarted,
-        )
-        if (!launched) {
-            // v1.4.4 — never silent (Rule #3). Stamp the entry like a blocked launch so the
-            // field log categorizes it, and hand the caller a Result it cannot mistake for
-            // "the nudge will speak for me".
-            entry.launchBlocked = true
-            entry.finishReason = FinishReason.LAUNCH_BLOCKED
-            logOp(entry, "openYoutube→launchFailed", MediaSessions.YOUTUBE_PKG)
-            return@withLock Result.LaunchFailed
+
+        // v1.4.11 — headless first, but ONLY where the keyguard is what breaks us. A cold
+        // YouTube started behind a secure lock screen never gets a visible window, so it never
+        // begins playback and never registers a session; binding to its MediaBrowserService
+        // starts audio with no Activity involved. See [YoutubeMediaBrowser] for the field-log
+        // proof. Warm switches and unlocked launches are untouched by this branch.
+        val browserUsed = tryBrowserLaunch(context, expectedTitle, query, priorTitle, entry)
+
+        if (!browserUsed) {
+            val launched = fireYoutubeIntent(
+                context, videoId, query, entry, forceRestart = firstFireRestarted,
+            )
+            if (!launched) {
+                // v1.4.4 — never silent (Rule #3). Stamp the entry like a blocked launch so
+                // the field log categorizes it, and hand the caller a Result it cannot
+                // mistake for "the nudge will speak for me".
+                entry.launchBlocked = true
+                entry.finishReason = FinishReason.LAUNCH_BLOCKED
+                logOp(entry, "openYoutube→launchFailed", MediaSessions.YOUTUBE_PKG)
+                return@withLock Result.LaunchFailed
+            }
         }
 
         // Remember what we opened for rule #2 lookups.
@@ -310,8 +360,40 @@ object MediaOrchestrator {
         scheduleTargetedNudge(
             context, MediaSessions.YOUTUBE_PKG, expectedTitle, priorTitle, entry,
             videoId = videoId, query = query, firstFireRestarted = firstFireRestarted,
+            browserUsed = browserUsed,
         )
         Result.Success
+    }
+
+    /**
+     * v1.4.11 — attempt the headless start. Returns true when [YoutubeMediaBrowser] dispatched
+     * a `playFromSearch`, which means the caller must NOT also fire a deep link now (the nudge
+     * holds the deep link in reserve — see `deepLinkPending` in [scheduleTargetedNudge]).
+     *
+     * Rule #3: every outcome is written to the op log, so a field entry always says which
+     * path ran and, when the headless one was refused, why. Nothing here reports success —
+     * the same nudge verification judges a browser start exactly as it judges a deep link.
+     */
+    private suspend fun tryBrowserLaunch(
+        context: Context, expectedTitle: String?, query: String?, priorTitle: String?,
+        entry: DebugEntry,
+    ): Boolean {
+        val term = browserSearchTerm(expectedTitle, query)
+        if (term == null ||
+            !shouldTryMediaBrowser(browserPreferred, entry.screenLocked, priorTitle)
+        ) {
+            return false
+        }
+        return when (val outcome = YoutubeMediaBrowser.playFromSearch(context, term)) {
+            is YoutubeMediaBrowser.Outcome.Dispatched -> {
+                logOp(entry, "browser→playFromSearch", MediaSessions.YOUTUBE_PKG)
+                true
+            }
+            is YoutubeMediaBrowser.Outcome.Failed -> {
+                logOp(entry, "browser→${outcome.reason}", MediaSessions.YOUTUBE_PKG)
+                false
+            }
+        }
     }
 
     /**
@@ -349,11 +431,23 @@ object MediaOrchestrator {
                     val expectedTitle = MediaSessionMemory.currentVerifyTitle().ifBlank { null }
                     entry.mediaExpectedTitle = expectedTitle
                     entry.screenLocked = isScreenLocked(context)
+                    // v1.4.11 — this path never stamped keyguardSecure, so the v1.4.7 gate in
+                    // shouldRefireNoSession read "not secure" and fired a CLEAR_TASK restart that
+                    // cannot land behind a secure keyguard. Field log 1794225000029, entry
+                    // 1794222694408 ("กด Play เลย"): `refireNoSession(clearTask)` with
+                    // `mediaBlockedKeyguard: locked=true,secure=false` on a phone whose every
+                    // other entry says `keyguardSecure: true`.
+                    entry.keyguardSecure = runCatching {
+                        context.getSystemService(android.app.KeyguardManager::class.java)?.isDeviceSecure
+                    }.getOrNull()
                     // v1.3.25 — same focus-steal guard as openYoutube: we only reach here
                     // because YouTube had no session, so a foreign player (Spotify auto-resumed
                     // on BT reconnect) may be holding audio focus. Pause it before refiring.
                     prepauseForeignPlayers(context, entry)
-                    if (!fireYoutubeIntent(context, lastVideo, null, entry)) {
+                    // v1.4.11 — same shape as a cold open (no session, screen locked), so the
+                    // same headless-first rule applies; the nudge keeps the deep link in reserve.
+                    val browserUsed = tryBrowserLaunch(context, expectedTitle, null, priorTitle = null, entry = entry)
+                    if (!browserUsed && !fireYoutubeIntent(context, lastVideo, null, entry)) {
                         entry.launchBlocked = true
                         entry.finishReason = FinishReason.LAUNCH_BLOCKED
                         logOp(entry, "playContinue→launchFailed", target)
@@ -364,6 +458,7 @@ object MediaOrchestrator {
                     scheduleTargetedNudge(
                         context, target, expectedTitle, priorTitle = null, entry = entry,
                         videoId = lastVideo, query = null, firstFireRestarted = false,
+                        browserUsed = browserUsed,
                     )
                     Result.Success
                 } else {
@@ -740,6 +835,8 @@ object MediaOrchestrator {
         videoId: String?, query: String?,
         /** v1.4.8 — whether the first delivery already carried CLEAR_TASK (see [firstFireNeedsRestart]). */
         firstFireRestarted: Boolean,
+        /** v1.4.11 — the launch went through [YoutubeMediaBrowser]; no deep link has been fired yet. */
+        browserUsed: Boolean = false,
     ) {
         val appCtx = context.applicationContext
         // v1.4.4 — uptimeMillis, the clock Handler.postDelayed and NudgeDecider run on. The
@@ -758,6 +855,11 @@ object MediaOrchestrator {
         // (stillPrior and noSession). Two CLEAR_TASK restarts racing each other would be a
         // re-fire war, which is the failure mode v1.3.36 already paid for once.
         var refired = false
+        /**
+         * v1.4.11 — a headless start still owes us the deep link if it produced nothing. True
+         * only on a browser launch, consumed once. See the poll body.
+         */
+        var deepLinkPending = browserUsed
         // v1.4.10 — set once when a paused/stopped prior session turns out to be our own
         // CLEAR_TASK first delivery settling (see pausedPriorAction); extends the window once.
         var restartSettling = false
@@ -799,7 +901,31 @@ object MediaOrchestrator {
                 }
                 runCatching { fc.transportControls.pause() }
             }
+            // v1.4.11 — the live lookup stays authoritative; the browser's own controller is
+            // the fallback for a phone that never granted notification-listener access. There,
+            // controllerFor() is null by definition, and without this the nudge would read a
+            // perfectly good headless start as "no session" and fire a deep link on top of
+            // music that had already begun.
             val ctrl = MediaSessions.controllerFor(appCtx, targetPkg)
+                ?: (if (browserUsed) YoutubeMediaBrowser.activeController() else null)
+
+            // v1.4.11 — the headless start gets REFIRE_STILL_PRIOR_MS to show something. If
+            // nothing is playing or buffering by then, fire the deep link ONCE and give it a
+            // cold start's worth of time from this moment. The two paths are complementary
+            // rather than redundant: YouTube may accept the bind and then ignore the search,
+            // and the deep link now runs against a YouTube the browser attempt has already
+            // warmed — the state in which the morning entry of field log 1794208929620
+            // (1794187133692) landed a cold locked open on play#1..3.
+            if (deepLinkPending && SystemClock.uptimeMillis() >= refireAt) {
+                deepLinkPending = false
+                if (!isActivelyPlaying(ctrl?.playbackState?.state) && (videoId != null || query != null)) {
+                    logOp(entry, "browser→fallbackDeeplink", targetPkg)
+                    Log.w(TAG, "nudge: headless start produced nothing — falling back to the deep link")
+                    fireYoutubeIntent(appCtx, videoId, query, entry)
+                    pollWindowEndAt = SystemClock.uptimeMillis() + POLL_WINDOW_COLD_MS
+                }
+            }
+
             if (ctrl == null) {
                 // Rule #1: NO media-key fallback here. If YouTube's session isn't there,
                 // dispatching MEDIA_PLAY would wake Spotify (per field log 1784028862496).
