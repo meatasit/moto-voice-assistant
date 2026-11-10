@@ -247,6 +247,19 @@
                     <LinearLayout style="@style/Widget.Moto.SwitchRow">
                         <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
                             android:layout_weight="1" android:orientation="vertical">
+                            <TextView style="@style/Widget.Moto.RowTitle" android:text="เปิดเพลงได้ตอนจอล็อค" />
+                            <TextView style="@style/Widget.Moto.RowSub" android:text="สั่งเล่นตรงเข้า YouTube โดยไม่ต้องเปิดหน้าจอ — ปิดถ้าได้คลิปผิดตัว" />
+                        </LinearLayout>
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switchYoutubeMediaBrowser"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <View style="@style/Widget.Moto.Divider" />
+
+                    <LinearLayout style="@style/Widget.Moto.SwitchRow">
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:orientation="vertical">
                             <TextView style="@style/Widget.Moto.RowTitle" android:text="คุยต่อเนื่องหลังตอบ" />
                             <TextView style="@style/Widget.Moto.RowSub" android:text="เปิดฟังต่ออีก 4 วินาทีหลังจาวิสตอบ ไม่ต้องกดปุ่มอีก" />
                         </LinearLayout>
