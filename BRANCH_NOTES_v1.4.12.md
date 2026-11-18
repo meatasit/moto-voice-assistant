@@ -58,6 +58,27 @@ No media code touched (iron rules #1–#3 unaffected).
   Settings → General management → Text-to-speech: check the preferred engine and
   re-download the Thai voice. Send the log.
 
+## Also in this build — music defaults to YouTube (rider's rule)
+
+Rider: "ถ้าสั่งเปิดเพลง ให้ Default เป็น youtube นอกจากสั่งว่าให้เปิดจาก Spotify" — one day a plain
+"เปิดเพลง" came back as a Spotify playlist.
+
+**No field-log line for that day:** in log 1794968515443 every music command went to
+YouTube and no entry has `action=spotify_play`. So this is the rider's stated rule, built
+as a guard, not a fix proven against a log.
+
+* `MusicSourceRule` — a `spotify_play` from the workflow is honoured only when the rider's
+  sentence names Spotify (`spotify` / `sportify` / สปอติฟาย and recogniser variants).
+* Otherwise the pipeline asks the workflow once more with "… จาก YouTube" appended and plays
+  that `youtube_play`. Op log: `spotifyNotNamed→askYoutube`. If the second answer is not a
+  YouTube video: `askYoutube→failed` and the rider hears `YOUTUBE_DEFAULT_FAILED` — never
+  Spotify by guess, never silent.
+* Not covered: "เล่นต่อ" still resumes what we last opened (Rule #2), and the helmet
+  auto-resuming Spotify on Bluetooth reconnect (field log 1784173407858) is not a command
+  at all. If Spotify starts again, the entry will say which of the three it was.
+* The better home for the rule is the workflow's prompt (outside this repo) — the guard
+  costs one extra webhook round-trip whenever the LLM guesses Spotify.
+
 ## Right now, on v1.4.11
 
 Force-stop Moto Voice (or reboot the phone) and the voice should return, if the cause is

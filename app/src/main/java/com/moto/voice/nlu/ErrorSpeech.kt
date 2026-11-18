@@ -276,6 +276,15 @@ object ErrorSpeech {
         "เปิดสปอติฟายให้แล้ว แต่ยังไม่เล่นครับ",
     )
 
+    /**
+     * v1.4.12 — the workflow chose Spotify for a sentence that never named it, and asking
+     * again for YouTube did not produce a video. See [MusicSourceRule].
+     */
+    val YOUTUBE_DEFAULT_FAILED: String get() = pick(
+        "ยังหาเพลงจากยูทูบไม่ได้ค่ะ ลองสั่งใหม่อีกครั้งนะคะ",
+        "ยังหาเพลงจากยูทูบไม่ได้ครับ ลองสั่งใหม่อีกครั้งนะครับ",
+    )
+
     /** v1.4.5 — `action=spotify_play` could not even get Spotify open (not installed?). */
     val SPOTIFY_LAUNCH_FAILED: String get() = pick(
         "เปิดสปอติฟายไม่สำเร็จค่ะ ลองสั่งใหม่อีกครั้งนะคะ",
@@ -332,7 +341,7 @@ object ErrorSpeech {
         SEEK_ATTEMPTED, MEDIA_PLAY_CONFIRMED, MEDIA_OPENED_NOT_PLAYING,
         LAUNCH_BLOCKED_LOCKED, LAUNCH_FAILED_NO_SESSION, SWITCH_NOT_LANDED,
         MEDIA_STOPPED_AFTER_OPEN, SEEK_AMOUNT_UNKNOWN,
-        SPOTIFY_OPENED_NOT_PLAYING, SPOTIFY_LAUNCH_FAILED,
+        SPOTIFY_OPENED_NOT_PLAYING, SPOTIFY_LAUNCH_FAILED, YOUTUBE_DEFAULT_FAILED,
         MEDIA_WAITING_FOR_UNLOCK, SWITCH_NEEDS_UNLOCK,
     )
 
