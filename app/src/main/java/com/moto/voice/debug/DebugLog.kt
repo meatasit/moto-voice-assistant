@@ -197,6 +197,14 @@ data class DebugEntry(
     var mediaBlockedKeyguard: String? = null,
 
     /**
+     * v1.4.13 — ms from the launch to the nudge's verdict (confirmed, blocked or gave up).
+     * [mediaOperations] records the order of events but not when they happened; field log
+     * 1795045364488 needed exactly that to tell a restart that lands in 3 s from one that
+     * lands in 14 s. Null when no nudge resolved (superseded, or not a launch).
+     */
+    var mediaResolvedMs: Long? = null,
+
+    /**
      * v1.4.7 — result of a probe connect to the target's MediaBrowserService on the
      * noSession path: connected(token) / connected(noToken) / refused / noService / …
      *
@@ -379,6 +387,7 @@ data class DebugEntry(
         if (playbackState != null) append("  playback:${playbackState}")
         if (mediaCtrlPkgMiss != null) append("  pkgMiss:${mediaCtrlPkgMiss}")
         if (mediaBlockedKeyguard != null) append("  kg:${mediaBlockedKeyguard}")
+        if (mediaResolvedMs != null) append("  resolved:${mediaResolvedMs}ms")
         if (mediaBrowserConnect != null) append("  browser:${mediaBrowserConnect}")
         if (mediaTargetPkg != null) append("  target:${mediaTargetPkg}")
         if (mediaOperations != null) append("  ops:${mediaOperations}")
