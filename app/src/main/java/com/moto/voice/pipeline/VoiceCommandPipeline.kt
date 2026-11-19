@@ -36,6 +36,7 @@ import com.moto.voice.debug.FinishReason
 import com.moto.voice.debug.sttErrorStamp
 import com.moto.voice.debug.ScoState
 import com.moto.voice.nlu.ErrorSpeech
+import com.moto.voice.nlu.MusicSourceRule
 import com.moto.voice.media.FmPlaybackState
 import com.moto.voice.media.FmPlayerService
 import com.moto.voice.media.MediaOrchestrator
@@ -791,8 +792,28 @@ class VoiceCommandPipeline(
         when (result) {
             is WebhookClient.Result.Success -> {
                 OfflineNotifier.onWebhookSuccess()
+                var response = result.response
+                // v1.4.12 — rider's rule: music opens from YouTube unless the rider SAID
+                // Spotify. The workflow picked Spotify for a sentence that never named it,
+                // so ask again with the source spelled out. See [MusicSourceRule].
+                if (MusicSourceRule.mustUseYoutube(response.action, text)) {
+                    appendMediaOp(entry, MusicSourceRule.OP_OVERRULED)
+                    val second = client.call(MusicSourceRule.youtubeRetryText(text)) { }
+                    entry.webhookResponse = second.rawJson
+                    entry.webhookTimeMs += second.elapsedMs
+                    val youtube = (second as? WebhookClient.Result.Success)?.response
+                        ?.takeIf { it.action.equals("youtube_play", ignoreCase = true) }
+                    if (youtube == null) {
+                        // Never Spotify by guess, and never silent (Rule #3).
+                        appendMediaOp(entry, MusicSourceRule.OP_RETRY_FAILED)
+                        speakAndRemember(ErrorSpeech.YOUTUBE_DEFAULT_FAILED)
+                        finish()
+                        return
+                    }
+                    response = youtube
+                }
                 val t2 = System.currentTimeMillis()
-                executeWebhookAction(result.response, entry)
+                executeWebhookAction(response, entry)
                 entry.actionTimeMs = System.currentTimeMillis() - t2
                 // v1.4.4 — a synchronous launch failure (Result.LaunchFailed) already stamped
                 // LAUNCH_BLOCKED; "ok" here would erase the one honest word in the entry.
@@ -913,6 +934,12 @@ class VoiceCommandPipeline(
                 executeRuleBased(text, entry)
             }
         }
+    }
+
+    /** Rule #3 — a pipeline-level decision recorded in the same op log the orchestrator writes. */
+    private fun appendMediaOp(entry: DebugEntry, op: String) {
+        val existing = entry.mediaOperations.orEmpty()
+        entry.mediaOperations = if (existing.isEmpty()) op else "$existing;$op"
     }
 
     private suspend fun executeWebhookAction(resp: WebhookResponse, entry: DebugEntry) {

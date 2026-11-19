@@ -122,6 +122,25 @@ object MediaOrchestrator {
      * and still leaves the window room to extend.
      */
     private const val REFIRE_NO_SESSION_MS = 6_000L
+
+    /**
+     * v1.4.13 — how long our own CLEAR_TASK restart may sit `stopped` on the old title
+     * before the nudge sends it one plain launch (no CLEAR_TASK) to wake it.
+     *
+     * Field log 1795045364488, entries 1794999172458 and 1794999294967: a warm switch from a
+     * PLAYING target behind the secure keyguard, `sessionSeen(stopped)` →
+     * `restartSettling(stopped)` → `launchBlocked(stillPrior)` after the full 15 s. Each was
+     * followed 40 s later by a plain launch from the rider's next command, and each time the
+     * clip the stuck restart had loaded started at once — in the second pair even though that
+     * next command asked for a DIFFERENT clip (`launchBlocked(wrongVideo)`, actual title = the
+     * previous command's). Field log 1794208929620 (1794188420595 → 1794188497352) is a third
+     * instance. So the restart is not lost; it is waiting for one more launch.
+     *
+     * Same reasoning as [REFIRE_NO_SESSION_MS] for the value: past the 800 ms–3 s in which a
+     * restart lands on its own (entries 1794999406302 / 1794999579885 in the same log did),
+     * and early enough to leave the woken clip a warm window's worth of time to be verified.
+     */
+    private const val WAKE_SETTLING_RESTART_MS = 6_000L
     private const val NUDGE_SETTLE_MS = 2_000L
     private const val NUDGE_MAX_ATTEMPTS = 3
     private const val NUDGE_RETRY_SPACING_MS = 1_500L
@@ -207,6 +226,18 @@ object MediaOrchestrator {
         val crumb = trampolineCrumb ?: return
         entry.fsiTrampolineRan = crumb.ran
         entry.fsiTrampolineLaunchOk = if (crumb.ran) crumb.launchOk else false
+    }
+
+    /** v1.4.13 — uptime at which the nudge in flight was scheduled; see [stampResolved]. */
+    @Volatile private var nudgeFiredAt: Long = 0L
+
+    /**
+     * v1.4.13 — how long the launch took to resolve, either way. The op log has an order but
+     * no clock, so field log 1795045364488 could not say whether the restart that landed
+     * (entry 1794999406302) took 3 s or 14 s — the one number the wake timing depends on.
+     */
+    private fun stampResolved(entry: DebugEntry) {
+        if (nudgeFiredAt > 0L) entry.mediaResolvedMs = SystemClock.uptimeMillis() - nudgeFiredAt
     }
 
     /**
@@ -863,6 +894,11 @@ object MediaOrchestrator {
         // v1.4.10 — set once when a paused/stopped prior session turns out to be our own
         // CLEAR_TASK first delivery settling (see pausedPriorAction); extends the window once.
         var restartSettling = false
+        // v1.4.13 — one plain launch to wake a restart that is stuck `stopped`; see
+        // [WAKE_SETTLING_RESTART_MS]. Separate from `refired`: this one never tears anything down.
+        var restartWoken = false
+        val wakeRestartAt = pollStartAt + WAKE_SETTLING_RESTART_MS
+        nudgeFiredAt = SystemClock.uptimeMillis()
         // v1.4.2 — did the target EVER show a session during this window? Field log
         // 1789518388540 (entry 1789518322022): the poll saw YouTube PLAYING the right video
         // mid-window (mediaActualTitle / playbackState were stamped), then the session was
@@ -1050,6 +1086,28 @@ object MediaOrchestrator {
                                 Log.w(TAG, "nudge: $targetPkg ${MediaSessions.stateName(state)} after our CLEAR_TASK first delivery — cold-start window")
                                 pollWindowEndAt = maxOf(pollWindowEndAt, pollStartAt + POLL_WINDOW_COLD_MS)
                             }
+                            // v1.4.13 — still stopped on the old title this far in: the
+                            // restart has the clip loaded and is waiting for one more launch
+                            // (field log 1795045364488, see [WAKE_SETTLING_RESTART_MS]). Send
+                            // the SAME link once, plain — no CLEAR_TASK, so nothing is torn
+                            // down and a restart that was about to land is only brought
+                            // forward. The title check below still judges the result.
+                            if (shouldWakeSettlingRestart(
+                                    alreadyWoken = restartWoken,
+                                    nowMs = SystemClock.uptimeMillis(),
+                                    wakeAt = wakeRestartAt,
+                                    haveLinkTarget = videoId != null || query != null,
+                                )
+                            ) {
+                                restartWoken = true
+                                logOp(
+                                    entry,
+                                    "nudge→wakeRestart(plain)@${SystemClock.uptimeMillis() - nudgeFiredAt}ms",
+                                    targetPkg,
+                                )
+                                Log.w(TAG, "nudge: $targetPkg still ${MediaSessions.stateName(state)} after our restart — one plain launch to wake it")
+                                fireYoutubeIntent(appCtx, videoId, query, entry)
+                            }
                             if (SystemClock.uptimeMillis() >= pollWindowEndAt) {
                                 declareLaunchBlocked(appCtx, targetPkg, entry, reason = "stillPrior")
                                 return@Runnable
@@ -1101,6 +1159,7 @@ object MediaOrchestrator {
                 when (decision) {
                     PlayingDecision.Confirm -> {
                         stampTrampoline(entry)
+                        stampResolved(entry)
                         logOp(entry, "nudge→confirmed", targetPkg)
                         Log.d(TAG, "nudge: $targetPkg playing, verdict=$verdict title=\"$currentTitle\" — confirmed")
                         if (speakPlayConfirmed && audioIsSettled(appCtx)) {
@@ -1142,6 +1201,7 @@ object MediaOrchestrator {
                     handler.postDelayed(poll, POLL_INTERVAL_MS)
                 }
                 NudgeDecider.Action.GiveUp -> {
+                    stampResolved(entry)
                     logOp(entry, "nudge→giveUp", targetPkg)
                     Log.w(TAG, "nudge: still not playing after ${POLL_WINDOW_MS}ms and $playAttempts play attempts on $targetPkg")
                     speakOutOfPipeline(appCtx, ErrorSpeech.MEDIA_OPENED_NOT_PLAYING)
@@ -1183,6 +1243,7 @@ object MediaOrchestrator {
         appCtx: Context, targetPkg: String, entry: DebugEntry, reason: String,
     ) {
         stampTrampoline(entry)
+        stampResolved(entry)
         val available = MediaSessions.activePackagesForDebug(appCtx)
         entry.mediaCtrlPkgMiss = if (available.isEmpty()) "none" else available.joinToString(",")
         entry.launchBlocked = true
@@ -1361,6 +1422,23 @@ object MediaOrchestrator {
         nowMs >= refireAt || windowExhausted -> PausedPriorAction.GiveUpNeedsUnlock
         else -> PausedPriorAction.KeepPolling
     }
+
+    /**
+     * v1.4.13 — should this tick send the one plain launch that wakes our own stuck restart?
+     * Only ever asked from the [PausedPriorAction.SettleRestart] branch, i.e. the target was
+     * PLAYING when we fired, the first delivery carried CLEAR_TASK, and the session is still
+     * paused/stopped on the old title behind the secure keyguard. A clip the rider paused
+     * never gets here ([pausedPriorAction] answers GiveUpNeedsUnlock for it).
+     *
+     * Pure so a JVM test can pin it to the log lines; whether the wake lands is the
+     * Acceptance Suite's to confirm.
+     */
+    internal fun shouldWakeSettlingRestart(
+        alreadyWoken: Boolean,
+        nowMs: Long,
+        wakeAt: Long,
+        haveLinkTarget: Boolean,
+    ): Boolean = !alreadyWoken && haveLinkTarget && nowMs >= wakeAt
 
     /** PLAYING or BUFFERING — the states in which a target's player is demonstrably alive. */
     internal fun isActivelyPlaying(state: Int?): Boolean =

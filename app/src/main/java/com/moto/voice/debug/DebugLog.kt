@@ -75,6 +75,12 @@ data class DebugEntry(
     var ttsEngine: String? = null,
     /** Why the TTS router picked the engine it did. See [EngineChoiceReason]. */
     var engineChoiceReason: String? = null,
+    /**
+     * v1.4.12 — why a spoken line failed or was suspect, and whether rebuilding the engine
+     * fixed it (`speakReturnedError→rebind→ok`). Null = every line was spoken normally.
+     * Field log 1794968515443 had four silent days with nothing in the entry to say so.
+     */
+    var ttsError: String? = null,
 
     // ─── SCO lifecycle (bug from log 1783477052378) ──────────────────────────
     /**
@@ -189,6 +195,14 @@ data class DebugEntry(
      * rider unlocked, and YouTube started playing by itself.
      */
     var mediaBlockedKeyguard: String? = null,
+
+    /**
+     * v1.4.13 — ms from the launch to the nudge's verdict (confirmed, blocked or gave up).
+     * [mediaOperations] records the order of events but not when they happened; field log
+     * 1795045364488 needed exactly that to tell a restart that lands in 3 s from one that
+     * lands in 14 s. Null when no nudge resolved (superseded, or not a launch).
+     */
+    var mediaResolvedMs: Long? = null,
 
     /**
      * v1.4.7 — result of a probe connect to the target's MediaBrowserService on the
@@ -361,6 +375,7 @@ data class DebugEntry(
         if (webhookTimeMs > 0) append("  WH:${webhookTimeMs}ms")
         if (actionTimeMs > 0) append("  ACT:${actionTimeMs}ms")
         if (engineChoiceReason != null) append("  tts:${engineChoiceReason}")
+        if (ttsError != null) append("  ttsErr:${ttsError}")
         if (completeSilenceMs > 0) append("  silHint:${completeSilenceMs}ms")
         if (youtubePrepaused) append("  yt:prepaused")
         if (youtubeNudged) append("  yt:nudged")
@@ -372,6 +387,7 @@ data class DebugEntry(
         if (playbackState != null) append("  playback:${playbackState}")
         if (mediaCtrlPkgMiss != null) append("  pkgMiss:${mediaCtrlPkgMiss}")
         if (mediaBlockedKeyguard != null) append("  kg:${mediaBlockedKeyguard}")
+        if (mediaResolvedMs != null) append("  resolved:${mediaResolvedMs}ms")
         if (mediaBrowserConnect != null) append("  browser:${mediaBrowserConnect}")
         if (mediaTargetPkg != null) append("  target:${mediaTargetPkg}")
         if (mediaOperations != null) append("  ops:${mediaOperations}")

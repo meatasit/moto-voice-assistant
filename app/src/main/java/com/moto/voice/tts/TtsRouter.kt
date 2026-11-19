@@ -27,7 +27,16 @@ import java.util.concurrent.atomic.AtomicReference
  */
 class TtsRouter private constructor(app: Context) {
 
-    private val android = AndroidTtsEngine(app)
+    /**
+     * The entry of the interaction that is speaking right now (null for unlogged lines).
+     * v1.4.12 — a line that failed, or only worked after the engine was rebuilt, writes
+     * `ttsError` here so a silent ride is visible in the next field log (1794968515443).
+     */
+    @Volatile private var speakingEntry: DebugEntry? = null
+
+    private val android = AndroidTtsEngine(app) { token ->
+        speakingEntry?.let { TtsRecovery.stamp(it, token) }
+    }
 
     /**
      * @param stampDebug whether this speak writes its engine onto the current [DebugEntry].
@@ -47,6 +56,7 @@ class TtsRouter private constructor(app: Context) {
         // utterance so a stale line can't surface after the engine finishes starting.
         stop()
         val entry = if (stampDebug) DebugLog.entries().firstOrNull() else null
+        speakingEntry = entry
         markDebug(entry)
         android.speak(text, onStart, onDone, onError)
     }
@@ -59,6 +69,10 @@ class TtsRouter private constructor(app: Context) {
         val head = entry ?: return
         head.ttsEngine = "android"
         head.engineChoiceReason = EngineChoiceReason.ANDROID_ONLY
+        // Thai voice missing on the phone's TTS engine — say so on every entry it affects.
+        android.standingProblem()?.let { p ->
+            if (head.ttsError?.contains(p) != true) TtsRecovery.stamp(head, p)
+        }
     }
 
     companion object {
